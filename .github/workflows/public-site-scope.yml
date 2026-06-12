@@ -1,0 +1,21 @@
+name: Public Site Scope
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  scope-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify public site scope
+        shell: pwsh
+        run: ./scripts/verify_public_site_scope.ps1

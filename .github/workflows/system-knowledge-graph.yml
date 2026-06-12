@@ -1,0 +1,33 @@
+name: System Knowledge Graph Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  system-knowledge-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test runner
+        run: python -m pip install pytest
+
+      - name: Run graph regression
+        run: |
+          python -m pytest \
+            tests/test_system_knowledge_graph.py \
+            tests/test_system_graph_runtime_status.py \
+            -q
+
+      - name: Run graph doctor
+        run: python tools/system_knowledge_graph.py doctor

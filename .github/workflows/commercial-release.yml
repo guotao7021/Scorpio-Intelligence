@@ -1,0 +1,80 @@
+name: Commercial Release Matrix
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  commercial-release:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install commercial smoke dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            pytest \
+            PyQt5 \
+            pandas \
+            numpy \
+            matplotlib \
+            requests \
+            mplfinance \
+            akshare \
+            chinese_calendar \
+            kuzu
+
+      - name: Run commercial boundary tests
+        run: |
+          mkdir -p build/commercial_release_matrix
+          python -m pytest \
+            tests/test_commercial_product_matrix.py \
+            tests/test_commercial_release_matrix_build.py \
+            tests/test_commercial_module_boundary.py \
+            tests/test_team_commercial_asset_boundary.py \
+            -q \
+            --junitxml build/commercial_release_matrix/pytest_commercial.xml
+
+      - name: Run release-aware edition tests
+        run: |
+          python scripts/run_release_tests.py --edition self_use --output-dir build/release_test_reports
+          python scripts/run_release_tests.py --edition personal_standard --output-dir build/release_test_reports
+          python scripts/run_release_tests.py --edition personal_pro --output-dir build/release_test_reports
+          python scripts/run_release_tests.py --edition team --output-dir build/release_test_reports
+          python scripts/run_release_tests.py --edition enterprise --output-dir build/release_test_reports
+
+      - name: Build edition packages and smoke reports
+        run: |
+          python scripts/build_commercial_release_matrix.py \
+            --materialize-package \
+            --prune-package \
+            --load-pages \
+            --output-dir build/commercial_release_matrix \
+            --json
+
+      - name: Upload commercial release artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: commercial-release-matrix
+          path: |
+            build/commercial_release_matrix/*.json
+            build/commercial_release_matrix/*.xml
+            build/commercial_release_matrix/*/*.json
+            build/release_test_reports/*/*.json
+            build/release_test_reports/*/matrix/*.json
+            build/release_test_reports/*/matrix/*/*.json

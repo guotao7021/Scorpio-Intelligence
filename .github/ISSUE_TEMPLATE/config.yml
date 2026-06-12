@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Public roadmap
+    url: https://github.com/guotao7021/Scorpio-Intelligence/blob/main/docs/public/ROADMAP.md
+    about: Check what is planned before filing a request.
+  - name: Changelog
+    url: https://github.com/guotao7021/Scorpio-Intelligence/blob/main/docs/public/changelog-cn.html
+    about: Review recent releases and fixes.

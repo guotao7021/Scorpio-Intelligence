@@ -1,0 +1,29 @@
+name: AI Boundary Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  ai-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Scan AI boundary
+        run: python tools/scan_ai_boundary.py ai
+
+      - name: Install test runner
+        run: python -m pip install pytest
+
+      - name: Run boundary regression
+        run: python -m pytest tests/test_ai_boundary.py -q
