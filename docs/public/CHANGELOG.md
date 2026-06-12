@@ -8,7 +8,7 @@
 
 ## 2026-06-07
 
-- Strengthened daily validation and market intelligence workflows.
+- Strengthened daily validation and market intelligence presentation.
 - Expanded commercial boundary and release governance documentation.
 
 ## Release note format

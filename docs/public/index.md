@@ -9,14 +9,14 @@ This project helps with:
 - market overview and capital flow tracking
 - sector and industry analysis
 - strategy validation and feedback loops
-- local SQLite-backed research workflows
+- local research storage and review
 
 ## Public pages
 
 - [Changelog CN](changelog-cn.html)
 - [Changelog EN](changelog-en.html)
 - [Feedback](FEEDBACK.md)
-- [Roadmap](ROADMAP.md)
+- [FAQ](faq.md)
 
 ## Notes
 
