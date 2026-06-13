@@ -1,11 +1,42 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>FAQ | Scorpio Intelligence</title><link rel="stylesheet" href="site.css"></head>
-<body><main class="section"><div class="boundary-card">
-  <div class="section-kicker">FAQ</div>
-  <h1 style="font-size:42px">Frequently asked questions</h1>
-  <h2>Why is there no download page yet?</h2><p>We are keeping the public site focused on product information, feedback, and release notes first.</p>
-  <h2>How should users give feedback?</h2><p>Use GitHub Issues for bugs or feature requests, and include version, environment, and logs when possible.</p>
-  <h2>Is this a trading advice product?</h2><p>No. It is a research and decision-support workspace for analysis, review, and data validation.</p>
-  <p><a href="index-en.html">Back to home</a></p>
-</div></main></body></html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FAQ | Scorpio Intelligence</title>
+  <link rel="stylesheet" href="site.css">
+  <style>
+    .faq-grid {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 72px 0;
+    }
+    .faq-item {
+      padding: 22px 0;
+      border-top: 1px solid rgba(244, 241, 248, 0.1);
+    }
+    .faq-item h2 { font-size: 22px; margin-bottom: 10px; }
+    .faq-item p { color: rgba(244, 241, 248, 0.78); line-height: 1.75; margin: 0; }
+  </style>
+</head>
+<body>
+  <main class="faq-grid">
+    <div class="section-kicker">FAQ</div>
+    <h1 style="font-size:clamp(38px, 6vw, 58px);margin: 10px 0 18px;">Frequently asked questions</h1>
+    <p style="max-width:760px;color:rgba(244,241,248,.78);line-height:1.75;">This page keeps the public boundary clear and answers the questions users are most likely to ask first.</p>
+    <div class="faq-item">
+      <h2>Why is there no download page yet?</h2>
+      <p>The public site is focused on product information, feedback entry, and release notes first. That keeps the brand message clean and the release boundary explicit.</p>
+    </div>
+    <div class="faq-item">
+      <h2>How should feedback be submitted?</h2>
+      <p>Use the Feedback page to open a GitHub Issue. Include the version, environment, steps to reproduce, and any supporting screenshots or logs.</p>
+    </div>
+    <div class="faq-item">
+      <h2>Is this a trading advice product?</h2>
+      <p>No. It is a research and review workspace built for observation, analysis, and data validation. It does not promise outcomes or returns.</p>
+    </div>
+    <p style="margin-top:28px;"><a href="index-en.html">Back to home</a></p>
+  </main>
+</body>
+</html>

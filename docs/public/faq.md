@@ -6,7 +6,7 @@ We are keeping the public site focused on product information, feedback, and rel
 
 ## How should users give feedback?
 
-Use GitHub Issues for bugs or feature requests, and include version, environment, and logs when possible.
+Use GitHub Issues for usage problems or improvement requests, and include version, environment, and logs when possible.
 
 ## Is this a trading advice product?
 

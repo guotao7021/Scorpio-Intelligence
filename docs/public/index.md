@@ -1,24 +1,25 @@
-# Product Hub
+# Scorpio Intelligence
 
-A local, desktop-first stock research and market cognition workspace.
+Public hub for the bilingual product site.
 
-## Software introduction
+## What it includes
 
-This project helps with:
+- product introduction
+- release notes
+- feedback entry points
+- FAQ
 
-- market overview and capital flow tracking
-- sector and industry analysis
-- strategy validation and feedback loops
-- local research storage and review
+## What it does not include
 
-## Public pages
+- download packages
+- internal implementation names
+- private delivery details
+- source code or operational scripts
 
-- [Changelog CN](changelog-cn.html)
-- [Changelog EN](changelog-en.html)
-- [Feedback](FEEDBACK.md)
-- [FAQ](faq.md)
+## Pages
 
-## Notes
-
-This software is designed for research and decision support.
-It does not guarantee investment returns.
+- [Chinese home](index-cn.html)
+- [English home](index-en.html)
+- [Feedback](feedback.html)
+- [FAQ](faq.html)
+- [Changelog](changelog.html)

@@ -2,14 +2,14 @@
 
 ## 2026-06-12
 
-- Added the market overview backfill workflow.
-- Improved fund-flow cache freshness handling.
-- Preserved real Eastmoney cache data when the source lagged behind the current trading day.
+- Refined the public site language to remove internal implementation references.
+- Made the feedback page actionable with direct GitHub Issue entry points.
+- Tightened the commercial presentation of the public hub and FAQ pages.
 
 ## 2026-06-07
 
-- Strengthened daily validation and market intelligence presentation.
-- Expanded commercial boundary and release governance documentation.
+- Polished the bilingual public site structure and visual consistency.
+- Clarified the public boundary around downloads, support, and release communication.
 
 ## Release note format
 
@@ -18,7 +18,7 @@ Use the pattern below for future entries:
 - `YYYY-MM-DD` release date
 - version number if useful
 - short summary
-- highlights
+- key highlights
 - fixes
 - known issues
 
