@@ -5,59 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>反馈 | Scorpio Intelligence</title>
   <link rel="stylesheet" href="site.css">
-  <style>
-    .feedback-shell {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 72px 0;
-    }
-    .feedback-grid {
-      display: grid;
-      gap: 20px;
-      grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
-    }
-    .feedback-panel, .mini-card {
-      padding: 28px;
-      border-radius: 12px;
-      background: linear-gradient(180deg, rgba(23, 23, 42, 0.98), rgba(18, 18, 30, 0.98));
-      border: 1px solid var(--line);
-    }
-    .feedback-panel h1 {
-      margin: 8px 0 14px;
-      font-size: clamp(40px, 6vw, 64px);
-      line-height: 1.02;
-    }
-    .feedback-panel p, .mini-card p, .mini-card li {
-      color: rgba(244, 241, 248, 0.8);
-      line-height: 1.75;
-    }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin: 24px 0 0;
-    }
-    .button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 46px;
-      padding: 12px 18px;
-      border-radius: 999px;
-      text-decoration: none;
-      font-weight: 700;
-      border: 1px solid rgba(125, 211, 252, .35);
-    }
-    .primary { background: linear-gradient(135deg, #1fb6ff, #18c6a3); color: #07101d; border-color: transparent; }
-    .secondary { background: rgba(17,24,39,.6); color: #e2e8f0; }
-    .feedback-panel ul { padding-left: 20px; margin: 18px 0 0; color: rgba(244, 241, 248, 0.76); }
-    .feedback-panel li { margin: 8px 0; }
-    .mini-card strong { display: block; margin-bottom: 10px; color: var(--white); }
-    @media (max-width: 900px) {
-      .feedback-grid { grid-template-columns: 1fr; }
-      .feedback-shell { padding: 28px 0; }
-    }
-  </style>
 </head>
 <body>
   <main class="feedback-shell">
@@ -65,7 +12,7 @@
       <section class="feedback-panel">
         <div class="section-kicker">反馈</div>
         <h1>告诉我们你遇到了什么</h1>
-        <p>请通过 GitHub Issues 提交问题、建议或流程缺口。这样每一条反馈都能被追踪、分派，并保持在一个明确的处理路径里。</p>
+        <p>请通过 GitHub Issues 提交问题、建议或用户体验反馈。这样每一条反馈都能被追踪、分派，并保持在一个明确的处理路径里。</p>
         <div class="actions">
           <a class="button primary" href="https://github.com/guotao7021/Scorpio-Intelligence/issues/new?template=bug_report.md">提交问题</a>
           <a class="button secondary" href="https://github.com/guotao7021/Scorpio-Intelligence/issues/new?template=feature_request.md">提出建议</a>

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" role="img" aria-labelledby="title desc">
+  <title id="title">Scorpio Intelligence horizontal logo</title>
+  <desc id="desc">Horizontal logo lockup for Scorpio Intelligence market intelligence platform.</desc>
+  <defs>
+    <linearGradient id="sOrbit" x1="42" y1="42" x2="138" y2="138" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1FB6FF"/>
+      <stop offset="0.52" stop-color="#18C6A3"/>
+      <stop offset="1" stop-color="#F2C94C"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="24" y1="18" x2="156" y2="162" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10172A"/>
+      <stop offset="1" stop-color="#070B16"/>
+    </linearGradient>
+  </defs>
+  <rect width="760" height="180" rx="26" fill="#070B16"/>
+  <g transform="translate(34 28)">
+    <rect width="124" height="124" rx="28" fill="url(#panel)" stroke="#26344D" stroke-width="1.4"/>
+    <path d="M88 28C73 19 48 22 36 37C27 48 30 61 47 66L77 73C99 79 102 95 89 107C75 121 48 118 35 106"
+          fill="none" stroke="url(#sOrbit)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M31 75H46L54 83L64 50L75 79H98" fill="none" stroke="#F2C94C" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M88 107L105 100L100 117" fill="none" stroke="#F2C94C" stroke-opacity="0.9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <g opacity="0.72">
+      <path d="M82 35L91 30L99 37L107 29" fill="none" stroke="#7DD3FC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="82" cy="35" r="2.1" fill="#E8EEF8"/>
+      <circle cx="91" cy="30" r="1.8" fill="#7DD3FC"/>
+      <circle cx="99" cy="37" r="1.9" fill="#18C6A3"/>
+      <circle cx="107" cy="29" r="2" fill="#F2C94C"/>
+    </g>
+    <circle cx="36" cy="37" r="4.2" fill="#E8EEF8"/>
+    <circle cx="64" cy="50" r="4" fill="#18C6A3"/>
+    <circle cx="89" cy="107" r="4.2" fill="#F2C94C"/>
+  </g>
+  <text x="190" y="78" fill="#E8EEF8" font-family="Inter, Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="40" font-weight="720" letter-spacing="0">Scorpio Intelligence</text>
+  <text x="192" y="114" fill="#94A3B8" font-family="Inter, Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="17" letter-spacing="2">MARKET INTELLIGENCE PLATFORM</text>
+  <path d="M192 132H612" stroke="#18C6A3" stroke-opacity="0.68" stroke-width="2"/>
+  <text x="192" y="154" fill="#CBD5E1" font-family="Microsoft YaHei, Inter, Segoe UI, Arial, sans-serif" font-size="15">理解市场 · 积累认知 · 做出更好的决策</text>
+</svg>

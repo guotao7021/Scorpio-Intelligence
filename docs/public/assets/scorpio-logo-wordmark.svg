@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" role="img" aria-label="Scorpio Intelligence">
+  <rect width="520" height="120" rx="20" fill="none"/>
+  <g transform="translate(8 12)">
+    <rect width="96" height="96" rx="24" fill="#0b1220"/>
+    <circle cx="48" cy="48" r="28" fill="none" stroke="#1fb6ff" stroke-width="4"/>
+    <path d="M31 56c7-12 27-12 34 0" fill="none" stroke="#f2c94c" stroke-width="4" stroke-linecap="round"/>
+    <path d="M38 38h20" stroke="#e8eef8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M34 48h28" stroke="#e8eef8" stroke-width="4" stroke-linecap="round" opacity=".7"/>
+  </g>
+  <text x="124" y="58" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="34" font-weight="700" fill="#ffffff">Scorpio Intelligence</text>
+  <text x="124" y="89" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" fill="#7dd3fc">Market Intelligence for Better Decisions</text>
+</svg>

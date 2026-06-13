@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Scorpio Intelligence logo mark</title>
+  <desc id="desc">Professional abstract S orbit mark with subtle Scorpio constellation technology elements.</desc>
+  <defs>
+    <linearGradient id="sOrbit" x1="58" y1="58" x2="198" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1FB6FF"/>
+      <stop offset="0.52" stop-color="#18C6A3"/>
+      <stop offset="1" stop-color="#F2C94C"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="28" y1="22" x2="228" y2="236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10172A"/>
+      <stop offset="1" stop-color="#070B16"/>
+    </linearGradient>
+    <filter id="quietGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.12 0 0 0 0 0.71 0 0 0 0 1 0 0 0 0.32 0"/>
+      <feBlend in="SourceGraphic" mode="screen"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="46" fill="url(#panel)"/>
+  <rect x="12.75" y="12.75" width="230.5" height="230.5" rx="45.25" fill="none" stroke="#26344D" stroke-width="1.5"/>
+  <path d="M177 58C150 40 103 45 82 72C67 92 73 116 103 124L152 137C187 146 193 176 172 197C147 222 99 215 76 194"
+        fill="none" stroke="url(#sOrbit)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" filter="url(#quietGlow)"/>
+  <path d="M75 85C107 68 148 70 180 90" fill="none" stroke="#E8EEF8" stroke-opacity="0.24" stroke-width="3" stroke-linecap="round"/>
+  <path d="M79 179C112 196 150 194 179 172" fill="none" stroke="#E8EEF8" stroke-opacity="0.24" stroke-width="3" stroke-linecap="round"/>
+  <path d="M68 145H94L108 160L128 103L147 151H188" fill="none" stroke="#F2C94C" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M176 196L207 185L198 217" fill="none" stroke="#F2C94C" stroke-opacity="0.9" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <g opacity="0.76">
+    <path d="M176 67L192 58L206 70L219 55" fill="none" stroke="#7DD3FC" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="176" cy="67" r="3.6" fill="#E8EEF8"/>
+    <circle cx="192" cy="58" r="2.8" fill="#7DD3FC"/>
+    <circle cx="206" cy="70" r="3.1" fill="#18C6A3"/>
+    <circle cx="219" cy="55" r="3.4" fill="#F2C94C"/>
+  </g>
+  <circle cx="82" cy="72" r="8" fill="#E8EEF8"/>
+  <circle cx="128" cy="103" r="7" fill="#18C6A3"/>
+  <circle cx="172" cy="197" r="8" fill="#F2C94C"/>
+</svg>
