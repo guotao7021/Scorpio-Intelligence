@@ -12,6 +12,8 @@ Primary entry points:
 - `feedback.html`
 - `faq.html`
 - `account.html` for account login, trial-code display, and release download entry
+- `admin.html` for owner-only administration with a locally entered `ADMIN_API_TOKEN`
 
 Keep this folder public-facing only. Do not place download packages here.
 The delivery console reads release download URLs from `https://api.scorpio-intelligence.tech`.
+Do not hard-code admin tokens or package secrets into this repository.
