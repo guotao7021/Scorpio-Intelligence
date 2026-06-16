@@ -360,23 +360,56 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 .delivery-shell {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 56px clamp(24px, 5vw, 72px) 92px;
+  padding: 42px clamp(24px, 5vw, 72px) 92px;
 }
 .delivery-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: 28px;
-  align-items: end;
-  margin-bottom: 26px;
+  align-items: stretch;
+  margin-bottom: 18px;
+  padding: clamp(26px, 4vw, 44px);
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(31, 182, 255, 0.14), transparent 34%),
+    linear-gradient(180deg, rgba(18, 26, 46, 0.92), rgba(8, 13, 25, 0.98));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.22);
 }
 .delivery-heading h1 {
-  font-size: clamp(42px, 5vw, 62px);
+  max-width: 680px;
+  font-size: clamp(38px, 4.4vw, 56px);
+  letter-spacing: 0;
+}
+.delivery-heading .lead {
+  max-width: 680px;
+  margin-top: 18px;
+  font-size: 18px;
+  line-height: 1.75;
+}
+.delivery-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+.delivery-hero-actions span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  color: rgba(244, 241, 248, 0.78);
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  border-radius: 999px;
+  background: rgba(7, 11, 22, 0.42);
+  font-size: 13px;
+  font-weight: 800;
 }
 .delivery-badge {
   display: flex;
   gap: 12px;
   align-items: center;
-  min-height: 76px;
+  min-height: 100%;
   padding: 16px 18px;
   border: 1px solid rgba(125, 211, 252, 0.22);
   border-radius: 8px;
@@ -411,8 +444,8 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   margin-bottom: 18px;
 }
 .delivery-stats article {
-  min-height: 108px;
-  padding: 18px;
+  min-height: 104px;
+  padding: 16px 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(12, 18, 34, 0.92);
@@ -424,9 +457,9 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 }
 .delivery-stats strong {
   display: block;
-  margin-top: 12px;
+  margin-top: 10px;
   color: var(--white);
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.1;
   word-break: break-word;
 }
@@ -438,7 +471,7 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 }
 .delivery-layout {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: 340px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -450,11 +483,11 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
 }
 .auth-console, .release-console, .license-console, .delivery-two-col .delivery-card {
-  padding: 24px;
+  padding: 22px;
 }
 .console-title h2 {
   margin: 0 0 18px;
-  font-size: 24px;
+  font-size: 22px;
 }
 .console-title .section-kicker {
   margin-bottom: 8px;
@@ -709,4 +742,6 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   .release-row { min-width: 720px; }
   .admin-shell { padding-top: 42px; }
   .admin-form .button { width: 100%; }
+  .delivery-heading { padding: 24px; }
+  .delivery-heading h1 { font-size: 36px; }
 }

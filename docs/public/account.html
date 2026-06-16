@@ -6,7 +6,7 @@
   <title>交付控制台 | Scorpio Intelligence</title>
   <meta name="description" content="Scorpio Intelligence 商业交付控制台，提供账号注册登录、试用授权码、客户端安装包下载与交付状态说明。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site.css?v=20260616-delivery">
 </head>
 <body>
   <header class="site-header">
@@ -27,8 +27,13 @@
     <section class="delivery-heading">
       <div>
         <p class="section-kicker">Delivery Console</p>
-        <h1>Scorpio Intelligence 交付控制台</h1>
-        <p class="lead">用于商业试用与正式交付：注册账号、领取试用授权码、下载客户端安装包，并确认当前交付状态。</p>
+        <h1>商业交付控制台</h1>
+        <p class="lead">注册账号、领取试用授权码、下载客户端安装包，并确认当前交付状态。</p>
+        <div class="delivery-hero-actions">
+          <span>账号授权</span>
+          <span>试用激活码</span>
+          <span>安装包下载</span>
+        </div>
       </div>
       <div class="delivery-badge" id="accountStatus">
         <span class="badge-dot"></span>
@@ -63,7 +68,7 @@
       <aside class="delivery-card auth-console">
         <div class="console-title">
           <p class="section-kicker">Account</p>
-          <h2>账号入口</h2>
+          <h2>登录或注册</h2>
         </div>
         <div class="auth-tabs" id="authTabs" role="tablist" aria-label="账号操作">
           <button class="auth-tab active" type="button" data-auth-tab="login">登录</button>
@@ -90,7 +95,7 @@
         </form>
 
         <div class="account-message" id="authMessage" role="status" aria-live="polite"></div>
-        <div class="auth-footnote">当前阶段使用 Cloudflare 授权 API。邮箱验证码暂未启用，注册后直接开通试用。</div>
+        <div class="auth-footnote">当前阶段使用 Cloudflare 授权 API。注册成功后直接开通试用授权。</div>
       </aside>
 
       <section class="delivery-main">
