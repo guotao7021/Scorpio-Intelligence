@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>交付控制台 | Scorpio Intelligence</title>
+  <meta name="description" content="Scorpio Intelligence 商业交付控制台，提供账号注册登录、试用授权码、客户端安装包下载与交付状态说明。">
+  <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="index-cn.html" aria-label="Scorpio Intelligence 首页">
+      <img src="assets/scorpio-logo-horizontal.svg" alt="Scorpio Intelligence">
+    </a>
+    <nav aria-label="主导航">
+      <a href="index-cn.html#platform">平台</a>
+      <a href="index-cn.html#experience">产品体验</a>
+      <a href="index-cn.html#editions">版本</a>
+      <a class="active" href="account.html">交付控制台</a>
+      <a href="faq-cn.html">FAQ</a>
+      <a href="feedback-cn.html">反馈</a>
+    </nav>
+  </header>
+
+  <main class="delivery-shell">
+    <section class="delivery-heading">
+      <div>
+        <p class="section-kicker">Delivery Console</p>
+        <h1>Scorpio Intelligence 交付控制台</h1>
+        <p class="lead">用于商业试用与正式交付：注册账号、领取试用授权码、下载客户端安装包，并确认当前交付状态。</p>
+      </div>
+      <div class="delivery-badge" id="accountStatus">
+        <span class="badge-dot"></span>
+        <div><strong>未登录</strong><small>注册或登录后开放下载入口</small></div>
+      </div>
+    </section>
+
+    <section class="delivery-stats" aria-label="交付状态摘要">
+      <article>
+        <span>账号状态</span>
+        <strong id="statAccount">未登录</strong>
+        <small id="statAccountMeta">需要登录后下载</small>
+      </article>
+      <article>
+        <span>试用授权</span>
+        <strong id="statTrial">待领取</strong>
+        <small>注册成功后自动生成</small>
+      </article>
+      <article>
+        <span>安装包</span>
+        <strong id="statRelease">待加载</strong>
+        <small id="statReleaseMeta">登录后读取发行信息</small>
+      </article>
+      <article>
+        <span>API 服务</span>
+        <strong>Cloudflare</strong>
+        <small>api.scorpio-intelligence.tech</small>
+      </article>
+    </section>
+
+    <section class="delivery-layout">
+      <aside class="delivery-card auth-console">
+        <div class="console-title">
+          <p class="section-kicker">Account</p>
+          <h2>账号入口</h2>
+        </div>
+        <div class="auth-tabs" id="authTabs" role="tablist" aria-label="账号操作">
+          <button class="auth-tab active" type="button" data-auth-tab="login">登录</button>
+          <button class="auth-tab" type="button" data-auth-tab="register">注册试用</button>
+        </div>
+
+        <div class="session-panel hidden" id="sessionPanel">
+          <span>当前账号</span>
+          <strong id="sessionEmail">-</strong>
+          <p>账号已登录，可以下载当前安装包或复制试用激活码。</p>
+        </div>
+
+        <form id="loginForm" class="auth-form" autocomplete="on">
+          <label>邮箱<input type="email" name="email" autocomplete="email" required></label>
+          <label>密码<input type="password" name="password" autocomplete="current-password" minlength="8" required></label>
+          <button class="button primary block" type="submit">登录控制台</button>
+        </form>
+
+        <form id="registerForm" class="auth-form hidden" autocomplete="on">
+          <label>用户名<input type="text" name="username" autocomplete="nickname" maxlength="64" placeholder="可选"></label>
+          <label>邮箱<input type="email" name="email" autocomplete="email" required></label>
+          <label>密码<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+          <button class="button primary block" type="submit">创建账号并领取试用</button>
+        </form>
+
+        <div class="account-message" id="authMessage" role="status" aria-live="polite"></div>
+        <div class="auth-footnote">当前阶段使用 Cloudflare 授权 API。邮箱验证码暂未启用，注册后直接开通试用。</div>
+      </aside>
+
+      <section class="delivery-main">
+        <article class="delivery-card release-console">
+          <div class="console-toolbar">
+            <div class="console-title">
+              <p class="section-kicker">Client Package</p>
+              <h2>客户端安装包</h2>
+            </div>
+            <button class="button secondary sm" id="refreshReleaseButton" type="button">刷新版本</button>
+          </div>
+          <div class="release-table" role="table" aria-label="安装包发行信息">
+            <div class="release-row release-head" role="row">
+              <span>版本</span>
+              <span>通道</span>
+              <span>发布日期</span>
+              <span>校验</span>
+              <span>操作</span>
+            </div>
+            <div class="release-row" role="row">
+              <strong id="releaseVersion">登录后加载</strong>
+              <span id="releaseChannel">stable</span>
+              <span id="releaseDate">-</span>
+              <span id="releaseHash">-</span>
+              <a class="button primary sm disabled" id="downloadButton" href="#" aria-disabled="true">下载</a>
+            </div>
+          </div>
+          <p class="delivery-note" id="downloadIntro">请先登录。登录后会读取后台发行记录并开放安装包下载按钮。</p>
+        </article>
+
+        <div class="delivery-two-col">
+          <article class="delivery-card license-console">
+            <div class="console-title">
+              <p class="section-kicker">Trial License</p>
+              <h2>试用激活码</h2>
+            </div>
+            <div class="trial-code" id="trialCode">暂无</div>
+            <div class="license-actions">
+            <button class="button secondary sm" id="copyTrialButton" type="button" disabled>复制激活码</button>
+            </div>
+            <p class="delivery-note" id="trialIntro">注册成功后这里会显示试用激活码。安装客户端后输入激活码完成授权。</p>
+          </article>
+
+          <article class="delivery-card">
+            <div class="console-title">
+              <p class="section-kicker">Delivery Boundary</p>
+              <h2>交付边界</h2>
+            </div>
+            <ul class="delivery-list">
+              <li>官网不存放安装包，只读取后台发行记录中的下载地址。</li>
+              <li>授权、登录、试用码由 Cloudflare API 承担。</li>
+              <li>本机指纹绑定与授权文件生成在客户端激活流程中完成。</li>
+            </ul>
+            <button class="button secondary sm hidden" id="logoutButton" type="button">退出登录</button>
+          </article>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-brand">
+      <img src="assets/scorpio-logo-mark.svg" alt="">
+      <div>
+        <strong>Scorpio Intelligence</strong>
+        <span>Market Intelligence Platform</span>
+      </div>
+    </div>
+    <div class="footer-legal">
+      <span>© 2026 Scorpio Intelligence. 保留所有权利。</span>
+      <span>软件版权及商业联系：<a class="footer-contact" href="mailto:guotao7021@gmail.com">guotao7021@gmail.com</a></span>
+    </div>
+  </footer>
+
+  <script src="account.js"></script>
+</body>
+</html>

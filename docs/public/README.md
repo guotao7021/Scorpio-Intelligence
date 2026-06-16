@@ -11,5 +11,7 @@ Primary entry points:
 - `changelog-en.html`
 - `feedback.html`
 - `faq.html`
+- `account.html` for account login, trial-code display, and release download entry
 
 Keep this folder public-facing only. Do not place download packages here.
+The delivery console reads release download URLs from `https://api.scorpio-intelligence.tech`.
