@@ -6,12 +6,14 @@
   const state = {
     session: readSession(),
     trialCode: localStorage.getItem(TRIAL_KEY) || "",
+    codeCooldown: {},
   };
 
   const els = {
-    accountStatus: byId("accountStatus"),
     accountLayout: byId("accountLayout"),
+    accountGate: byId("accountGate"),
     accountPrivate: byId("accountPrivate"),
+    accountStatus: byId("accountStatus"),
     statAccount: byId("statAccount"),
     statAccountMeta: byId("statAccountMeta"),
     statTrial: byId("statTrial"),
@@ -21,6 +23,7 @@
     authTabs: byId("authTabs"),
     loginForm: byId("loginForm"),
     registerForm: byId("registerForm"),
+    resetForm: byId("resetForm"),
     sessionPanel: byId("sessionPanel"),
     sessionEmail: byId("sessionEmail"),
     downloadIntro: byId("downloadIntro"),
@@ -40,6 +43,10 @@
     button.addEventListener("click", () => switchAuthTab(button.dataset.authTab));
   });
 
+  document.querySelectorAll("[data-send-code]").forEach((button) => {
+    button.addEventListener("click", () => sendVerificationCode(button));
+  });
+
   els.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = formData(els.loginForm);
@@ -49,7 +56,7 @@
         password: data.password,
       });
       saveSession(session);
-      setMessage("登录成功，用户中心已开放下载入口。", "success");
+      setMessage("登录成功，用户中心已开放。", "success");
       await refreshRelease();
     });
   });
@@ -57,11 +64,16 @@
   els.registerForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = formData(els.registerForm);
+    if (data.password !== data.password_confirm) {
+      setMessage("两次输入的密码不一致。", "error");
+      return;
+    }
     await runAuthAction("正在创建账号...", async () => {
       const result = await apiPost("/auth/register", {
         email: data.email,
         password: data.password,
         username: data.username || data.email.split("@")[0],
+        verification_code: data.verification_code,
       });
 
       if (result.trial_activation_code) {
@@ -75,8 +87,27 @@
       });
       saveSession(session);
       render();
-      setMessage("注册成功，已领取试用激活码并登录。", "success");
+      setMessage("注册成功，已领取试用资格并登录。", "success");
       await refreshRelease();
+    });
+  });
+
+  els.resetForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = formData(els.resetForm);
+    if (data.password !== data.password_confirm) {
+      setMessage("两次输入的新密码不一致。", "error");
+      return;
+    }
+    await runAuthAction("正在重置密码...", async () => {
+      await apiPost("/auth/reset-password", {
+        email: data.email,
+        verification_code: data.verification_code,
+        new_password: data.password,
+      });
+      els.resetForm.reset();
+      switchAuthTab("login");
+      setMessage("密码已重置，请使用新密码登录。", "success");
     });
   });
 
@@ -111,15 +142,52 @@
   }
 
   function switchAuthTab(tab) {
-    if (state.session) {
-      return;
-    }
+    if (state.session) return;
     document.querySelectorAll("[data-auth-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.authTab === tab);
     });
     els.loginForm.classList.toggle("hidden", tab !== "login");
     els.registerForm.classList.toggle("hidden", tab !== "register");
+    els.resetForm.classList.toggle("hidden", tab !== "reset");
     setMessage("", "");
+  }
+
+  async function sendVerificationCode(button) {
+    const purpose = button.dataset.sendCode;
+    const form = purpose === "register" ? els.registerForm : els.resetForm;
+    const email = String(new FormData(form).get("email") || "").trim();
+    if (!email) {
+      setMessage("请先填写邮箱。", "warn");
+      return;
+    }
+    if (state.codeCooldown[purpose] > Date.now()) {
+      setMessage("验证码已发送，请稍后再试。", "warn");
+      return;
+    }
+
+    await runAuthAction("正在发送验证码...", async () => {
+      await apiPost("/auth/send-code", { email, purpose });
+      state.codeCooldown[purpose] = Date.now() + 60000;
+      startCodeCountdown(button, 60);
+      setMessage("验证码已发送，请查收邮箱。", "success");
+    });
+  }
+
+  function startCodeCountdown(button, seconds) {
+    let remain = seconds;
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = `${remain}s`;
+    const timer = setInterval(() => {
+      remain -= 1;
+      if (remain <= 0) {
+        clearInterval(timer);
+        button.disabled = false;
+        button.textContent = originalText;
+        return;
+      }
+      button.textContent = `${remain}s`;
+    }, 1000);
   }
 
   async function runAuthAction(loadingText, task) {
@@ -137,7 +205,6 @@
 
   async function refreshRelease() {
     if (!state.session) {
-      setMessage("请先登录，再读取安装包信息。", "warn");
       renderRelease(null, "login_required");
       return;
     }
@@ -197,12 +264,13 @@
       els.authTabs.classList.add("hidden");
       els.loginForm.classList.add("hidden");
       els.registerForm.classList.add("hidden");
+      els.resetForm.classList.add("hidden");
       els.sessionPanel.classList.remove("hidden");
-      els.accountLayout.classList.remove("public-mode");
+      els.accountGate.classList.add("hidden");
       els.accountPrivate.classList.remove("hidden");
       els.sessionEmail.textContent = email;
       els.logoutButton.classList.remove("hidden");
-      els.accountStatus.innerHTML = `<span class="badge-dot online"></span><div><strong>已登录</strong><small>${escapeHtml(email)}</small></div>`;
+      els.accountStatus.innerHTML = '<span class="badge-dot online"></span><strong>已登录</strong>';
       els.statAccount.textContent = "已登录";
       els.statAccountMeta.textContent = email;
       els.downloadIntro.textContent = "已登录。下方展示当前稳定版客户端安装包，下载地址来自后台发行记录。";
@@ -213,12 +281,13 @@
     els.authTabs.classList.remove("hidden");
     els.loginForm.classList.toggle("hidden", activeTab !== "login");
     els.registerForm.classList.toggle("hidden", activeTab !== "register");
+    els.resetForm.classList.toggle("hidden", activeTab !== "reset");
     els.sessionPanel.classList.add("hidden");
-    els.accountLayout.classList.add("public-mode");
+    els.accountGate.classList.remove("hidden");
     els.accountPrivate.classList.add("hidden");
     els.sessionEmail.textContent = "-";
     els.logoutButton.classList.add("hidden");
-    els.accountStatus.innerHTML = '<span class="badge-dot"></span><div><strong>未登录</strong><small>注册或登录后开放下载入口</small></div>';
+    els.accountStatus.innerHTML = '<span class="badge-dot"></span><strong>未登录</strong>';
     els.statAccount.textContent = "未登录";
     els.statAccountMeta.textContent = "需要登录后下载";
     els.downloadIntro.textContent = "请先登录。登录后会读取后台发行记录并开放安装包下载按钮。";
@@ -226,7 +295,7 @@
 
   function renderTrialState() {
     els.copyTrialButton.disabled = !state.trialCode;
-    if (state.trialCode) {
+    if (state.trialCode && state.session) {
       els.trialCode.textContent = state.trialCode;
       els.statTrial.textContent = "已领取";
       els.trialIntro.textContent = "这是最近一次注册生成的试用激活码。安装客户端后输入激活码完成授权。";
@@ -299,7 +368,7 @@
   }
 
   function setBusy(isBusy) {
-    document.querySelectorAll("button").forEach((button) => {
+    document.querySelectorAll(".auth-form button[type='submit']").forEach((button) => {
       button.disabled = isBusy;
     });
     if (!isBusy) {
@@ -338,20 +407,17 @@
       password_too_short: "密码至少需要 8 位。",
       invalid_credentials: "邮箱或密码不正确。",
       email_exists: "该邮箱已经注册，请直接登录。",
+      verification_code_required: "请输入邮箱验证码。",
+      verification_code_invalid: "验证码不正确或已过期。",
+      verification_code_expired: "验证码已过期，请重新发送。",
+      email_not_verified: "邮箱还没有完成验证。",
+      email_delivery_not_configured: "邮件验证码服务还没有配置，请联系管理员完成邮件发送配置。",
+      email_delivery_failed: "验证码邮件发送失败，请稍后重试。",
+      verification_purpose_invalid: "验证码用途不正确，请刷新页面后重试。",
       release_not_found: "后台还没有录入正式发行包。",
       failed_to_fetch: "网络请求失败，请确认官网域名和 API 域名已经生效。",
     };
     return map[code] || map[String(error.message || "").toLowerCase()] || `操作失败：${code || error.message || "unknown_error"}`;
-  }
-
-  function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, (char) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      "\"": "&quot;",
-      "'": "&#039;",
-    })[char]);
   }
 
   function byId(id) {

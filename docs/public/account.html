@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>用户中心 | Scorpio Intelligence</title>
-  <meta name="description" content="Scorpio Intelligence 用户中心，提供账号登录、试用授权和客户端下载。">
+  <meta name="description" content="Scorpio Intelligence 用户中心，提供账号登录、试用授权和客户端下载安装入口。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260616-account-secure">
+  <link rel="stylesheet" href="site.css?v=20260616-account-auth">
 </head>
-<body>
-  <header class="site-header">
+<body class="account-page">
+  <header class="site-header account-site-header">
     <a class="brand" href="index-cn.html" aria-label="Scorpio Intelligence 首页">
       <img src="assets/scorpio-logo-horizontal.svg" alt="Scorpio Intelligence">
     </a>
@@ -23,28 +23,45 @@
     </nav>
   </header>
 
-  <main class="delivery-shell account-center">
-    <section class="delivery-heading account-landing">
-      <div>
-        <p class="section-kicker">User Center</p>
-        <h1>Scorpio Intelligence 用户中心</h1>
-        <p class="lead">登录后可查看当前账号权益、试用资格和已开放的版本入口。</p>
-      </div>
-      <div class="delivery-badge" id="accountStatus">
-        <span class="badge-dot"></span>
-        <div><strong>未登录</strong><small>登录后开放账号权益和下载入口</small></div>
-      </div>
-    </section>
-
-    <section class="delivery-layout public-mode" id="accountLayout">
-      <aside class="delivery-card auth-console">
-        <div class="console-title">
-          <p class="section-kicker">Account</p>
-          <h2>登录或注册</h2>
+  <main class="account-shell-v2" id="accountLayout">
+    <section class="account-gate" id="accountGate">
+      <aside class="account-product-panel" aria-label="用户中心说明">
+        <div class="account-product-brand">
+          <img src="assets/scorpio-logo-mark.svg" alt="">
+          <div>
+            <strong>Scorpio Intelligence</strong>
+            <span>Market Intelligence Platform</span>
+          </div>
         </div>
+        <p class="section-kicker">User Center</p>
+        <h1>用户中心</h1>
+        <p class="account-gate-lead">
+          登录后查看账号权益和试用资格。未登录状态不展示授权码、文件地址或内部服务信息。
+        </p>
+        <div class="account-security-list">
+          <span>账号认证</span>
+          <span>邮箱验证码</span>
+          <span>试用权益</span>
+          <span>权益交付</span>
+        </div>
+      </aside>
+
+      <section class="account-auth-card" aria-label="登录或注册">
+        <div class="auth-card-head">
+          <div>
+            <p class="section-kicker">Access</p>
+            <h2>登录或注册</h2>
+          </div>
+          <div class="auth-status-pill" id="accountStatus">
+            <span class="badge-dot"></span>
+            <strong>未登录</strong>
+          </div>
+        </div>
+
         <div class="auth-tabs" id="authTabs" role="tablist" aria-label="账号操作">
           <button class="auth-tab active" type="button" data-auth-tab="login">登录</button>
           <button class="auth-tab" type="button" data-auth-tab="register">注册试用</button>
+          <button class="auth-tab" type="button" data-auth-tab="reset">找回密码</button>
         </div>
 
         <div class="session-panel hidden" id="sessionPanel">
@@ -54,96 +71,142 @@
         </div>
 
         <form id="loginForm" class="auth-form" autocomplete="on">
-          <label>邮箱<input type="email" name="email" autocomplete="email" required></label>
-          <label>密码<input type="password" name="password" autocomplete="current-password" minlength="8" required></label>
+          <label>邮箱
+            <input type="email" name="email" autocomplete="email" required>
+          </label>
+          <label>密码
+            <input type="password" name="password" autocomplete="current-password" minlength="8" required>
+          </label>
           <button class="button primary block" type="submit">登录用户中心</button>
         </form>
 
         <form id="registerForm" class="auth-form hidden" autocomplete="on">
-          <label>用户名<input type="text" name="username" autocomplete="nickname" maxlength="64" placeholder="可选"></label>
-          <label>邮箱<input type="email" name="email" autocomplete="email" required></label>
-          <label>密码<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+          <label>用户名
+            <input type="text" name="username" autocomplete="nickname" maxlength="64" placeholder="可选">
+          </label>
+          <label>邮箱
+            <input type="email" name="email" autocomplete="email" required>
+          </label>
+          <div class="code-field">
+            <label>邮箱验证码
+              <input type="text" name="verification_code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required>
+            </label>
+            <button class="button secondary code-button" type="button" data-send-code="register">发送验证码</button>
+          </div>
+          <label>密码
+            <input type="password" name="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <label>确认密码
+            <input type="password" name="password_confirm" autocomplete="new-password" minlength="8" required>
+          </label>
           <button class="button primary block" type="submit">创建账号并领取试用</button>
         </form>
 
-        <div class="account-message" id="authMessage" role="status" aria-live="polite"></div>
-        <div class="auth-footnote">未登录前不会展示任何敏感交付信息。</div>
-      </aside>
-
-      <section class="account-private hidden" id="accountPrivate">
-        <section class="delivery-stats" aria-label="账号权益摘要">
-          <article>
-            <span>账号状态</span>
-            <strong id="statAccount">已登录</strong>
-            <small id="statAccountMeta">-</small>
-          </article>
-          <article>
-            <span>试用授权</span>
-            <strong id="statTrial">待领取</strong>
-            <small>注册成功后自动生成</small>
-          </article>
-          <article>
-            <span>安装包</span>
-            <strong id="statRelease">待加载</strong>
-            <small id="statReleaseMeta">登录后读取发行信息</small>
-          </article>
-        </section>
-
-        <section class="delivery-main">
-          <article class="delivery-card release-console">
-            <div class="console-toolbar">
-              <div class="console-title">
-                <p class="section-kicker">Client Package</p>
-                <h2>客户端下载</h2>
-              </div>
-              <button class="button secondary sm" id="refreshReleaseButton" type="button">刷新版本</button>
-            </div>
-            <div class="release-table" role="table" aria-label="安装包发行信息">
-              <div class="release-row release-head" role="row">
-                <span>版本</span>
-                <span>通道</span>
-                <span>发布日期</span>
-                <span>校验</span>
-                <span>操作</span>
-              </div>
-              <div class="release-row" role="row">
-                <strong id="releaseVersion">登录后加载</strong>
-                <span id="releaseChannel">stable</span>
-                <span id="releaseDate">-</span>
-                <span id="releaseHash">-</span>
-                <a class="button primary sm disabled" id="downloadButton" href="#" aria-disabled="true">下载</a>
-              </div>
-            </div>
-            <p class="delivery-note" id="downloadIntro">登录后会读取当前开放版本。</p>
-          </article>
-
-          <div class="delivery-two-col">
-            <article class="delivery-card license-console">
-              <div class="console-title">
-                <p class="section-kicker">Trial License</p>
-                <h2>试用激活码</h2>
-              </div>
-              <div class="trial-code" id="trialCode">暂无</div>
-              <div class="license-actions">
-                <button class="button secondary sm" id="copyTrialButton" type="button" disabled>复制激活码</button>
-              </div>
-              <p class="delivery-note" id="trialIntro">注册成功后这里会显示试用激活码。</p>
-            </article>
-
-            <article class="delivery-card">
-              <div class="console-title">
-                <p class="section-kicker">Account</p>
-                <h2>账号操作</h2>
-              </div>
-              <ul class="delivery-list">
-                <li>下载按钮仅在登录后开放。</li>
-                <li>试用激活码仅展示给当前登录账号。</li>
-                <li>安装包实际授权仍在客户端激活流程中完成。</li>
-              </ul>
-              <button class="button secondary sm hidden" id="logoutButton" type="button">退出登录</button>
-            </article>
+        <form id="resetForm" class="auth-form hidden" autocomplete="on">
+          <label>邮箱
+            <input type="email" name="email" autocomplete="email" required>
+          </label>
+          <div class="code-field">
+            <label>重置验证码
+              <input type="text" name="verification_code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required>
+            </label>
+            <button class="button secondary code-button" type="button" data-send-code="reset_password">发送验证码</button>
           </div>
-        </section>
+          <label>新密码
+            <input type="password" name="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <label>确认新密码
+            <input type="password" name="password_confirm" autocomplete="new-password" minlength="8" required>
+          </label>
+          <button class="button primary block" type="submit">重置密码</button>
+        </form>
+
+        <div class="account-message" id="authMessage" role="status" aria-live="polite"></div>
+        <div class="auth-footnote">验证码用于确认邮箱真实性。未登录前不会展示任何敏感交付信息。</div>
+      </section>
+    </section>
+
+    <section class="account-private hidden" id="accountPrivate">
+      <section class="account-dashboard-head">
+        <div>
+          <p class="section-kicker">Console</p>
+          <h1>账号权益</h1>
+          <p>这里展示当前账号的试用授权、安装包和版本入口。</p>
+        </div>
+        <button class="button secondary sm hidden" id="logoutButton" type="button">退出登录</button>
+      </section>
+
+      <section class="delivery-stats" aria-label="账号权益摘要">
+        <article>
+          <span>账号状态</span>
+          <strong id="statAccount">已登录</strong>
+          <small id="statAccountMeta">-</small>
+        </article>
+        <article>
+          <span>试用授权</span>
+          <strong id="statTrial">待领取</strong>
+          <small>注册成功后自动生成</small>
+        </article>
+        <article>
+          <span>安装包</span>
+          <strong id="statRelease">待加载</strong>
+          <small id="statReleaseMeta">登录后读取发行信息</small>
+        </article>
+      </section>
+
+      <section class="delivery-main">
+        <article class="delivery-card release-console">
+          <div class="console-toolbar">
+            <div class="console-title">
+              <p class="section-kicker">Client Package</p>
+              <h2>客户端安装包</h2>
+            </div>
+            <button class="button secondary sm" id="refreshReleaseButton" type="button">刷新版本</button>
+          </div>
+          <div class="release-table" role="table" aria-label="安装包发行信息">
+            <div class="release-row release-head" role="row">
+              <span>版本</span>
+              <span>通道</span>
+              <span>发布日期</span>
+              <span>校验</span>
+              <span>操作</span>
+            </div>
+            <div class="release-row" role="row">
+              <strong id="releaseVersion">登录后加载</strong>
+              <span id="releaseChannel">stable</span>
+              <span id="releaseDate">-</span>
+              <span id="releaseHash">-</span>
+              <a class="button primary sm disabled" id="downloadButton" href="#" aria-disabled="true">下载</a>
+            </div>
+          </div>
+          <p class="delivery-note" id="downloadIntro">登录后会读取当前开放版本。</p>
+        </article>
+
+        <div class="delivery-two-col">
+          <article class="delivery-card license-console">
+            <div class="console-title">
+              <p class="section-kicker">Trial License</p>
+              <h2>试用激活码</h2>
+            </div>
+            <div class="trial-code" id="trialCode">暂无</div>
+            <div class="license-actions">
+              <button class="button secondary sm" id="copyTrialButton" type="button" disabled>复制激活码</button>
+            </div>
+            <p class="delivery-note" id="trialIntro">注册成功后这里会显示试用激活码。</p>
+          </article>
+
+          <article class="delivery-card">
+            <div class="console-title">
+              <p class="section-kicker">Boundary</p>
+              <h2>交付边界</h2>
+            </div>
+            <ul class="delivery-list">
+              <li>下载入口仅在账号登录后开放。</li>
+              <li>试用激活码只展示给当前登录账号。</li>
+              <li>客户端授权仍在本机激活流程中完成。</li>
+            </ul>
+          </article>
+        </div>
       </section>
     </section>
   </main>
@@ -162,6 +225,6 @@
     </div>
   </footer>
 
-  <script src="account.js?v=20260616-account-secure"></script>
+  <script src="account.js?v=20260616-account-auth"></script>
 </body>
 </html>
