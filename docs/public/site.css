@@ -544,13 +544,158 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   color: rgba(244, 241, 248, 0.76);
   line-height: 1.8;
 }
+.admin-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 56px clamp(24px, 5vw, 72px) 92px;
+}
+.admin-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 28px;
+  align-items: end;
+  margin-bottom: 26px;
+}
+.admin-hero h1 {
+  font-size: clamp(42px, 5vw, 62px);
+}
+.admin-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.admin-token-card,
+.admin-panel {
+  padding: 24px;
+}
+.admin-actions,
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 0;
+}
+.field-label,
+.admin-form label {
+  display: grid;
+  gap: 8px;
+  color: rgba(244, 241, 248, 0.72);
+  font-size: 14px;
+  font-weight: 800;
+}
+.field-label input,
+.admin-form input,
+.admin-form select,
+.admin-form textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 12px;
+  color: var(--white);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 8px;
+  background: rgba(7, 11, 22, 0.58);
+  font: inherit;
+}
+.field-label input:focus,
+.admin-form input:focus,
+.admin-form select:focus,
+.admin-form textarea:focus {
+  outline: none;
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(31, 182, 255, 0.12);
+}
+.admin-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+.admin-form .wide {
+  grid-column: 1 / -1;
+}
+.check-field {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 2px;
+}
+.check-field input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--cyan);
+}
+.generated-codes {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(24, 198, 163, 0.22);
+  border-radius: 8px;
+  background: rgba(24, 198, 163, 0.08);
+}
+.generated-codes strong {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--white);
+}
+.generated-codes pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--constellation);
+  font: 700 15px/1.7 "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+.admin-table {
+  margin-top: 16px;
+}
+.admin-table-scroll {
+  overflow-x: auto;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  border-radius: 8px;
+}
+.admin-table table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+.admin-table th,
+.admin-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid rgba(125, 211, 252, 0.1);
+  text-align: left;
+  vertical-align: top;
+}
+.admin-table th {
+  color: rgba(244, 241, 248, 0.56);
+  background: rgba(7, 11, 22, 0.42);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.admin-table td {
+  color: rgba(244, 241, 248, 0.78);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.admin-table tr:last-child td {
+  border-bottom: 0;
+}
+.empty-state {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  border-radius: 8px;
+  color: rgba(244, 241, 248, 0.52);
+  background: rgba(7, 11, 22, 0.34);
+}
 @media (max-width: 900px) {
   .site-header { position: static; align-items: flex-start; flex-direction: column; }
   nav { flex-wrap: wrap; }
   .hero { min-height: 680px; background-position: center; }
   h1 { font-size: 42px; }
   h2 { font-size: 32px; }
-  .pillar-grid, .edition-grid, .split, .trust, .feedback-grid, .account-hero, .account-grid, .delivery-heading, .delivery-stats, .delivery-layout, .delivery-two-col { grid-template-columns: 1fr; }
+  .pillar-grid, .edition-grid, .split, .trust, .feedback-grid, .account-hero, .account-grid, .delivery-heading, .delivery-stats, .delivery-layout, .delivery-two-col, .admin-hero, .admin-grid, .admin-form { grid-template-columns: 1fr; }
   .product-visual { min-height: 360px; }
   .lang-switch { margin-left: 0; }
   .brand img { width: min(240px, 70vw); }
@@ -562,4 +707,6 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   .delivery-shell { padding-top: 42px; }
   .release-table { overflow-x: auto; }
   .release-row { min-width: 720px; }
+  .admin-shell { padding-top: 42px; }
+  .admin-form .button { width: 100%; }
 }
