@@ -1,14 +1,25 @@
 (function () {
   const API_BASE = "https://api.scorpio-intelligence.tech/v1";
+  const ADMIN_PATH = "/scorpio_v1_admin";
   const TOKEN_KEY = "scorpio_admin_token";
 
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || "",
+    codes: [],
+    licenses: [],
+    releases: [],
   };
 
   const els = {
+    adminLogin: byId("adminLogin"),
+    adminLoginForm: byId("adminLoginForm"),
+    adminLoginToken: byId("adminLoginToken"),
+    loginMessage: byId("loginMessage"),
+    adminTopbar: byId("adminTopbar"),
+    adminConsole: byId("adminConsole"),
     adminStatus: byId("adminStatus"),
     adminToken: byId("adminToken"),
+    logoutButton: byId("logoutButton"),
     saveTokenButton: byId("saveTokenButton"),
     clearTokenButton: byId("clearTokenButton"),
     adminMessage: byId("adminMessage"),
@@ -21,9 +32,44 @@
     codesTable: byId("codesTable"),
     licensesTable: byId("licensesTable"),
     releasesTable: byId("releasesTable"),
+    metricCodes: byId("metricCodes"),
+    metricCodesMeta: byId("metricCodesMeta"),
+    metricLicenses: byId("metricLicenses"),
+    metricLicensesMeta: byId("metricLicensesMeta"),
+    metricReleases: byId("metricReleases"),
+    metricReleasesMeta: byId("metricReleasesMeta"),
+    metricApi: byId("metricApi"),
   };
 
   els.adminToken.value = state.token;
+  els.adminLoginToken.value = state.token;
+
+  els.adminLoginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const token = els.adminLoginToken.value.trim();
+    if (!token) {
+      setLoginMessage("请输入 Admin Token。", "warn");
+      return;
+    }
+    state.token = token;
+    localStorage.setItem(TOKEN_KEY, token);
+    els.adminToken.value = token;
+    setLoginMessage("正在验证管理员身份...", "loading");
+    const ok = await refreshAll();
+    if (ok) {
+      setLoginMessage("", "");
+      showConsole();
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      state.token = "";
+      els.adminToken.value = "";
+      els.adminLoginToken.focus();
+    }
+  });
+
+  els.logoutButton.addEventListener("click", () => {
+    clearSession("已退出管理员后台。");
+  });
 
   els.saveTokenButton.addEventListener("click", async () => {
     state.token = els.adminToken.value.trim();
@@ -33,16 +79,13 @@
       return;
     }
     localStorage.setItem(TOKEN_KEY, state.token);
-    await refreshAll();
+    els.adminLoginToken.value = state.token;
+    const ok = await refreshAll();
+    if (ok) showConsole();
   });
 
   els.clearTokenButton.addEventListener("click", () => {
-    state.token = "";
-    localStorage.removeItem(TOKEN_KEY);
-    els.adminToken.value = "";
-    renderStatus(false);
-    clearTables();
-    setMessage("已清除本地 Token。", "success");
+    clearSession("已清除本地 Token。");
   });
 
   els.codeForm.addEventListener("submit", async (event) => {
@@ -52,10 +95,11 @@
       payload.count = Number(payload.count || 1);
       payload.license_days = Number(payload.license_days || 365);
       payload.max_devices = Number(payload.max_devices || 1);
-      const result = await apiPost("/admin/activation-codes", payload);
+      const result = await apiPost(`${ADMIN_PATH}/activation-codes`, payload);
       renderGeneratedCodes(result.codes || []);
       await loadCodes();
-      setMessage("授权码已生成。", "success");
+      renderMetrics();
+      setMessage("授权码已生成，并已刷新列表。", "success");
     });
   });
 
@@ -65,85 +109,141 @@
       const payload = formPayload(els.releaseForm);
       payload.file_size_bytes = Number(payload.file_size_bytes || 0);
       payload.is_required = Boolean(payload.is_required);
-      await apiPost("/admin/releases", payload);
+      await apiPost(`${ADMIN_PATH}/releases`, payload);
       await loadReleases();
+      renderMetrics();
       setMessage("发行记录已保存。用户交付页会读取最新 stable 记录。", "success");
     });
   });
 
-  els.refreshCodesButton.addEventListener("click", () => runAdminAction("正在刷新授权码...", loadCodes));
-  els.refreshReleasesButton.addEventListener("click", () => runAdminAction("正在刷新发行包...", loadReleases));
+  els.refreshCodesButton.addEventListener("click", () => runAdminAction("正在刷新授权码...", async () => {
+    await loadCodes();
+    renderMetrics();
+  }));
+  els.refreshReleasesButton.addEventListener("click", () => runAdminAction("正在刷新发行包...", async () => {
+    await loadReleases();
+    renderMetrics();
+  }));
   els.refreshAllButton.addEventListener("click", refreshAll);
 
   document.querySelectorAll("[data-admin-tab]").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.adminTab));
   });
 
-  renderStatus(Boolean(state.token));
+  showLogin();
+  renderStatus(false);
+  renderAllTables();
+  renderMetrics();
   if (state.token) {
-    refreshAll();
-  } else {
-    clearTables();
+    setLoginMessage("正在恢复管理员登录...", "loading");
+    refreshAll().then((ok) => {
+      if (ok) {
+        setLoginMessage("", "");
+        showConsole();
+      } else {
+        localStorage.removeItem(TOKEN_KEY);
+        state.token = "";
+        els.adminToken.value = "";
+      }
+    });
   }
 
   async function refreshAll() {
-    await runAdminAction("正在连接管理员 API...", async () => {
+    return runAdminAction("正在连接管理员 API...", async () => {
       const results = await Promise.allSettled([loadCodes(), loadLicenses(), loadReleases()]);
       const rejected = results.filter((item) => item.status === "rejected");
       const tokenError = rejected.find((item) => item.reason && item.reason.code === "admin_token_required");
       if (tokenError) {
         throw tokenError.reason;
       }
-      if (rejected.some((item) => item.reason && item.reason.code === "not_found")) {
-        renderTable(els.releasesTable, [], []);
-        setMessage("基础管理员接口已连接；发行包接口需要重新部署 Cloudflare Worker 后可用。", "warn");
+      if (rejected.length) {
+        throw rejected[0].reason || new Error("admin_api_unavailable");
       }
       renderStatus(true);
-      if (!rejected.length) {
-        setMessage("管理员 API 已连接。", "success");
+      renderMetrics();
+      if (rejected.some((item) => item.reason && item.reason.code === "not_found")) {
+        setMessage("基础管理员接口已连接；发行包接口需要重新部署 Cloudflare Worker 后可用。", "warn");
+        return;
       }
+      setMessage("管理员 API 已连接。", "success");
     });
   }
 
   async function loadCodes() {
-    const data = await apiGet("/admin/activation-codes");
-    renderTable(els.codesTable, ["授权码", "版本", "天数", "设备", "状态", "客户邮箱", "创建时间", "使用时间"], (data.results || []).map((row) => [
+    const data = await apiGet(`${ADMIN_PATH}/activation-codes`);
+    state.codes = data.results || [];
+    renderCodes();
+  }
+
+  async function loadLicenses() {
+    const data = await apiGet(`${ADMIN_PATH}/licenses`);
+    state.licenses = data.results || [];
+    renderLicenses();
+  }
+
+  async function loadReleases() {
+    const data = await apiGet(`${ADMIN_PATH}/releases`);
+    state.releases = data.results || [];
+    renderReleases();
+  }
+
+  function renderAllTables() {
+    renderCodes();
+    renderLicenses();
+    renderReleases();
+  }
+
+  function renderCodes() {
+    renderTable(els.codesTable, ["授权码", "版本", "天数", "设备", "状态", "客户邮箱", "创建时间", "使用时间"], state.codes.map((row) => [
       row.code,
       row.edition,
       row.license_days,
       row.max_devices,
-      row.status,
+      statusLabel(row.status),
       row.customer_email || "-",
-      row.created_at || "-",
-      row.used_at || "-",
+      formatDate(row.created_at),
+      formatDate(row.used_at),
     ]));
   }
 
-  async function loadLicenses() {
-    const data = await apiGet("/admin/licenses");
-    renderTable(els.licensesTable, ["授权 ID", "版本", "邮箱", "机器指纹", "到期", "有效", "审批", "最近在线"], (data.results || []).map((row) => [
-      row.license_id,
+  function renderLicenses() {
+    renderTable(els.licensesTable, ["授权 ID", "版本", "邮箱", "机器指纹", "到期", "有效", "审批", "最近在线"], state.licenses.map((row) => [
+      shortText(row.license_id, 18),
       row.edition,
       row.email || "-",
       shortText(row.machine_fingerprint || "-", 22),
-      row.expires_at || "-",
+      formatDate(row.expires_at),
       row.revoked ? "已撤销" : row.is_active ? "有效" : "停用",
       row.approval_status || "-",
-      row.last_online_check || "-",
+      formatDate(row.last_online_check),
     ]));
   }
 
-  async function loadReleases() {
-    const data = await apiGet("/admin/releases");
-    renderTable(els.releasesTable, ["版本", "通道", "版本类型", "下载地址", "SHA256", "强制", "发布时间"], (data.results || []).map((row) => [
-      row.version,
+  function renderReleases() {
+    renderTable(els.releasesTable, ["版本", "通道", "版本类型", "下载地址", "SHA256", "强制", "发布时间"], state.releases.map((row) => [
+      `v${String(row.version || "").replace(/^v/i, "")}`,
       row.channel,
       row.edition,
-      shortText(row.download_url || "-", 42),
+      shortText(row.download_url || "-", 46),
       row.file_hash_sha256 ? shortText(row.file_hash_sha256, 18) : "-",
       row.is_required ? "是" : "否",
-      row.released_at || "-",
+      formatDate(row.released_at),
     ]));
+  }
+
+  function renderMetrics() {
+    const activeCodes = state.codes.filter((row) => row.status === "active" || row.status === "assigned").length;
+    const usedCodes = state.codes.filter((row) => row.status === "used").length;
+    const activeLicenses = state.licenses.filter((row) => row.is_active && !row.revoked).length;
+    const latestRelease = state.releases[0];
+
+    els.metricCodes.textContent = state.codes.length ? String(state.codes.length) : "-";
+    els.metricCodesMeta.textContent = state.codes.length ? `可用 ${activeCodes} / 已用 ${usedCodes}` : "等待连接";
+    els.metricLicenses.textContent = state.licenses.length ? String(activeLicenses) : "-";
+    els.metricLicensesMeta.textContent = state.licenses.length ? `总记录 ${state.licenses.length}` : "等待连接";
+    els.metricReleases.textContent = latestRelease ? `v${String(latestRelease.version || "").replace(/^v/i, "")}` : "-";
+    els.metricReleasesMeta.textContent = latestRelease ? `${latestRelease.channel} / ${latestRelease.edition}` : "等待发行记录";
+    els.metricApi.textContent = state.token ? "已连接" : "未连接";
   }
 
   async function apiGet(path) {
@@ -187,19 +287,51 @@
     if (!state.token) {
       setMessage("请先输入 Admin Token。", "warn");
       renderStatus(false);
-      return;
+      return false;
     }
     setMessage(loadingText, "loading");
     setBusy(true);
     try {
       await task();
       renderStatus(true);
+      return true;
     } catch (error) {
       renderStatus(false);
-      setMessage(errorToText(error), "error");
+      const text = errorToText(error);
+      setMessage(text, "error");
+      setLoginMessage(text, "error");
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  function showLogin() {
+    els.adminLogin.classList.remove("hidden");
+    els.adminTopbar.classList.add("hidden");
+    els.adminConsole.classList.add("hidden");
+  }
+
+  function showConsole() {
+    els.adminLogin.classList.add("hidden");
+    els.adminTopbar.classList.remove("hidden");
+    els.adminConsole.classList.remove("hidden");
+  }
+
+  function clearSession(message) {
+    state.token = "";
+    state.codes = [];
+    state.licenses = [];
+    state.releases = [];
+    localStorage.removeItem(TOKEN_KEY);
+    els.adminToken.value = "";
+    els.adminLoginToken.value = "";
+    renderStatus(false);
+    renderAllTables();
+    renderMetrics();
+    showLogin();
+    setLoginMessage(message, "success");
+    setMessage("", "");
   }
 
   function renderStatus(isConnected) {
@@ -239,12 +371,6 @@
     els.releasesTable.classList.toggle("hidden", tab !== "releases");
   }
 
-  function clearTables() {
-    renderTable(els.codesTable, [], []);
-    renderTable(els.licensesTable, [], []);
-    renderTable(els.releasesTable, [], []);
-  }
-
   function setBusy(isBusy) {
     document.querySelectorAll("button").forEach((button) => {
       button.disabled = isBusy;
@@ -253,7 +379,12 @@
 
   function setMessage(text, type) {
     els.adminMessage.textContent = text || "";
-    els.adminMessage.className = `account-message ${type || ""}`.trim();
+    els.adminMessage.className = `admin-message ${type || ""}`.trim();
+  }
+
+  function setLoginMessage(text, type) {
+    els.loginMessage.textContent = text || "";
+    els.loginMessage.className = `admin-message ${type || ""}`.trim();
   }
 
   function formPayload(form) {
@@ -268,6 +399,16 @@
     return payload;
   }
 
+  function statusLabel(status) {
+    const map = { active: "可用", assigned: "已分配", used: "已使用", revoked: "已撤销" };
+    return map[status] || status || "-";
+  }
+
+  function formatDate(value) {
+    if (!value) return "-";
+    return String(value).replace("T", " ").replace(/\.\d+Z$/, "").replace(/Z$/, "");
+  }
+
   function errorToText(error) {
     const code = error && error.code ? error.code : "";
     const map = {
@@ -275,6 +416,8 @@
       version_required: "请填写安装包版本号。",
       download_url_https_required: "下载地址必须使用 https://。",
       not_found: "当前 API 版本还没有部署对应管理员接口，请先重新部署 Cloudflare Worker。",
+      "failed to fetch": "管理员登录校验失败，请确认官网域名已生效，或稍后重试。",
+      failed_to_fetch: "管理员登录校验失败，请确认官网域名已生效，或稍后重试。",
     };
     return map[code] || `操作失败：${code || error.message || "unknown_error"}`;
   }

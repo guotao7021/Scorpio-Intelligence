@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>管理员后台 | Scorpio Intelligence</title>
+  <meta name="description" content="Scorpio Intelligence 管理员后台，用于授权码、授权记录与安装包发行管理。">
+  <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css?v=20260616-admin-pro">
+</head>
+<body class="admin-page">
+  <section class="admin-login" id="adminLogin">
+    <div class="admin-login-card">
+      <a class="admin-brand" href="index-cn.html" aria-label="Scorpio Intelligence 首页">
+        <img src="assets/scorpio-logo-mark.svg" alt="">
+        <div>
+          <strong>Scorpio Intelligence</strong>
+          <span>商业授权运营后台</span>
+        </div>
+      </a>
+      <div class="admin-login-copy">
+        <p class="section-kicker">Admin Access</p>
+        <h1>管理员登录</h1>
+        <p>请输入管理员 Token 后进入后台。登录凭据只保存在当前浏览器本地，后台接口仍由服务端二次校验。</p>
+      </div>
+      <form class="admin-login-form" id="adminLoginForm">
+        <label>Admin Token
+          <input id="adminLoginToken" type="password" autocomplete="off" placeholder="粘贴 ADMIN_API_TOKEN" required>
+        </label>
+        <button class="button primary" type="submit">登录后台</button>
+      </form>
+      <div class="admin-message" id="loginMessage" role="status" aria-live="polite"></div>
+      <div class="admin-login-note">
+        <strong>安全边界</strong>
+        <span>此页面不内置管理员密钥；未通过 API 校验不会展示授权码、授权记录和发行包信息。</span>
+      </div>
+    </div>
+  </section>
+
+  <header class="admin-topbar hidden" id="adminTopbar">
+    <a class="admin-brand" href="index-cn.html" aria-label="Scorpio Intelligence 首页">
+      <img src="assets/scorpio-logo-mark.svg" alt="">
+      <div>
+        <strong>Scorpio Intelligence</strong>
+        <span>商业授权运营后台</span>
+      </div>
+    </a>
+    <nav class="admin-nav" aria-label="管理员导航">
+      <a href="index-cn.html">官网首页</a>
+      <a href="account.html">用户中心</a>
+      <a class="active" href="scorpio_v1_admin.html">管理员后台</a>
+      <button class="admin-logout" id="logoutButton" type="button">退出登录</button>
+    </nav>
+  </header>
+
+  <main class="admin-console hidden" id="adminConsole">
+    <section class="admin-command-bar">
+      <div>
+        <p class="section-kicker">Admin Console</p>
+        <h1>授权与发行运营台</h1>
+        <p>集中处理客户授权码、机器授权记录、客户端安装包发行。Admin Token 只保存在当前浏览器本地，不进入仓库。</p>
+      </div>
+      <div class="admin-live-card" id="adminStatus">
+        <span class="badge-dot"></span>
+        <div>
+          <strong>未连接</strong>
+          <small>输入 Admin Token 后读取数据</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="admin-metrics" aria-label="运营概览">
+      <article>
+        <span>授权码</span>
+        <strong id="metricCodes">-</strong>
+        <small id="metricCodesMeta">等待连接</small>
+      </article>
+      <article>
+        <span>有效授权</span>
+        <strong id="metricLicenses">-</strong>
+        <small id="metricLicensesMeta">等待连接</small>
+      </article>
+      <article>
+        <span>发行包</span>
+        <strong id="metricReleases">-</strong>
+        <small id="metricReleasesMeta">stable / personal_pro</small>
+      </article>
+      <article>
+        <span>API 状态</span>
+        <strong id="metricApi">未连接</strong>
+        <small>服务端校验</small>
+      </article>
+    </section>
+
+    <section class="admin-workbench">
+      <aside class="admin-side">
+        <article class="admin-card">
+          <div class="admin-card-title">
+            <span>Access</span>
+            <h2>管理员访问</h2>
+          </div>
+          <label class="field-label">Admin Token
+            <input id="adminToken" type="password" autocomplete="off" placeholder="粘贴 ADMIN_API_TOKEN">
+          </label>
+          <div class="admin-actions">
+            <button class="button primary sm" id="saveTokenButton" type="button">保存并连接</button>
+            <button class="button secondary sm" id="clearTokenButton" type="button">清除</button>
+          </div>
+          <div class="admin-message" id="adminMessage" role="status" aria-live="polite"></div>
+          <ul class="admin-boundary">
+            <li>Token 只存本地浏览器。</li>
+            <li>后台页面不公开挂导航入口。</li>
+            <li>发行包地址必须使用 HTTPS。</li>
+          </ul>
+        </article>
+
+        <article class="admin-card admin-ops-card">
+          <div class="admin-card-title">
+            <span>Runbook</span>
+            <h2>交付检查</h2>
+          </div>
+          <ol class="admin-runbook">
+            <li>生成客户授权码。</li>
+            <li>录入最新安装包下载地址。</li>
+            <li>确认授权记录与机器指纹。</li>
+            <li>客户页下载按钮读取发行记录。</li>
+          </ol>
+        </article>
+      </aside>
+
+      <section class="admin-main">
+        <article class="admin-card admin-primary-card">
+          <div class="admin-card-head">
+            <div class="admin-card-title">
+              <span>Activation Codes</span>
+              <h2>生成客户授权码</h2>
+            </div>
+            <button class="button secondary sm" id="refreshCodesButton" type="button">刷新授权码</button>
+          </div>
+          <form class="admin-form admin-form-compact" id="codeForm">
+            <label>客户邮箱<input name="email" type="email" placeholder="可选，用于绑定客户"></label>
+            <label>客户名称<input name="customer_name" type="text" placeholder="可选"></label>
+            <label>版本
+              <select name="edition">
+                <option value="personal_pro">personal_pro</option>
+                <option value="personal_standard">personal_standard</option>
+              </select>
+            </label>
+            <label>有效天数<input name="license_days" type="number" min="1" value="365"></label>
+            <label>设备数<input name="max_devices" type="number" min="1" value="1"></label>
+            <label>数量<input name="count" type="number" min="1" max="100" value="1"></label>
+            <button class="button primary sm" type="submit">生成授权码</button>
+          </form>
+          <div class="generated-codes hidden" id="generatedCodes"></div>
+        </article>
+
+        <article class="admin-card">
+          <div class="admin-card-head">
+            <div class="admin-card-title">
+              <span>Release</span>
+              <h2>客户端安装包发行</h2>
+            </div>
+            <button class="button secondary sm" id="refreshReleasesButton" type="button">刷新发行包</button>
+          </div>
+          <form class="admin-form release-form" id="releaseForm">
+            <label>版本号<input name="version" type="text" placeholder="例如 1.0.0" required></label>
+            <label>通道
+              <select name="channel">
+                <option value="stable">stable</option>
+                <option value="beta">beta</option>
+              </select>
+            </label>
+            <label>版本
+              <select name="edition">
+                <option value="personal_pro">personal_pro</option>
+                <option value="personal_standard">personal_standard</option>
+                <option value="all">all</option>
+              </select>
+            </label>
+            <label class="wide">下载地址<input name="download_url" type="url" placeholder="https://..." required></label>
+            <label>SHA256<input name="file_hash_sha256" type="text" placeholder="可选"></label>
+            <label>文件大小 bytes<input name="file_size_bytes" type="number" min="0" value="0"></label>
+            <label class="check-field"><input name="is_required" type="checkbox"> 强制更新</label>
+            <label class="wide">发行说明<textarea name="release_notes" rows="3" placeholder="可选，展示给内部运营复核"></textarea></label>
+            <button class="button primary sm" type="submit">保存发行记录</button>
+          </form>
+        </article>
+
+        <article class="admin-card">
+          <div class="admin-card-head">
+            <div class="admin-card-title">
+              <span>Operations</span>
+              <h2>运营数据</h2>
+            </div>
+            <button class="button secondary sm" id="refreshAllButton" type="button">全部刷新</button>
+          </div>
+          <div class="admin-tabs" role="tablist" aria-label="管理员数据表">
+            <button class="auth-tab active" type="button" data-admin-tab="codes">授权码</button>
+            <button class="auth-tab" type="button" data-admin-tab="licenses">授权记录</button>
+            <button class="auth-tab" type="button" data-admin-tab="releases">发行包</button>
+          </div>
+          <div class="admin-table" id="codesTable"></div>
+          <div class="admin-table hidden" id="licensesTable"></div>
+          <div class="admin-table hidden" id="releasesTable"></div>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <script src="scorpio_v1_admin.js?v=20260616-admin-pro"></script>
+</body>
+</html>

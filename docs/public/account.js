@@ -10,6 +10,8 @@
 
   const els = {
     accountStatus: byId("accountStatus"),
+    accountLayout: byId("accountLayout"),
+    accountPrivate: byId("accountPrivate"),
     statAccount: byId("statAccount"),
     statAccountMeta: byId("statAccountMeta"),
     statTrial: byId("statTrial"),
@@ -47,7 +49,7 @@
         password: data.password,
       });
       saveSession(session);
-      setMessage("登录成功，交付控制台已开放下载入口。", "success");
+      setMessage("登录成功，用户中心已开放下载入口。", "success");
       await refreshRelease();
     });
   });
@@ -196,6 +198,8 @@
       els.loginForm.classList.add("hidden");
       els.registerForm.classList.add("hidden");
       els.sessionPanel.classList.remove("hidden");
+      els.accountLayout.classList.remove("public-mode");
+      els.accountPrivate.classList.remove("hidden");
       els.sessionEmail.textContent = email;
       els.logoutButton.classList.remove("hidden");
       els.accountStatus.innerHTML = `<span class="badge-dot online"></span><div><strong>已登录</strong><small>${escapeHtml(email)}</small></div>`;
@@ -210,6 +214,8 @@
     els.loginForm.classList.toggle("hidden", activeTab !== "login");
     els.registerForm.classList.toggle("hidden", activeTab !== "register");
     els.sessionPanel.classList.add("hidden");
+    els.accountLayout.classList.add("public-mode");
+    els.accountPrivate.classList.add("hidden");
     els.sessionEmail.textContent = "-";
     els.logoutButton.classList.add("hidden");
     els.accountStatus.innerHTML = '<span class="badge-dot"></span><div><strong>未登录</strong><small>注册或登录后开放下载入口</small></div>';
