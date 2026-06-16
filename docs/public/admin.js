@@ -88,9 +88,20 @@
 
   async function refreshAll() {
     await runAdminAction("正在连接管理员 API...", async () => {
-      await Promise.all([loadCodes(), loadLicenses(), loadReleases()]);
+      const results = await Promise.allSettled([loadCodes(), loadLicenses(), loadReleases()]);
+      const rejected = results.filter((item) => item.status === "rejected");
+      const tokenError = rejected.find((item) => item.reason && item.reason.code === "admin_token_required");
+      if (tokenError) {
+        throw tokenError.reason;
+      }
+      if (rejected.some((item) => item.reason && item.reason.code === "not_found")) {
+        renderTable(els.releasesTable, [], []);
+        setMessage("基础管理员接口已连接；发行包接口需要重新部署 Cloudflare Worker 后可用。", "warn");
+      }
       renderStatus(true);
-      setMessage("管理员 API 已连接。", "success");
+      if (!rejected.length) {
+        setMessage("管理员 API 已连接。", "success");
+      }
     });
   }
 
