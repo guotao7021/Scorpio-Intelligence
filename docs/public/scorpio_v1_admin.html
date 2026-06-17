@@ -72,6 +72,11 @@
 
     <section class="admin-metrics" aria-label="运营概览">
       <article>
+        <span>客户台账</span>
+        <strong id="metricCustomers">-</strong>
+        <small id="metricCustomersMeta">等待连接</small>
+      </article>
+      <article>
         <span>授权码</span>
         <strong id="metricCodes">-</strong>
         <small id="metricCodesMeta">等待连接</small>
@@ -133,12 +138,52 @@
         <article class="admin-card admin-primary-card">
           <div class="admin-card-head">
             <div class="admin-card-title">
+              <span>Customer Ledger</span>
+              <h2>客户台账</h2>
+            </div>
+            <button class="button secondary sm" id="refreshCustomersButton" type="button">刷新客户</button>
+          </div>
+          <form class="admin-form admin-form-compact" id="customerForm">
+            <label>客户名称<input name="customer_name" type="text" placeholder="客户或公司名称"></label>
+            <label>客户邮箱<input name="customer_email" type="email" placeholder="用于绑定网站账号"></label>
+            <label>版本
+              <select name="edition">
+                <option value="personal_pro">personal_pro</option>
+                <option value="personal_standard">personal_standard</option>
+                <option value="team">team</option>
+                <option value="enterprise">enterprise</option>
+              </select>
+            </label>
+            <label>有效天数<input name="license_days" type="number" min="1" value="365"></label>
+            <label>客户状态
+              <select name="status">
+                <option value="draft">草稿</option>
+                <option value="active">活跃</option>
+                <option value="issued">已交付</option>
+                <option value="suspended">暂停</option>
+                <option value="cancelled">取消</option>
+              </select>
+            </label>
+            <label>预绑定机器<input name="machine_fingerprint_prebind" type="text" placeholder="可选"></label>
+            <label class="wide">备注<textarea name="notes" rows="3" placeholder="销售来源、交付说明、风险备注等"></textarea></label>
+            <button class="button primary sm" type="submit">保存客户</button>
+          </form>
+        </article>
+
+        <article class="admin-card admin-primary-card">
+          <div class="admin-card-head">
+            <div class="admin-card-title">
               <span>Activation Codes</span>
               <h2>生成客户授权码</h2>
             </div>
             <button class="button secondary sm" id="refreshCodesButton" type="button">刷新授权码</button>
           </div>
           <form class="admin-form admin-form-compact" id="codeForm">
+            <label>选择客户
+              <select name="customer_id" id="codeCustomerSelect">
+                <option value="">不关联台账</option>
+              </select>
+            </label>
             <label>客户邮箱<input name="email" type="email" placeholder="可选，用于绑定客户"></label>
             <label>客户名称<input name="customer_name" type="text" placeholder="可选"></label>
             <label>版本
@@ -196,11 +241,13 @@
             <button class="button secondary sm" id="refreshAllButton" type="button">全部刷新</button>
           </div>
           <div class="admin-tabs" role="tablist" aria-label="管理员数据表">
-            <button class="auth-tab active" type="button" data-admin-tab="codes">授权码</button>
+            <button class="auth-tab active" type="button" data-admin-tab="customers">客户台账</button>
+            <button class="auth-tab" type="button" data-admin-tab="codes">授权码</button>
             <button class="auth-tab" type="button" data-admin-tab="licenses">授权记录</button>
             <button class="auth-tab" type="button" data-admin-tab="releases">发行包</button>
           </div>
-          <div class="admin-table" id="codesTable"></div>
+          <div class="admin-table" id="customersTable"></div>
+          <div class="admin-table hidden" id="codesTable"></div>
           <div class="admin-table hidden" id="licensesTable"></div>
           <div class="admin-table hidden" id="releasesTable"></div>
         </article>

@@ -5,6 +5,7 @@
 
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || "",
+    customers: [],
     codes: [],
     licenses: [],
     releases: [],
@@ -23,15 +24,21 @@
     saveTokenButton: byId("saveTokenButton"),
     clearTokenButton: byId("clearTokenButton"),
     adminMessage: byId("adminMessage"),
+    customerForm: byId("customerForm"),
     codeForm: byId("codeForm"),
+    codeCustomerSelect: byId("codeCustomerSelect"),
     releaseForm: byId("releaseForm"),
     generatedCodes: byId("generatedCodes"),
+    refreshCustomersButton: byId("refreshCustomersButton"),
     refreshCodesButton: byId("refreshCodesButton"),
     refreshReleasesButton: byId("refreshReleasesButton"),
     refreshAllButton: byId("refreshAllButton"),
+    customersTable: byId("customersTable"),
     codesTable: byId("codesTable"),
     licensesTable: byId("licensesTable"),
     releasesTable: byId("releasesTable"),
+    metricCustomers: byId("metricCustomers"),
+    metricCustomersMeta: byId("metricCustomersMeta"),
     metricCodes: byId("metricCodes"),
     metricCodesMeta: byId("metricCodesMeta"),
     metricLicenses: byId("metricLicenses"),
@@ -88,15 +95,29 @@
     clearSession("已清除本地 Token。");
   });
 
+  els.customerForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await runAdminAction("正在保存客户台账...", async () => {
+      const payload = formPayload(els.customerForm);
+      payload.license_days = Number(payload.license_days || 365);
+      const result = await apiPost(`${ADMIN_PATH}/customers`, payload);
+      await loadCustomers();
+      renderMetrics();
+      setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}`, "success");
+    });
+  });
+
   els.codeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await runAdminAction("正在生成授权码...", async () => {
       const payload = formPayload(els.codeForm);
+      payload.customer_id = payload.customer_id ? Number(payload.customer_id) : undefined;
       payload.count = Number(payload.count || 1);
       payload.license_days = Number(payload.license_days || 365);
       payload.max_devices = Number(payload.max_devices || 1);
       const result = await apiPost(`${ADMIN_PATH}/activation-codes`, payload);
       renderGeneratedCodes(result.codes || []);
+      await loadCustomers();
       await loadCodes();
       renderMetrics();
       setMessage("授权码已生成，并已刷新列表。", "success");
@@ -118,6 +139,10 @@
 
   els.refreshCodesButton.addEventListener("click", () => runAdminAction("正在刷新授权码...", async () => {
     await loadCodes();
+    renderMetrics();
+  }));
+  els.refreshCustomersButton.addEventListener("click", () => runAdminAction("正在刷新客户台账...", async () => {
+    await loadCustomers();
     renderMetrics();
   }));
   els.refreshReleasesButton.addEventListener("click", () => runAdminAction("正在刷新发行包...", async () => {
@@ -150,7 +175,7 @@
 
   async function refreshAll() {
     return runAdminAction("正在连接管理员 API...", async () => {
-      const results = await Promise.allSettled([loadCodes(), loadLicenses(), loadReleases()]);
+      const results = await Promise.allSettled([loadCustomers(), loadCodes(), loadLicenses(), loadReleases()]);
       const rejected = results.filter((item) => item.status === "rejected");
       const tokenError = rejected.find((item) => item.reason && item.reason.code === "admin_token_required");
       if (tokenError) {
@@ -167,6 +192,13 @@
       }
       setMessage("管理员 API 已连接。", "success");
     });
+  }
+
+  async function loadCustomers() {
+    const data = await apiGet(`${ADMIN_PATH}/customers`);
+    state.customers = data.results || [];
+    renderCustomers();
+    renderCustomerOptions();
   }
 
   async function loadCodes() {
@@ -188,18 +220,49 @@
   }
 
   function renderAllTables() {
+    renderCustomers();
     renderCodes();
     renderLicenses();
     renderReleases();
+    renderCustomerOptions();
+  }
+
+  function renderCustomers() {
+    renderTable(els.customersTable, ["客户", "邮箱", "版本", "天数", "状态", "授权码", "已使用", "最近发码", "更新时间"], state.customers.map((row) => [
+      row.customer_name || "-",
+      row.customer_email || "-",
+      row.edition || "-",
+      row.license_days || "-",
+      customerStatusLabel(row.status),
+      row.activation_code_count || 0,
+      row.used_code_count || 0,
+      formatDate(row.latest_code_created_at),
+      formatDate(row.updated_at),
+    ]));
+  }
+
+  function renderCustomerOptions() {
+    const selected = els.codeCustomerSelect.value;
+    els.codeCustomerSelect.innerHTML = [
+      '<option value="">不关联台账</option>',
+      ...state.customers.map((row) => {
+        const label = `${row.customer_name || row.customer_email || `客户#${row.id}`} ${row.customer_email ? `(${row.customer_email})` : ""}`;
+        return `<option value="${escapeHtml(row.id)}">${escapeHtml(label)}</option>`;
+      }),
+    ].join("");
+    if ([...els.codeCustomerSelect.options].some((option) => option.value === selected)) {
+      els.codeCustomerSelect.value = selected;
+    }
   }
 
   function renderCodes() {
-    renderTable(els.codesTable, ["授权码", "版本", "天数", "设备", "状态", "客户邮箱", "创建时间", "使用时间"], state.codes.map((row) => [
+    renderTable(els.codesTable, ["授权码", "版本", "天数", "设备", "状态", "客户", "客户邮箱", "创建时间", "使用时间"], state.codes.map((row) => [
       row.code,
       row.edition,
       row.license_days,
       row.max_devices,
       statusLabel(row.status),
+      row.customer_name || (row.customer_id ? `客户#${row.customer_id}` : "-"),
       row.customer_email || "-",
       formatDate(row.created_at),
       formatDate(row.used_at),
@@ -232,11 +295,14 @@
   }
 
   function renderMetrics() {
+    const activeCustomers = state.customers.filter((row) => ["active", "issued"].includes(row.status)).length;
     const activeCodes = state.codes.filter((row) => row.status === "active" || row.status === "assigned").length;
     const usedCodes = state.codes.filter((row) => row.status === "used").length;
     const activeLicenses = state.licenses.filter((row) => row.is_active && !row.revoked).length;
     const latestRelease = state.releases[0];
 
+    els.metricCustomers.textContent = state.customers.length ? String(state.customers.length) : "-";
+    els.metricCustomersMeta.textContent = state.customers.length ? `活跃/已交付 ${activeCustomers}` : "等待连接";
     els.metricCodes.textContent = state.codes.length ? String(state.codes.length) : "-";
     els.metricCodesMeta.textContent = state.codes.length ? `可用 ${activeCodes} / 已用 ${usedCodes}` : "等待连接";
     els.metricLicenses.textContent = state.licenses.length ? String(activeLicenses) : "-";
@@ -320,6 +386,7 @@
 
   function clearSession(message) {
     state.token = "";
+    state.customers = [];
     state.codes = [];
     state.licenses = [];
     state.releases = [];
@@ -367,6 +434,7 @@
       button.classList.toggle("active", button.dataset.adminTab === tab);
     });
     els.codesTable.classList.toggle("hidden", tab !== "codes");
+    els.customersTable.classList.toggle("hidden", tab !== "customers");
     els.licensesTable.classList.toggle("hidden", tab !== "licenses");
     els.releasesTable.classList.toggle("hidden", tab !== "releases");
   }
@@ -401,6 +469,11 @@
 
   function statusLabel(status) {
     const map = { active: "可用", assigned: "已分配", used: "已使用", revoked: "已撤销" };
+    return map[status] || status || "-";
+  }
+
+  function customerStatusLabel(status) {
+    const map = { draft: "草稿", active: "活跃", issued: "已交付", suspended: "暂停", cancelled: "取消" };
     return map[status] || status || "-";
   }
 

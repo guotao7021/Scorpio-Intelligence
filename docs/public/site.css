@@ -1147,7 +1147,7 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 
 .admin-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -1267,7 +1267,7 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 }
 
 .admin-table table {
-  min-width: 900px;
+  min-width: 1060px;
 }
 @media (max-width: 900px) {
   .site-header { position: static; align-items: flex-start; flex-direction: column; }
