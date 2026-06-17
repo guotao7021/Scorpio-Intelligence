@@ -144,6 +144,7 @@
             <button class="button secondary sm" id="refreshCustomersButton" type="button">刷新客户</button>
           </div>
           <form class="admin-form admin-form-compact" id="customerForm">
+            <input name="customer_id" id="customerId" type="hidden">
             <label>客户名称<input name="customer_name" type="text" placeholder="客户或公司名称"></label>
             <label>客户邮箱<input name="customer_email" type="email" placeholder="用于绑定网站账号"></label>
             <label>版本
@@ -166,7 +167,10 @@
             </label>
             <label>预绑定机器<input name="machine_fingerprint_prebind" type="text" placeholder="可选"></label>
             <label class="wide">备注<textarea name="notes" rows="3" placeholder="销售来源、交付说明、风险备注等"></textarea></label>
-            <button class="button primary sm" type="submit">保存客户</button>
+            <div class="form-actions wide">
+              <button class="button primary sm" id="customerSubmitButton" type="submit">保存客户</button>
+              <button class="button secondary sm" id="clearCustomerFormButton" type="button">新建/清空</button>
+            </div>
           </form>
         </article>
 
@@ -245,6 +249,23 @@
             <button class="auth-tab" type="button" data-admin-tab="codes">授权码</button>
             <button class="auth-tab" type="button" data-admin-tab="licenses">授权记录</button>
             <button class="auth-tab" type="button" data-admin-tab="releases">发行包</button>
+          </div>
+          <div class="admin-table-toolbar" id="customerTableToolbar">
+            <label>
+              <span>搜索客户</span>
+              <input id="customerSearch" type="search" placeholder="客户名 / 邮箱 / 备注">
+            </label>
+            <label>
+              <span>状态</span>
+              <select id="customerStatusFilter">
+                <option value="">全部状态</option>
+                <option value="draft">草稿</option>
+                <option value="active">活跃</option>
+                <option value="issued">已交付</option>
+                <option value="suspended">暂停</option>
+                <option value="cancelled">取消</option>
+              </select>
+            </label>
           </div>
           <div class="admin-table" id="customersTable"></div>
           <div class="admin-table hidden" id="codesTable"></div>

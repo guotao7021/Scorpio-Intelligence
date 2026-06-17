@@ -885,6 +885,35 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 .admin-table {
   margin-top: 16px;
 }
+.admin-table-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 180px;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(125, 211, 252, 0.12);
+  border-radius: 8px;
+  background: rgba(7, 11, 22, 0.28);
+}
+.admin-table-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+.admin-table-toolbar span {
+  color: rgba(244, 241, 248, 0.56);
+  font-size: 12px;
+  font-weight: 800;
+}
+.admin-table-toolbar input,
+.admin-table-toolbar select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--white);
+  background: rgba(6, 10, 20, 0.72);
+}
 .admin-table-scroll {
   overflow-x: auto;
   border: 1px solid rgba(125, 211, 252, 0.14);
@@ -917,6 +946,35 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 .admin-table tr:last-child td {
   border-bottom: 0;
 }
+.table-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+.text-action {
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--constellation);
+  background: rgba(18, 27, 47, 0.82);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.text-action:hover {
+  border-color: rgba(56, 189, 248, 0.66);
+  background: rgba(14, 116, 144, 0.22);
+}
+.text-action.danger {
+  color: #ff6b8a;
+  border-color: rgba(255, 107, 138, 0.26);
+}
+.text-action.danger:hover {
+  border-color: rgba(255, 107, 138, 0.68);
+  background: rgba(127, 29, 29, 0.24);
+}
 .empty-state {
   min-height: 92px;
   display: grid;
@@ -925,6 +983,12 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   border-radius: 8px;
   color: rgba(244, 241, 248, 0.52);
   background: rgba(7, 11, 22, 0.34);
+}
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 
 .admin-page {

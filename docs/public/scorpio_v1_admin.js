@@ -9,6 +9,8 @@
     codes: [],
     licenses: [],
     releases: [],
+    customerQuery: "",
+    customerStatus: "",
   };
 
   const els = {
@@ -25,6 +27,9 @@
     clearTokenButton: byId("clearTokenButton"),
     adminMessage: byId("adminMessage"),
     customerForm: byId("customerForm"),
+    customerId: byId("customerId"),
+    customerSubmitButton: byId("customerSubmitButton"),
+    clearCustomerFormButton: byId("clearCustomerFormButton"),
     codeForm: byId("codeForm"),
     codeCustomerSelect: byId("codeCustomerSelect"),
     releaseForm: byId("releaseForm"),
@@ -33,6 +38,9 @@
     refreshCodesButton: byId("refreshCodesButton"),
     refreshReleasesButton: byId("refreshReleasesButton"),
     refreshAllButton: byId("refreshAllButton"),
+    customerTableToolbar: byId("customerTableToolbar"),
+    customerSearch: byId("customerSearch"),
+    customerStatusFilter: byId("customerStatusFilter"),
     customersTable: byId("customersTable"),
     codesTable: byId("codesTable"),
     licensesTable: byId("licensesTable"),
@@ -100,11 +108,34 @@
     await runAdminAction("正在保存客户台账...", async () => {
       const payload = formPayload(els.customerForm);
       payload.license_days = Number(payload.license_days || 365);
-      const result = await apiPost(`${ADMIN_PATH}/customers`, payload);
+      const customerId = Number(payload.customer_id || 0);
+      delete payload.customer_id;
+      const result = customerId > 0
+        ? await apiPut(`${ADMIN_PATH}/customers/${customerId}`, payload)
+        : await apiPost(`${ADMIN_PATH}/customers`, payload);
       await loadCustomers();
       renderMetrics();
+      clearCustomerForm();
       setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}`, "success");
     });
+  });
+
+  els.clearCustomerFormButton.addEventListener("click", () => {
+    clearCustomerForm();
+    setMessage("已切换为新建客户模式。", "success");
+  });
+
+  els.customersTable.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-customer-action]");
+    if (!button) return;
+    const customerId = Number(button.dataset.customerId || 0);
+    if (button.dataset.customerAction === "edit") {
+      editCustomer(customerId);
+      return;
+    }
+    if (button.dataset.customerAction === "delete") {
+      await deleteCustomer(customerId);
+    }
   });
 
   els.codeForm.addEventListener("submit", async (event) => {
@@ -150,6 +181,14 @@
     renderMetrics();
   }));
   els.refreshAllButton.addEventListener("click", refreshAll);
+  els.customerSearch.addEventListener("input", () => {
+    state.customerQuery = els.customerSearch.value.trim().toLowerCase();
+    renderCustomers();
+  });
+  els.customerStatusFilter.addEventListener("change", () => {
+    state.customerStatus = els.customerStatusFilter.value;
+    renderCustomers();
+  });
 
   document.querySelectorAll("[data-admin-tab]").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.adminTab));
@@ -228,17 +267,67 @@
   }
 
   function renderCustomers() {
-    renderTable(els.customersTable, ["客户", "邮箱", "版本", "天数", "状态", "授权码", "已使用", "最近发码", "更新时间"], state.customers.map((row) => [
-      row.customer_name || "-",
-      row.customer_email || "-",
-      row.edition || "-",
-      row.license_days || "-",
-      customerStatusLabel(row.status),
-      row.activation_code_count || 0,
-      row.used_code_count || 0,
-      formatDate(row.latest_code_created_at),
-      formatDate(row.updated_at),
-    ]));
+    const rows = state.customers.filter((row) => {
+      const matchesStatus = !state.customerStatus || row.status === state.customerStatus;
+      const haystack = [
+        row.customer_name,
+        row.customer_email,
+        row.edition,
+        row.status,
+        row.notes,
+      ].join(" ").toLowerCase();
+      const matchesQuery = !state.customerQuery || haystack.includes(state.customerQuery);
+      return matchesStatus && matchesQuery;
+    });
+    if (!state.customers.length) {
+      els.customersTable.innerHTML = '<div class="empty-state">暂无客户台账。新增测试客户后会在这里维护。</div>';
+      return;
+    }
+    if (!rows.length) {
+      els.customersTable.innerHTML = '<div class="empty-state">没有匹配的客户记录。请调整搜索条件或状态过滤。</div>';
+      return;
+    }
+    els.customersTable.innerHTML = `
+      <div class="admin-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>客户</th>
+              <th>邮箱</th>
+              <th>版本</th>
+              <th>天数</th>
+              <th>状态</th>
+              <th>授权码</th>
+              <th>已使用</th>
+              <th>最近发码</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td><strong>${escapeHtml(row.customer_name || `客户#${row.id}`)}</strong></td>
+                <td>${escapeHtml(row.customer_email || "-")}</td>
+                <td>${escapeHtml(row.edition || "-")}</td>
+                <td>${escapeHtml(row.license_days || "-")}</td>
+                <td>${escapeHtml(customerStatusLabel(row.status))}</td>
+                <td>${escapeHtml(row.activation_code_count || 0)}</td>
+                <td>${escapeHtml(row.used_code_count || 0)}</td>
+                <td>${escapeHtml(formatDate(row.latest_code_created_at))}</td>
+                <td>${escapeHtml(formatDate(row.updated_at))}</td>
+                <td>
+                  <div class="table-actions">
+                    <button class="text-action" type="button" data-customer-action="edit" data-customer-id="${escapeHtml(row.id)}">编辑</button>
+                    <button class="text-action danger" type="button" data-customer-action="delete" data-customer-id="${escapeHtml(row.id)}">删除</button>
+                  </div>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   function renderCustomerOptions() {
@@ -253,6 +342,59 @@
     if ([...els.codeCustomerSelect.options].some((option) => option.value === selected)) {
       els.codeCustomerSelect.value = selected;
     }
+  }
+
+  function editCustomer(customerId) {
+    const row = state.customers.find((item) => Number(item.id) === Number(customerId));
+    if (!row) {
+      setMessage("未找到这条客户记录，请刷新客户台账后重试。", "warn");
+      return;
+    }
+    const fields = els.customerForm.elements;
+    fields.customer_id.value = row.id || "";
+    fields.customer_name.value = row.customer_name || "";
+    fields.customer_email.value = row.customer_email || "";
+    fields.edition.value = row.edition || "personal_pro";
+    fields.license_days.value = row.license_days || 365;
+    fields.status.value = row.status || "draft";
+    fields.machine_fingerprint_prebind.value = row.machine_fingerprint_prebind || "";
+    fields.notes.value = row.notes || "";
+    els.customerSubmitButton.textContent = "更新客户";
+    setMessage(`正在编辑客户：${row.customer_name || row.customer_email || row.id}`, "success");
+    els.customerForm.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function clearCustomerForm() {
+    els.customerForm.reset();
+    els.customerId.value = "";
+    els.customerForm.elements.edition.value = "personal_pro";
+    els.customerForm.elements.license_days.value = 365;
+    els.customerForm.elements.status.value = "draft";
+    els.customerSubmitButton.textContent = "保存客户";
+  }
+
+  async function deleteCustomer(customerId) {
+    const row = state.customers.find((item) => Number(item.id) === Number(customerId));
+    if (!row) {
+      setMessage("未找到这条客户记录，请刷新客户台账后重试。", "warn");
+      return;
+    }
+    const label = row.customer_name || row.customer_email || `客户#${row.id}`;
+    const codeCount = Number(row.activation_code_count || 0);
+    const prompt = codeCount > 0
+      ? `${label} 已有关联授权码，不能硬删除。建议编辑状态为暂停或取消。仍要请求删除吗？`
+      : `确认删除测试客户 ${label}？此操作只适合清理未关联授权码的测试数据。`;
+    if (!window.confirm(prompt)) return;
+
+    await runAdminAction("正在删除客户记录...", async () => {
+      await apiDelete(`${ADMIN_PATH}/customers/${customerId}`);
+      await loadCustomers();
+      renderMetrics();
+      if (Number(els.customerId.value || 0) === Number(customerId)) {
+        clearCustomerForm();
+      }
+      setMessage(`客户已删除：${label}`, "success");
+    });
   }
 
   function renderCodes() {
@@ -324,6 +466,21 @@
       method: "POST",
       headers: { ...adminHeaders(), "content-type": "application/json" },
       body: JSON.stringify(body),
+    }));
+  }
+
+  async function apiPut(path, body) {
+    return parseResponse(await fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers: { ...adminHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+  }
+
+  async function apiDelete(path) {
+    return parseResponse(await fetch(`${API_BASE}${path}`, {
+      method: "DELETE",
+      headers: adminHeaders(),
     }));
   }
 
@@ -433,6 +590,7 @@
     document.querySelectorAll("[data-admin-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.adminTab === tab);
     });
+    els.customerTableToolbar.classList.toggle("hidden", tab !== "customers");
     els.codesTable.classList.toggle("hidden", tab !== "codes");
     els.customersTable.classList.toggle("hidden", tab !== "customers");
     els.licensesTable.classList.toggle("hidden", tab !== "licenses");
@@ -489,6 +647,11 @@
       version_required: "请填写安装包版本号。",
       download_url_https_required: "下载地址必须使用 https://。",
       not_found: "当前 API 版本还没有部署对应管理员接口，请先重新部署 Cloudflare Worker。",
+      customer_id_invalid: "客户 ID 无效，请刷新台账后重试。",
+      customer_not_found: "客户记录不存在，可能已被删除，请刷新台账。",
+      customer_identity_required: "客户名称和客户邮箱至少填写一项。",
+      email_invalid: "客户邮箱格式不正确。",
+      customer_has_activation_codes: "该客户已有授权码或授权记录，不能硬删除；请编辑状态为暂停或取消。",
       "failed to fetch": "管理员登录校验失败，请确认官网域名已生效，或稍后重试。",
       failed_to_fetch: "管理员登录校验失败，请确认官网域名已生效，或稍后重试。",
     };
