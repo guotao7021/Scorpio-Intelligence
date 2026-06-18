@@ -138,6 +138,41 @@
     }
   });
 
+  els.codesTable.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-code-action]");
+    if (!button) return;
+    const code = button.dataset.code || "";
+    if (button.dataset.codeAction === "copy") {
+      await copyText(code);
+      setMessage(`授权码已复制：${code}`, "success");
+      return;
+    }
+    if (button.dataset.codeAction === "edit") {
+      await editActivationCode(code);
+      return;
+    }
+    if (button.dataset.codeAction === "revoke") {
+      await revokeActivationCode(code);
+    }
+  });
+
+  els.licensesTable.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-license-action]");
+    if (!button) return;
+    const licenseId = button.dataset.licenseId || "";
+    if (button.dataset.licenseAction === "extend") {
+      await extendLicense(licenseId);
+      return;
+    }
+    if (button.dataset.licenseAction === "revoke") {
+      await revokeLicense(licenseId);
+      return;
+    }
+    if (button.dataset.licenseAction === "restore") {
+      await restoreLicense(licenseId);
+    }
+  });
+
   els.codeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await runAdminAction("正在生成授权码...", async () => {
@@ -382,46 +417,208 @@
     const label = row.customer_name || row.customer_email || `客户#${row.id}`;
     const codeCount = Number(row.activation_code_count || 0);
     const prompt = codeCount > 0
-      ? `${label} 已有关联授权码，不能硬删除。建议编辑状态为暂停或取消。仍要请求删除吗？`
-      : `确认删除测试客户 ${label}？此操作只适合清理未关联授权码的测试数据。`;
+      ? `${label} 已有关联授权码，将改为“已取消/归档”，保留审计链路。确认处理？`
+      : `确认删除测试客户 ${label}？`;
     if (!window.confirm(prompt)) return;
 
-    await runAdminAction("正在删除客户记录...", async () => {
-      await apiDelete(`${ADMIN_PATH}/customers/${customerId}`);
+    await runAdminAction("正在处理客户记录...", async () => {
+      const result = await apiDelete(`${ADMIN_PATH}/customers/${customerId}`);
       await loadCustomers();
       renderMetrics();
       if (Number(els.customerId.value || 0) === Number(customerId)) {
         clearCustomerForm();
       }
-      setMessage(`客户已删除：${label}`, "success");
+      setMessage(result.archived ? `客户已归档：${label}` : `客户已删除：${label}`, "success");
     });
   }
 
   function renderCodes() {
-    renderTable(els.codesTable, ["授权码", "版本", "天数", "设备", "状态", "客户", "客户邮箱", "创建时间", "使用时间"], state.codes.map((row) => [
-      row.code,
-      row.edition,
-      row.license_days,
-      row.max_devices,
-      statusLabel(row.status),
-      row.customer_name || (row.customer_id ? `客户#${row.customer_id}` : "-"),
-      row.customer_email || "-",
-      formatDate(row.created_at),
-      formatDate(row.used_at),
-    ]));
+    if (!state.codes.length) {
+      els.codesTable.innerHTML = '<div class="empty-state">暂无授权码</div>';
+      return;
+    }
+    els.codesTable.innerHTML = `
+      <div class="admin-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>授权码</th>
+              <th>版本</th>
+              <th>天数</th>
+              <th>设备</th>
+              <th>状态</th>
+              <th>客户</th>
+              <th>客户邮箱</th>
+              <th>创建时间</th>
+              <th>使用时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.codes.map((row) => `
+              <tr>
+                <td><strong>${escapeHtml(row.code)}</strong></td>
+                <td>${escapeHtml(row.edition || "-")}</td>
+                <td>${escapeHtml(row.license_days || "-")}</td>
+                <td>${escapeHtml(row.max_devices || "-")}</td>
+                <td>${escapeHtml(statusLabel(row.status))}</td>
+                <td>${escapeHtml(row.customer_name || (row.customer_id ? `客户#${row.customer_id}` : "-"))}</td>
+                <td>${escapeHtml(row.customer_email || "-")}</td>
+                <td>${escapeHtml(formatDate(row.created_at))}</td>
+                <td>${escapeHtml(formatDate(row.used_at))}</td>
+                <td>
+                  <div class="table-actions">
+                    <button class="text-action" type="button" data-code-action="copy" data-code="${escapeHtml(row.code)}">复制</button>
+                    <button class="text-action" type="button" data-code-action="edit" data-code="${escapeHtml(row.code)}">编辑</button>
+                    <button class="text-action danger" type="button" data-code-action="revoke" data-code="${escapeHtml(row.code)}" ${row.status === "used" ? "disabled" : ""}>撤销</button>
+                  </div>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   function renderLicenses() {
-    renderTable(els.licensesTable, ["授权 ID", "版本", "邮箱", "机器指纹", "到期", "有效", "审批", "最近在线"], state.licenses.map((row) => [
-      shortText(row.license_id, 18),
-      row.edition,
-      row.email || "-",
-      shortText(row.machine_fingerprint || "-", 22),
-      formatDate(row.expires_at),
-      row.revoked ? "已撤销" : row.is_active ? "有效" : "停用",
-      row.approval_status || "-",
-      formatDate(row.last_online_check),
-    ]));
+    if (!state.licenses.length) {
+      els.licensesTable.innerHTML = '<div class="empty-state">暂无授权记录</div>';
+      return;
+    }
+    els.licensesTable.innerHTML = `
+      <div class="admin-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>授权 ID</th>
+              <th>授权码</th>
+              <th>版本</th>
+              <th>客户邮箱</th>
+              <th>机器指纹</th>
+              <th>到期时间</th>
+              <th>状态</th>
+              <th>审批</th>
+              <th>最近在线</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.licenses.map((row) => `
+              <tr>
+                <td><strong>${escapeHtml(shortText(row.license_id, 20))}</strong></td>
+                <td>${escapeHtml(row.activation_code || "-")}</td>
+                <td>${escapeHtml(row.edition || "-")}</td>
+                <td>${escapeHtml(row.email || "-")}</td>
+                <td>${escapeHtml(shortText(row.machine_fingerprint || "-", 22))}</td>
+                <td>${escapeHtml(formatDate(row.expires_at))}</td>
+                <td>${escapeHtml(row.revoked ? "已撤销" : row.is_active ? "有效" : "停用")}</td>
+                <td>${escapeHtml(row.approval_status || "-")}</td>
+                <td>${escapeHtml(formatDate(row.last_online_check))}</td>
+                <td>
+                  <div class="table-actions">
+                    <button class="text-action" type="button" data-license-action="extend" data-license-id="${escapeHtml(row.license_id)}">延期</button>
+                    ${row.revoked
+                      ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeHtml(row.license_id)}">恢复</button>`
+                      : `<button class="text-action danger" type="button" data-license-action="revoke" data-license-id="${escapeHtml(row.license_id)}">撤销</button>`}
+                  </div>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function editActivationCode(code) {
+    const row = state.codes.find((item) => item.code === code);
+    if (!row) return;
+    const days = window.prompt("授权天数。已使用的授权码不会反向修改已签发授权。", row.license_days || 365);
+    if (days === null) return;
+    const maxDevices = window.prompt("设备数。已使用的授权码不会反向修改已签发授权。", row.max_devices || 1);
+    if (maxDevices === null) return;
+    const status = row.status === "used" ? "used" : (window.prompt("状态：active / assigned / suspended / revoked", row.status || "active") || row.status);
+    await runAdminAction("正在更新授权码...", async () => {
+      await apiPut(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}`, {
+        license_days: Number(days || row.license_days || 365),
+        max_devices: Number(maxDevices || row.max_devices || 1),
+        status,
+        customer_name: row.customer_name || "",
+        customer_email: row.customer_email || "",
+        machine_fingerprint_prebind: row.machine_fingerprint_prebind || "",
+        notes: row.notes || "",
+      });
+      await loadCodes();
+      renderMetrics();
+      setMessage("授权码已更新。已签发授权请在“授权记录”中单独延期或撤销。", "success");
+    });
+  }
+
+  async function revokeActivationCode(code) {
+    const row = state.codes.find((item) => item.code === code);
+    if (!row) return;
+    if (row.status === "used") {
+      setMessage("已使用授权码不能直接撤销，请在授权记录中撤销或延期对应授权。", "warn");
+      return;
+    }
+    if (!window.confirm(`确认撤销授权码 ${code}？`)) return;
+    await runAdminAction("正在撤销授权码...", async () => {
+      await apiDelete(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}`);
+      await loadCodes();
+      renderMetrics();
+      setMessage(`授权码已撤销：${code}`, "success");
+    });
+  }
+
+  async function extendLicense(licenseId) {
+    const row = state.licenses.find((item) => item.license_id === licenseId);
+    if (!row) return;
+    const days = window.prompt("从当前到期日继续延期天数", "30");
+    if (days === null) return;
+    const value = Number(days);
+    if (!Number.isFinite(value) || value <= 0) {
+      setMessage("延期天数必须大于 0。", "warn");
+      return;
+    }
+    await runAdminAction("正在延期并重新签名授权...", async () => {
+      await apiPut(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`, {
+        extend_days: value,
+        is_active: true,
+        revoked: false,
+        approval_status: row.approval_status || "auto",
+      });
+      await loadLicenses();
+      renderMetrics();
+      setMessage("授权已延期并重新签名。客户端在线校验或刷新授权后生效。", "success");
+    });
+  }
+
+  async function revokeLicense(licenseId) {
+    if (!window.confirm(`确认撤销授权 ${licenseId}？`)) return;
+    await runAdminAction("正在撤销授权...", async () => {
+      await apiDelete(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`);
+      await loadLicenses();
+      renderMetrics();
+      setMessage("授权已撤销。", "success");
+    });
+  }
+
+  async function restoreLicense(licenseId) {
+    const row = state.licenses.find((item) => item.license_id === licenseId);
+    if (!row) return;
+    await runAdminAction("正在恢复并重新签名授权...", async () => {
+      await apiPut(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`, {
+        expires_at: String(row.expires_at || "").slice(0, 10) || undefined,
+        is_active: true,
+        revoked: false,
+        revoke_reason: "",
+        approval_status: row.approval_status || "auto",
+      });
+      await loadLicenses();
+      renderMetrics();
+      setMessage("授权已恢复。", "success");
+    });
   }
 
   function renderReleases() {
@@ -569,6 +766,22 @@
     els.generatedCodes.innerHTML = codes.length
       ? `<strong>本次生成</strong><pre>${escapeHtml(codes.join("\n"))}</pre>`
       : "";
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
   }
 
   function renderTable(container, headers, rows) {

@@ -967,6 +967,14 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   border-color: rgba(56, 189, 248, 0.66);
   background: rgba(14, 116, 144, 0.22);
 }
+.text-action:disabled,
+.text-action:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.42;
+  color: rgba(244, 241, 248, 0.48);
+  border-color: rgba(125, 211, 252, 0.12);
+  background: rgba(18, 27, 47, 0.5);
+}
 .text-action.danger {
   color: #ff6b8a;
   border-color: rgba(255, 107, 138, 0.26);
