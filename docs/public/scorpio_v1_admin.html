@@ -7,7 +7,7 @@
   <title>管理员后台 | Scorpio Intelligence</title>
   <meta name="description" content="Scorpio Intelligence 管理员后台，用于授权码、授权记录与安装包发行管理。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260616-admin-pro">
+  <link rel="stylesheet" href="site.css?v=20260619-admin-usability">
 </head>
 <body class="admin-page">
   <section class="admin-login" id="adminLogin">
@@ -242,7 +242,10 @@
               <span>Operations</span>
               <h2>运营数据</h2>
             </div>
-            <button class="button secondary sm" id="refreshAllButton" type="button">全部刷新</button>
+            <div class="admin-card-tools">
+              <label class="admin-toggle"><input id="showTestRecordsToggle" type="checkbox"> 显示测试记录</label>
+              <button class="button secondary sm" id="refreshAllButton" type="button">全部刷新</button>
+            </div>
           </div>
           <div class="admin-tabs" role="tablist" aria-label="管理员数据表">
             <button class="auth-tab active" type="button" data-admin-tab="customers">客户台账</button>
@@ -282,6 +285,6 @@
     </section>
   </main>
 
-  <script src="scorpio_v1_admin.js?v=20260616-admin-pro"></script>
+  <script src="scorpio_v1_admin.js?v=20260619-admin-usability"></script>
 </body>
 </html>

@@ -15,6 +15,7 @@
     analysisRequests: [],
     customerQuery: "",
     customerStatus: "",
+    showTestRecords: false,
   };
 
   const els = {
@@ -42,6 +43,7 @@
     refreshCodesButton: byId("refreshCodesButton"),
     refreshReleasesButton: byId("refreshReleasesButton"),
     refreshAllButton: byId("refreshAllButton"),
+    showTestRecordsToggle: byId("showTestRecordsToggle"),
     customerTableToolbar: byId("customerTableToolbar"),
     customerSearch: byId("customerSearch"),
     customerStatusFilter: byId("customerStatusFilter"),
@@ -233,6 +235,11 @@
     renderMetrics();
   }));
   els.refreshAllButton.addEventListener("click", refreshAll);
+  els.showTestRecordsToggle.addEventListener("change", () => {
+    state.showTestRecords = els.showTestRecordsToggle.checked;
+    renderAllTables();
+    renderMetrics();
+  });
   els.customerSearch.addEventListener("input", () => {
     state.customerQuery = els.customerSearch.value.trim().toLowerCase();
     renderCustomers();
@@ -352,8 +359,34 @@
     renderCustomerOptions();
   }
 
+  function visibleRows(rows) {
+    return state.showTestRecords ? rows : rows.filter((row) => !isTestRecord(row));
+  }
+
+  function isTestRecord(row) {
+    const fields = [
+      row.code,
+      row.activation_code,
+      row.license_id,
+      row.customer_name,
+      row.customer_email,
+      row.email,
+      row.username,
+      row.machine_fingerprint,
+      row.machine_fingerprint_prebind,
+      row.notes,
+    ].join(" ").toLowerCase();
+    return (
+      fields.includes("cf-test") ||
+      fields.includes("@example.com") ||
+      /\+cf\d*@/.test(fields) ||
+      /^cf-test-/i.test(String(row.machine_fingerprint || row.code || ""))
+    );
+  }
+
   function renderCustomers() {
-    const rows = state.customers.filter((row) => {
+    const baseRows = visibleRows(state.customers);
+    const rows = baseRows.filter((row) => {
       const matchesStatus = !state.customerStatus || row.status === state.customerStatus;
       const haystack = [
         row.customer_name,
@@ -365,7 +398,7 @@
       const matchesQuery = !state.customerQuery || haystack.includes(state.customerQuery);
       return matchesStatus && matchesQuery;
     });
-    if (!state.customers.length) {
+    if (!baseRows.length) {
       els.customersTable.innerHTML = '<div class="empty-state">暂无客户台账。新增测试客户后会在这里维护。</div>';
       return;
     }
@@ -420,7 +453,7 @@
     const selected = els.codeCustomerSelect.value;
     els.codeCustomerSelect.innerHTML = [
       '<option value="">不关联台账</option>',
-      ...state.customers.map((row) => {
+      ...visibleRows(state.customers).map((row) => {
         const label = `${row.customer_name || row.customer_email || `客户#${row.id}`} ${row.customer_email ? `(${row.customer_email})` : ""}`;
         return `<option value="${escapeHtml(row.id)}">${escapeHtml(label)}</option>`;
       }),
@@ -484,7 +517,8 @@
   }
 
   function renderCodes() {
-    if (!state.codes.length) {
+    const rows = visibleRows(state.codes);
+    if (!rows.length) {
       els.codesTable.innerHTML = '<div class="empty-state">暂无授权码</div>';
       return;
     }
@@ -506,7 +540,7 @@
             </tr>
           </thead>
           <tbody>
-            ${state.codes.map((row) => `
+            ${rows.map((row) => `
               <tr>
                 <td><strong>${escapeHtml(row.code)}</strong></td>
                 <td>${escapeHtml(row.edition || "-")}</td>
@@ -533,54 +567,60 @@
   }
 
   function renderLicenses() {
-    if (!state.licenses.length) {
-      els.licensesTable.innerHTML = '<div class="empty-state">暂无授权记录</div>';
+    const rows = visibleRows(state.licenses);
+    if (!rows.length) {
+      els.licensesTable.innerHTML = state.licenses.length
+        ? '<div class="empty-state">测试授权记录已隐藏。需要核对历史测试数据时，打开右上角“显示测试记录”。</div>'
+        : '<div class="empty-state">暂无授权记录</div>';
       return;
     }
     els.licensesTable.innerHTML = `
-      <div class="admin-table-scroll">
-        <table class="license-table">
-          <thead>
-            <tr>
-              <th>客户 / 授权</th>
-              <th>版本</th>
-              <th>机器指纹</th>
-              <th>有效期 / 状态</th>
-              <th>最近在线</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${state.licenses.map((row) => `
-              <tr>
-                <td>
+      <div class="license-record-list">
+        ${rows.map((row) => {
+          const licenseId = row.license_id || "-";
+          const machineFingerprint = row.machine_fingerprint || "-";
+          const statusText = row.revoked ? "已撤销" : row.is_active ? "有效" : "停用";
+          return `
+            <article class="license-record">
+              <div class="license-record-head">
+                <div class="license-identity">
                   <strong>${escapeHtml(row.email || row.username || "-")}</strong>
-                  <small class="cell-subline">${escapeHtml(row.license_id || "-")}</small>
-                  <small class="cell-subline">授权码：${escapeHtml(row.activation_code || "-")}</small>
-                </td>
-                <td>${escapeHtml(row.edition || "-")}</td>
-                <td>
-                  <code class="machine-fingerprint" title="${escapeHtml(row.machine_fingerprint || "")}">${escapeHtml(row.machine_fingerprint || "-")}</code>
-                </td>
-                <td>
+                  <span>${escapeHtml(row.edition || "-")} · ${escapeHtml(statusText)} · ${escapeHtml(row.approval_status || "-")}</span>
+                </div>
+                <div class="table-actions">
+                  <button class="text-action" type="button" data-license-action="copy-machine" data-machine-fingerprint="${escapeHtml(row.machine_fingerprint || "")}" data-license-id="${escapeHtml(licenseId)}">复制机器码</button>
+                  <button class="text-action" type="button" data-license-action="copy-license" data-license-id="${escapeHtml(licenseId)}">复制授权</button>
+                  <button class="text-action" type="button" data-license-action="extend" data-license-id="${escapeHtml(licenseId)}">延期</button>
+                  ${row.revoked
+                    ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeHtml(licenseId)}">恢复</button>`
+                    : `<button class="text-action danger" type="button" data-license-action="revoke" data-license-id="${escapeHtml(licenseId)}">撤销</button>`}
+                </div>
+              </div>
+              <div class="license-meta-grid">
+                <div>
+                  <span>授权 ID</span>
+                  <code>${escapeHtml(licenseId)}</code>
+                </div>
+                <div>
+                  <span>授权码</span>
+                  <code>${escapeHtml(row.activation_code || "-")}</code>
+                </div>
+                <div>
+                  <span>到期</span>
                   <strong>${escapeHtml(formatDate(row.expires_at))}</strong>
-                  <small class="cell-subline">${escapeHtml(row.revoked ? "已撤销" : row.is_active ? "有效" : "停用")} / ${escapeHtml(row.approval_status || "-")}</small>
-                </td>
-                <td>${escapeHtml(formatDate(row.last_online_check))}</td>
-                <td>
-                  <div class="table-actions">
-                    <button class="text-action" type="button" data-license-action="copy-machine" data-machine-fingerprint="${escapeHtml(row.machine_fingerprint || "")}" data-license-id="${escapeHtml(row.license_id)}">复制机器码</button>
-                    <button class="text-action" type="button" data-license-action="copy-license" data-license-id="${escapeHtml(row.license_id)}">复制授权</button>
-                    <button class="text-action" type="button" data-license-action="extend" data-license-id="${escapeHtml(row.license_id)}">延期</button>
-                    ${row.revoked
-                      ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeHtml(row.license_id)}">恢复</button>`
-                      : `<button class="text-action danger" type="button" data-license-action="revoke" data-license-id="${escapeHtml(row.license_id)}">撤销</button>`}
-                  </div>
-                </td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
+                </div>
+                <div>
+                  <span>最近在线</span>
+                  <strong>${escapeHtml(formatDate(row.last_online_check))}</strong>
+                </div>
+              </div>
+              <div class="machine-block">
+                <span>机器指纹</span>
+                <code class="machine-fingerprint" title="${escapeHtml(machineFingerprint)}">${escapeHtml(machineFingerprint)}</code>
+              </div>
+            </article>
+          `;
+        }).join("")}
       </div>
     `;
   }
@@ -721,19 +761,24 @@
   }
 
   function renderMetrics() {
+    const visibleCustomers = visibleRows(state.customers);
+    const visibleCodes = visibleRows(state.codes);
+    const visibleLicenses = visibleRows(state.licenses);
+    const activeCustomers = visibleCustomers.filter((row) => ["active", "issued"].includes(row.status)).length;
+    const activeCodes = visibleCodes.filter((row) => row.status === "active" || row.status === "assigned").length;
+    const usedCodes = visibleCodes.filter((row) => row.status === "used").length;
+    const activeLicenses = visibleLicenses.filter((row) => row.is_active && !row.revoked).length;
+
     if (state.overview) {
       const overview = state.overview;
-      const customers = overview.customers || {};
-      const codes = overview.activation_codes || {};
-      const licenses = overview.licenses || {};
       const analysis = overview.analysis || {};
 
-      els.metricCustomers.textContent = String(customers.total || 0);
-      els.metricCustomersMeta.textContent = `活跃/已交付 ${customers.active || 0}`;
-      els.metricCodes.textContent = String(codes.total || 0);
-      els.metricCodesMeta.textContent = `可用 ${codes.active || 0} / 已用 ${codes.used || 0}`;
-      els.metricLicenses.textContent = String(licenses.active || 0);
-      els.metricLicensesMeta.textContent = `总记录 ${licenses.total || 0} / 将到期 ${licenses.expiring_soon || 0}`;
+      els.metricCustomers.textContent = String(visibleCustomers.length || 0);
+      els.metricCustomersMeta.textContent = `活跃/已交付 ${activeCustomers}`;
+      els.metricCodes.textContent = String(visibleCodes.length || 0);
+      els.metricCodesMeta.textContent = `可用 ${activeCodes} / 已用 ${usedCodes}`;
+      els.metricLicenses.textContent = String(activeLicenses || 0);
+      els.metricLicensesMeta.textContent = `总记录 ${visibleLicenses.length}`;
       els.metricReleases.textContent = state.releases[0] ? `v${String(state.releases[0].version || "").replace(/^v/i, "")}` : "-";
       els.metricReleasesMeta.textContent = overview.release_latest_released_at
         ? formatDate(overview.release_latest_released_at)
@@ -744,18 +789,14 @@
       return;
     }
 
-    const activeCustomers = state.customers.filter((row) => ["active", "issued"].includes(row.status)).length;
-    const activeCodes = state.codes.filter((row) => row.status === "active" || row.status === "assigned").length;
-    const usedCodes = state.codes.filter((row) => row.status === "used").length;
-    const activeLicenses = state.licenses.filter((row) => row.is_active && !row.revoked).length;
     const latestRelease = state.releases[0];
 
-    els.metricCustomers.textContent = state.customers.length ? String(state.customers.length) : "-";
-    els.metricCustomersMeta.textContent = state.customers.length ? `活跃/已交付 ${activeCustomers}` : "等待连接";
-    els.metricCodes.textContent = state.codes.length ? String(state.codes.length) : "-";
-    els.metricCodesMeta.textContent = state.codes.length ? `可用 ${activeCodes} / 已用 ${usedCodes}` : "等待连接";
-    els.metricLicenses.textContent = state.licenses.length ? String(activeLicenses) : "-";
-    els.metricLicensesMeta.textContent = state.licenses.length ? `总记录 ${state.licenses.length}` : "等待连接";
+    els.metricCustomers.textContent = visibleCustomers.length ? String(visibleCustomers.length) : "-";
+    els.metricCustomersMeta.textContent = visibleCustomers.length ? `活跃/已交付 ${activeCustomers}` : "等待连接";
+    els.metricCodes.textContent = visibleCodes.length ? String(visibleCodes.length) : "-";
+    els.metricCodesMeta.textContent = visibleCodes.length ? `可用 ${activeCodes} / 已用 ${usedCodes}` : "等待连接";
+    els.metricLicenses.textContent = visibleLicenses.length ? String(activeLicenses) : "-";
+    els.metricLicensesMeta.textContent = visibleLicenses.length ? `总记录 ${visibleLicenses.length}` : "等待连接";
     els.metricReleases.textContent = latestRelease ? `v${String(latestRelease.version || "").replace(/^v/i, "")}` : "-";
     els.metricReleasesMeta.textContent = latestRelease ? `${latestRelease.channel} / ${latestRelease.edition}` : "等待发行记录";
     els.metricApi.textContent = state.token ? "已连接" : "未连接";
