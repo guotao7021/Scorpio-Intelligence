@@ -1376,3 +1376,146 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   .code-field { grid-template-columns: 1fr; }
   .account-dashboard-head { flex-direction: column; }
 }
+
+/* Admin usability pass: denser layout, readable machine fingerprints, less horizontal friction. */
+.admin-console {
+  max-width: min(1760px, calc(100% - 44px));
+  padding: 24px 0 72px;
+}
+
+.admin-command-bar {
+  grid-template-columns: minmax(0, 1fr) 260px;
+  margin-bottom: 14px;
+}
+
+.admin-metrics {
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.admin-metrics article {
+  min-height: 86px;
+  padding: 14px 16px;
+}
+
+.admin-workbench {
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.admin-side {
+  position: sticky;
+  top: 88px;
+}
+
+.admin-main {
+  gap: 14px;
+}
+
+.admin-card {
+  padding: 16px;
+}
+
+.admin-card-head {
+  margin-bottom: 12px;
+}
+
+.admin-card-title h2 {
+  font-size: 21px;
+}
+
+.admin-form {
+  gap: 12px;
+}
+
+.admin-form-compact,
+.release-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-form .wide,
+.release-form .wide {
+  grid-column: 1 / -1;
+}
+
+.form-actions.wide {
+  display: flex;
+  gap: 10px;
+}
+
+.admin-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.admin-table table {
+  min-width: 980px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 11px 12px;
+}
+
+.license-table {
+  min-width: 1180px;
+}
+
+.license-table th:nth-child(3),
+.license-table td:nth-child(3) {
+  min-width: 420px;
+  width: 38%;
+}
+
+.machine-fingerprint {
+  display: block;
+  max-width: 620px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: rgba(244, 241, 248, 0.9);
+  background: rgba(7, 11, 22, 0.52);
+  font: 700 13px/1.5 "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.cell-subline {
+  display: block;
+  margin-top: 5px;
+  color: rgba(244, 241, 248, 0.55);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.table-actions {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  white-space: normal;
+  min-width: 168px;
+}
+
+.text-action {
+  min-height: 32px;
+}
+
+@media (max-width: 1100px) {
+  .admin-console {
+    max-width: min(100% - 24px, 1760px);
+  }
+
+  .admin-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-side {
+    position: static;
+  }
+
+  .admin-form-compact,
+  .release-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

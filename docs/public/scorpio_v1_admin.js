@@ -167,6 +167,16 @@
     const button = event.target.closest("[data-license-action]");
     if (!button) return;
     const licenseId = button.dataset.licenseId || "";
+    if (button.dataset.licenseAction === "copy-machine") {
+      await copyText(button.dataset.machineFingerprint || "");
+      setMessage("机器指纹已复制。", "success");
+      return;
+    }
+    if (button.dataset.licenseAction === "copy-license") {
+      await copyText(licenseId);
+      setMessage("授权 ID 已复制。", "success");
+      return;
+    }
     if (button.dataset.licenseAction === "extend") {
       await extendLicense(licenseId);
       return;
@@ -529,17 +539,13 @@
     }
     els.licensesTable.innerHTML = `
       <div class="admin-table-scroll">
-        <table>
+        <table class="license-table">
           <thead>
             <tr>
-              <th>授权 ID</th>
-              <th>授权码</th>
+              <th>客户 / 授权</th>
               <th>版本</th>
-              <th>客户邮箱</th>
               <th>机器指纹</th>
-              <th>到期时间</th>
-              <th>状态</th>
-              <th>审批</th>
+              <th>有效期 / 状态</th>
               <th>最近在线</th>
               <th>操作</th>
             </tr>
@@ -547,17 +553,24 @@
           <tbody>
             ${state.licenses.map((row) => `
               <tr>
-                <td><strong>${escapeHtml(shortText(row.license_id, 20))}</strong></td>
-                <td>${escapeHtml(row.activation_code || "-")}</td>
+                <td>
+                  <strong>${escapeHtml(row.email || row.username || "-")}</strong>
+                  <small class="cell-subline">${escapeHtml(row.license_id || "-")}</small>
+                  <small class="cell-subline">授权码：${escapeHtml(row.activation_code || "-")}</small>
+                </td>
                 <td>${escapeHtml(row.edition || "-")}</td>
-                <td>${escapeHtml(row.email || "-")}</td>
-                <td>${escapeHtml(shortText(row.machine_fingerprint || "-", 22))}</td>
-                <td>${escapeHtml(formatDate(row.expires_at))}</td>
-                <td>${escapeHtml(row.revoked ? "已撤销" : row.is_active ? "有效" : "停用")}</td>
-                <td>${escapeHtml(row.approval_status || "-")}</td>
+                <td>
+                  <code class="machine-fingerprint" title="${escapeHtml(row.machine_fingerprint || "")}">${escapeHtml(row.machine_fingerprint || "-")}</code>
+                </td>
+                <td>
+                  <strong>${escapeHtml(formatDate(row.expires_at))}</strong>
+                  <small class="cell-subline">${escapeHtml(row.revoked ? "已撤销" : row.is_active ? "有效" : "停用")} / ${escapeHtml(row.approval_status || "-")}</small>
+                </td>
                 <td>${escapeHtml(formatDate(row.last_online_check))}</td>
                 <td>
                   <div class="table-actions">
+                    <button class="text-action" type="button" data-license-action="copy-machine" data-machine-fingerprint="${escapeHtml(row.machine_fingerprint || "")}" data-license-id="${escapeHtml(row.license_id)}">复制机器码</button>
+                    <button class="text-action" type="button" data-license-action="copy-license" data-license-id="${escapeHtml(row.license_id)}">复制授权</button>
                     <button class="text-action" type="button" data-license-action="extend" data-license-id="${escapeHtml(row.license_id)}">延期</button>
                     ${row.revoked
                       ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeHtml(row.license_id)}">恢复</button>`
