@@ -1,0 +1,23 @@
+name = "scorpio-license-api"
+main = "src/worker.js"
+compatibility_date = "2026-06-16"
+
+# Add this route only after the Cloudflare zone is Active and DNS is owned by Cloudflare:
+# routes = [
+#   { pattern = "api.scorpio-intelligence.tech/*", custom_domain = true }
+# ]
+
+[vars]
+APP_NAME = "Scorpio Intelligence"
+CORS_ALLOWED_ORIGINS = "https://scorpio-intelligence.pages.dev,https://www.scorpio-intelligence.tech,https://scorpio-intelligence.tech"
+REGISTRATION_TRIAL_EDITION = "personal_pro"
+REGISTRATION_TRIAL_DAYS = "7"
+LICENSE_AUTO_ISSUE_EDITIONS = "personal_standard,personal_pro"
+JWT_ACCESS_SECONDS = "3600"
+JWT_REFRESH_SECONDS = "1209600"
+MAX_OFFLINE_DAYS = "7"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "scorpio-license-db"
+database_id = "44338085-38a1-4283-b6c9-91fb0d78e0ac"

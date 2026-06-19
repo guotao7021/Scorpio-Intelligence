@@ -9,6 +9,10 @@
     codes: [],
     licenses: [],
     releases: [],
+    overview: null,
+    auditEvents: [],
+    usageReports: [],
+    analysisRequests: [],
     customerQuery: "",
     customerStatus: "",
   };
@@ -45,6 +49,9 @@
     codesTable: byId("codesTable"),
     licensesTable: byId("licensesTable"),
     releasesTable: byId("releasesTable"),
+    auditTable: byId("auditTable"),
+    usageTable: byId("usageTable"),
+    analysisTable: byId("analysisTable"),
     metricCustomers: byId("metricCustomers"),
     metricCustomersMeta: byId("metricCustomersMeta"),
     metricCodes: byId("metricCodes"),
@@ -249,7 +256,16 @@
 
   async function refreshAll() {
     return runAdminAction("正在连接管理员 API...", async () => {
-      const results = await Promise.allSettled([loadCustomers(), loadCodes(), loadLicenses(), loadReleases()]);
+      const results = await Promise.allSettled([
+        loadOverview(),
+        loadCustomers(),
+        loadCodes(),
+        loadLicenses(),
+        loadReleases(),
+        loadAuditEvents(),
+        loadUsageReports(),
+        loadAnalysisRequests(),
+      ]);
       const rejected = results.filter((item) => item.status === "rejected");
       const tokenError = rejected.find((item) => item.reason && item.reason.code === "admin_token_required");
       if (tokenError) {
@@ -266,6 +282,10 @@
       }
       setMessage("管理员 API 已连接。", "success");
     });
+  }
+
+  async function loadOverview() {
+    state.overview = await apiGet(`${ADMIN_PATH}/overview`);
   }
 
   async function loadCustomers() {
@@ -293,11 +313,32 @@
     renderReleases();
   }
 
+  async function loadAuditEvents() {
+    const data = await apiGet(`${ADMIN_PATH}/audit-events`);
+    state.auditEvents = data.results || [];
+    renderAuditEvents();
+  }
+
+  async function loadUsageReports() {
+    const data = await apiGet(`${ADMIN_PATH}/usage-reports`);
+    state.usageReports = data.results || [];
+    renderUsageReports();
+  }
+
+  async function loadAnalysisRequests() {
+    const data = await apiGet(`${ADMIN_PATH}/analysis-requests`);
+    state.analysisRequests = data.results || [];
+    renderAnalysisRequests();
+  }
+
   function renderAllTables() {
     renderCustomers();
     renderCodes();
     renderLicenses();
     renderReleases();
+    renderAuditEvents();
+    renderUsageReports();
+    renderAnalysisRequests();
     renderCustomerOptions();
   }
 
@@ -633,7 +674,63 @@
     ]));
   }
 
+  function renderAuditEvents() {
+    renderTable(els.auditTable, ["时间", "操作", "操作者", "内容"], state.auditEvents.map((row) => [
+      formatDate(row.created_at),
+      row.action || "-",
+      row.actor || "-",
+      shortText(row.payload || "-", 86),
+    ]));
+  }
+
+  function renderUsageReports() {
+    renderTable(els.usageTable, ["上报时间", "授权 ID", "用户", "版本", "系统", "会话秒数", "功能使用"], state.usageReports.map((row) => [
+      formatDate(row.reported_at),
+      shortText(row.license_id || "-", 26),
+      row.user_id || "-",
+      row.client_version || "-",
+      row.os_version || "-",
+      row.session_duration_seconds || 0,
+      shortText(row.feature_usage || "{}", 86),
+    ]));
+  }
+
+  function renderAnalysisRequests() {
+    renderTable(els.analysisTable, ["时间", "接口", "资产", "代码", "状态", "耗时", "客户端"], state.analysisRequests.map((row) => [
+      formatDate(row.created_at),
+      shortText(row.endpoint || "-", 36),
+      row.asset_type || "-",
+      row.asset_code || "-",
+      row.status || "-",
+      `${row.latency_ms || 0}ms`,
+      row.client_version || "-",
+    ]));
+  }
+
   function renderMetrics() {
+    if (state.overview) {
+      const overview = state.overview;
+      const customers = overview.customers || {};
+      const codes = overview.activation_codes || {};
+      const licenses = overview.licenses || {};
+      const analysis = overview.analysis || {};
+
+      els.metricCustomers.textContent = String(customers.total || 0);
+      els.metricCustomersMeta.textContent = `活跃/已交付 ${customers.active || 0}`;
+      els.metricCodes.textContent = String(codes.total || 0);
+      els.metricCodesMeta.textContent = `可用 ${codes.active || 0} / 已用 ${codes.used || 0}`;
+      els.metricLicenses.textContent = String(licenses.active || 0);
+      els.metricLicensesMeta.textContent = `总记录 ${licenses.total || 0} / 将到期 ${licenses.expiring_soon || 0}`;
+      els.metricReleases.textContent = state.releases[0] ? `v${String(state.releases[0].version || "").replace(/^v/i, "")}` : "-";
+      els.metricReleasesMeta.textContent = overview.release_latest_released_at
+        ? formatDate(overview.release_latest_released_at)
+        : "等待发行记录";
+      els.metricApi.textContent = state.token
+        ? `已连接 / 分析异常 ${analysis.exceptions_24h || 0}`
+        : "未连接";
+      return;
+    }
+
     const activeCustomers = state.customers.filter((row) => ["active", "issued"].includes(row.status)).length;
     const activeCodes = state.codes.filter((row) => row.status === "active" || row.status === "assigned").length;
     const usedCodes = state.codes.filter((row) => row.status === "used").length;
@@ -808,6 +905,9 @@
     els.customersTable.classList.toggle("hidden", tab !== "customers");
     els.licensesTable.classList.toggle("hidden", tab !== "licenses");
     els.releasesTable.classList.toggle("hidden", tab !== "releases");
+    els.auditTable.classList.toggle("hidden", tab !== "audit");
+    els.usageTable.classList.toggle("hidden", tab !== "usage");
+    els.analysisTable.classList.toggle("hidden", tab !== "analysis");
   }
 
   function setBusy(isBusy) {
