@@ -4,227 +4,174 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>用户中心 | Scorpio Intelligence</title>
-  <meta name="description" content="Scorpio Intelligence 用户中心，提供账号登录、试用授权和客户端下载安装入口。">
+  <meta name="description" content="Scorpio Intelligence 用户中心：账号登录、授权激活、桌面端数据同步入口。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260616-account-auth">
+  <link rel="stylesheet" href="site.css?v=20260621-account-sync">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  <script src="account.js?v=20260621-account-sync" defer></script>
 </head>
 <body class="account-page">
-  <header class="site-header account-site-header">
+  <header class="site-header">
     <a class="brand" href="index-cn.html" aria-label="Scorpio Intelligence 首页">
       <img src="assets/scorpio-logo-horizontal.svg" alt="Scorpio Intelligence">
     </a>
     <nav aria-label="主导航">
       <a href="index-cn.html#platform">平台</a>
+      <a href="index-cn.html#brand-story">品牌叙事</a>
       <a href="index-cn.html#experience">产品体验</a>
       <a href="index-cn.html#editions">版本</a>
       <a class="active" href="account.html">用户中心</a>
-      <a href="faq-cn.html">FAQ</a>
       <a href="feedback-cn.html">反馈</a>
+      <a href="faq-cn.html">FAQ</a>
     </nav>
+    <div class="lang-switch" aria-label="语言切换">
+      <a class="active" href="account.html">中文</a>
+      <a href="index-en.html">EN</a>
+    </div>
   </header>
 
-  <main class="account-shell-v2" id="accountLayout">
-    <section class="account-gate" id="accountGate">
-      <aside class="account-product-panel" aria-label="用户中心说明">
-        <div class="account-product-brand">
-          <img src="assets/scorpio-logo-mark.svg" alt="">
-          <div>
-            <strong>Scorpio Intelligence</strong>
-            <span>Market Intelligence Platform</span>
-          </div>
-        </div>
-        <p class="section-kicker">User Center</p>
-        <h1>用户中心</h1>
-        <p class="account-gate-lead">
-          登录后查看账号权益和试用资格。未登录状态不展示授权码、文件地址或内部服务信息。
-        </p>
-        <div class="account-security-list">
-          <span>账号认证</span>
-          <span>邮箱验证码</span>
-          <span>试用权益</span>
-          <span>权益交付</span>
-        </div>
-      </aside>
-
-      <section class="account-auth-card" aria-label="登录或注册">
-        <div class="auth-card-head">
-          <div>
-            <p class="section-kicker">Access</p>
-            <h2>登录或注册</h2>
-          </div>
-          <div class="auth-status-pill" id="accountStatus">
-            <span class="badge-dot"></span>
-            <strong>未登录</strong>
-          </div>
-        </div>
-
-        <div class="auth-tabs" id="authTabs" role="tablist" aria-label="账号操作">
-          <button class="auth-tab active" type="button" data-auth-tab="login">登录</button>
-          <button class="auth-tab" type="button" data-auth-tab="register">注册试用</button>
-          <button class="auth-tab" type="button" data-auth-tab="reset">找回密码</button>
-        </div>
-
-        <div class="session-panel hidden" id="sessionPanel">
-          <span>当前账号</span>
-          <strong id="sessionEmail">-</strong>
-          <p>账号已登录，可以查看专属交付信息。</p>
-        </div>
-
-        <form id="loginForm" class="auth-form" autocomplete="on">
-          <label>邮箱
-            <input type="email" name="email" autocomplete="email" required>
-          </label>
-          <label>密码
-            <input type="password" name="password" autocomplete="current-password" minlength="8" required>
-          </label>
-          <button class="button primary block" type="submit">登录用户中心</button>
-        </form>
-
-        <form id="registerForm" class="auth-form hidden" autocomplete="on">
-          <label>用户名
-            <input type="text" name="username" autocomplete="nickname" maxlength="64" placeholder="可选">
-          </label>
-          <label>邮箱
-            <input type="email" name="email" autocomplete="email" required>
-          </label>
-          <div class="code-field">
-            <label>邮箱验证码
-              <input type="text" name="verification_code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required>
-            </label>
-            <button class="button secondary code-button" type="button" data-send-code="register">发送验证码</button>
-          </div>
-          <label>密码
-            <input type="password" name="password" autocomplete="new-password" minlength="8" required>
-          </label>
-          <label>确认密码
-            <input type="password" name="password_confirm" autocomplete="new-password" minlength="8" required>
-          </label>
-          <button class="button primary block" type="submit">创建账号并领取试用</button>
-        </form>
-
-        <form id="resetForm" class="auth-form hidden" autocomplete="on">
-          <label>邮箱
-            <input type="email" name="email" autocomplete="email" required>
-          </label>
-          <div class="code-field">
-            <label>重置验证码
-              <input type="text" name="verification_code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required>
-            </label>
-            <button class="button secondary code-button" type="button" data-send-code="reset_password">发送验证码</button>
-          </div>
-          <label>新密码
-            <input type="password" name="password" autocomplete="new-password" minlength="8" required>
-          </label>
-          <label>确认新密码
-            <input type="password" name="password_confirm" autocomplete="new-password" minlength="8" required>
-          </label>
-          <button class="button primary block" type="submit">重置密码</button>
-        </form>
-
-        <div class="account-message" id="authMessage" role="status" aria-live="polite"></div>
-        <div class="auth-footnote">验证码用于确认邮箱真实性。未登录前不会展示任何敏感交付信息。</div>
-      </section>
+  <main class="delivery-shell">
+    <section class="account-dashboard-head">
+      <div>
+        <p class="section-kicker">Account & Delivery</p>
+        <h1>账号、授权与数据同步入口</h1>
+        <p>先完成网站登录和授权激活，再回到桌面端“数据更新中心”同步 Cloudflare 发布数据。</p>
+      </div>
+      <div class="session-panel" id="sessionPanel">
+        <span>当前账号</span>
+        <strong id="sessionEmail">未登录</strong>
+        <p id="sessionHint">登录后可激活授权、检查发行包，并让桌面端使用同一账号同步云端数据。</p>
+      </div>
     </section>
 
-    <section class="account-private hidden" id="accountPrivate">
-      <section class="account-dashboard-head">
-        <div>
-          <p class="section-kicker">Console</p>
-          <h1>账号权益</h1>
-          <p>这里展示当前账号的试用授权、安装包和版本入口。</p>
-        </div>
-        <button class="button secondary sm hidden" id="logoutButton" type="button">退出登录</button>
-      </section>
-
-      <section class="delivery-stats" aria-label="账号权益摘要">
-        <article>
-          <span>账号状态</span>
-          <strong id="statAccount">已登录</strong>
-          <small id="statAccountMeta">-</small>
-        </article>
-        <article>
-          <span>试用授权</span>
-          <strong id="statTrial">待领取</strong>
-          <small>注册成功后自动生成</small>
-        </article>
-        <article>
-          <span>安装包</span>
-          <strong id="statRelease">待加载</strong>
-          <small id="statReleaseMeta">登录后读取发行信息</small>
-        </article>
-      </section>
-
-      <section class="delivery-main">
-        <article class="delivery-card release-console">
-          <div class="console-toolbar">
-            <div class="console-title">
-              <p class="section-kicker">Client Package</p>
-              <h2>客户端安装包</h2>
-            </div>
-            <button class="button secondary sm" id="refreshReleaseButton" type="button">刷新版本</button>
+    <section class="delivery-layout">
+      <article class="account-panel account-auth-card">
+        <div class="auth-card-head">
+          <div>
+            <p class="section-kicker">Sign In</p>
+            <h2>登录 / 注册</h2>
           </div>
-          <div class="release-table" role="table" aria-label="安装包发行信息">
-            <div class="release-row release-head" role="row">
-              <span>版本</span>
-              <span>通道</span>
-              <span>发布日期</span>
-              <span>校验</span>
-              <span>操作</span>
-            </div>
-            <div class="release-row" role="row">
-              <strong id="releaseVersion">登录后加载</strong>
-              <span id="releaseChannel">stable</span>
-              <span id="releaseDate">-</span>
-              <span id="releaseHash">-</span>
-              <a class="button primary sm disabled" id="downloadButton" href="#" aria-disabled="true">下载</a>
-            </div>
-          </div>
-          <p class="delivery-note" id="downloadIntro">登录后会读取当前开放版本。</p>
-        </article>
-
-        <div class="delivery-two-col">
-          <article class="delivery-card license-console">
-            <div class="console-title">
-              <p class="section-kicker">Trial License</p>
-              <h2>试用激活码</h2>
-            </div>
-            <div class="trial-code" id="trialCode">暂无</div>
-            <div class="license-actions">
-              <button class="button secondary sm" id="copyTrialButton" type="button" disabled>复制激活码</button>
-            </div>
-            <p class="delivery-note" id="trialIntro">注册成功后这里会显示试用激活码。</p>
-          </article>
-
-          <article class="delivery-card">
-            <div class="console-title">
-              <p class="section-kicker">Boundary</p>
-              <h2>交付边界</h2>
-            </div>
-            <ul class="delivery-list">
-              <li>下载入口仅在账号登录后开放。</li>
-              <li>试用激活码只展示给当前登录账号。</li>
-              <li>客户端授权仍在本机激活流程中完成。</li>
-            </ul>
-          </article>
+          <span class="auth-status-pill" id="authStatus">未登录</span>
         </div>
-      </section>
+        <div class="auth-tabs" role="tablist" aria-label="账号操作">
+          <button class="auth-tab active" type="button" data-auth-tab="login">登录</button>
+          <button class="auth-tab" type="button" data-auth-tab="register">注册</button>
+          <button class="auth-tab" type="button" data-auth-tab="reset">重置密码</button>
+        </div>
+
+        <form class="auth-form" id="loginForm">
+          <label>邮箱
+            <input id="loginEmail" type="email" autocomplete="email" required>
+          </label>
+          <label>密码
+            <input id="loginPassword" type="password" autocomplete="current-password" minlength="8" required>
+          </label>
+          <button class="button primary account-button" type="submit">登录用户中心</button>
+        </form>
+
+        <form class="auth-form hidden" id="registerForm">
+          <label>邮箱
+            <input id="registerEmail" type="email" autocomplete="email" required>
+          </label>
+          <label>用户名
+            <input id="registerName" type="text" autocomplete="name" placeholder="可选">
+          </label>
+          <label>密码
+            <input id="registerPassword" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <div class="code-field">
+            <label>验证码
+              <input id="registerCode" type="text" inputmode="numeric" required>
+            </label>
+            <button class="button secondary code-button" type="button" id="sendRegisterCode">发送验证码</button>
+          </div>
+          <button class="button primary account-button" type="submit">注册并登录</button>
+        </form>
+
+        <form class="auth-form hidden" id="resetForm">
+          <label>邮箱
+            <input id="resetEmail" type="email" autocomplete="email" required>
+          </label>
+          <div class="code-field">
+            <label>验证码
+              <input id="resetCode" type="text" inputmode="numeric" required>
+            </label>
+            <button class="button secondary code-button" type="button" id="sendResetCode">发送验证码</button>
+          </div>
+          <label>新密码
+            <input id="resetPassword" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <button class="button primary account-button" type="submit">重置密码</button>
+        </form>
+        <p class="account-message" id="authMessage"></p>
+      </article>
+
+      <article class="account-panel">
+        <div class="panel-heading">
+          <p class="section-kicker">License</p>
+          <h2>授权激活与机器码绑定</h2>
+        </div>
+        <p>桌面端会读取本机机器码。请复制桌面端显示的机器码，在这里激活后再回到桌面端同步数据。</p>
+        <form class="auth-form" id="activateForm">
+          <label>激活码
+            <input id="activationCode" type="text" autocomplete="off" placeholder="例如 LIC-..." required>
+          </label>
+          <label>机器码
+            <input id="machineFingerprint" type="text" autocomplete="off" placeholder="从桌面端授权页面复制" required>
+          </label>
+          <button class="button primary account-button" type="submit">激活授权</button>
+        </form>
+        <form class="auth-form" id="statusForm">
+          <label>License ID
+            <input id="licenseId" type="text" autocomplete="off" placeholder="激活后自动填入，也可手动粘贴">
+          </label>
+          <button class="button secondary account-button" type="submit">检查授权状态</button>
+        </form>
+        <p class="account-message" id="licenseMessage"></p>
+      </article>
+    </section>
+
+    <section class="delivery-two-col">
+      <article class="account-panel">
+        <div class="panel-heading">
+          <p class="section-kicker">Desktop Sync</p>
+          <h2>桌面端数据同步</h2>
+        </div>
+        <ul class="account-list">
+          <li>网站账号用于身份登录，License ID + 机器码用于设备授权。</li>
+          <li>桌面端“数据更新中心”会按模块拉取标的研究和市场上下文数据。</li>
+          <li>Standard / Pro 走同一条 Cloudflare 分发链路，只在可用字段和数据范围上区分。</li>
+        </ul>
+      </article>
+
+      <article class="account-panel">
+        <div class="panel-heading">
+          <p class="section-kicker">Release</p>
+          <h2>客户端下载</h2>
+        </div>
+        <div class="release-box" id="releaseBox">
+          <span>最新版本</span>
+          <strong id="releaseVersion">正在读取...</strong>
+          <small id="releaseMeta">连接 Cloudflare API 获取最新发行信息。</small>
+        </div>
+        <div class="download-actions">
+          <a class="button primary disabled" id="downloadLink" href="#" aria-disabled="true">下载客户端</a>
+          <button class="button secondary" id="refreshRelease" type="button">刷新发行信息</button>
+          <button class="button secondary" id="logoutButton" type="button">退出登录</button>
+        </div>
+      </article>
     </section>
   </main>
 
   <footer class="site-footer">
-    <div class="footer-brand">
-      <img src="assets/scorpio-logo-mark.svg" alt="">
-      <div>
-        <strong>Scorpio Intelligence</strong>
-        <span>Market Intelligence Platform</span>
-      </div>
+    <div>
+      <strong>Scorpio Intelligence</strong>
+      <span>Market intelligence platform</span>
     </div>
     <div class="footer-legal">
-      <span>© 2026 Scorpio Intelligence. 保留所有权利。</span>
-      <span>软件版权及商业联系：<a class="footer-contact" href="mailto:guotao7021@gmail.com">guotao7021@gmail.com</a></span>
+      <span>研究辅助工具，不构成投资建议。</span>
+      <a class="footer-contact" href="mailto:guotao7021@gmail.com">guotao7021@gmail.com</a>
     </div>
   </footer>
-
-  <script src="account.js?v=20260616-account-auth"></script>
 </body>
 </html>
