@@ -49,6 +49,10 @@ export default {
           }
           return withCors(await revokeAdminLicense({ request, env, licenseId }), corsHeaders);
         }
+        if (request.method === "PUT" && path.startsWith("/v1/scorpio_v1_admin/feedback/")) {
+          const feedbackId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/feedback/".length)).trim());
+          return withCors(await updateAdminFeedback({ request, env, feedbackId }), corsHeaders);
+        }
         if (request.method === "GET" && path === "/health") {
           return json({ ok: true, service: "scorpio-license-api" }, 200, corsHeaders);
         }
@@ -524,6 +528,76 @@ route("POST", "/v1/usage/report", async (ctx) => {
     .run();
 
   return json({ accepted: true });
+});
+
+route("POST", "/v1/feedback", async (ctx) => {
+  const body = await readJson(ctx.request);
+  const item = normalizeFeedbackSubmission(body);
+  const now = nowIso();
+  const publicId = `FB-${Date.now().toString(36).toUpperCase()}-${randomToken(4).toUpperCase()}`;
+
+  await ctx.env.DB.prepare(
+    `INSERT INTO feedback_items
+       (public_id, type, product_area, priority, status, title, description,
+        contact_email, page_url, client_version, environment, rating, survey_answers,
+        client_ip, user_agent, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      publicId,
+      item.type,
+      item.product_area,
+      item.priority,
+      item.title,
+      item.description,
+      item.contact_email,
+      item.page_url,
+      item.client_version,
+      item.environment,
+      item.rating,
+      JSON.stringify(item.survey_answers),
+      clientIp(ctx.request),
+      safeText(ctx.request.headers.get("user-agent") || "", 400),
+      now,
+      now
+    )
+    .run();
+
+  return json({ accepted: true, public_id: publicId, status: "new" }, 201);
+});
+
+route("GET", "/v1/scorpio_v1_admin/feedback", async (ctx) => {
+  requireAdmin(ctx);
+  const options = adminListOptions(ctx.url, { defaultLimit: 80, maxLimit: 300 });
+  const type = normalizeFeedbackType(ctx.url.searchParams.get("type") || "", "");
+  const where = [];
+  const params = [];
+
+  addListTextSearch(where, params, ["public_id", "title", "description", "contact_email", "product_area", "admin_notes"], options.q);
+  if (options.status) {
+    where.push("status = ?");
+    params.push(normalizeFeedbackStatus(options.status, "new"));
+  }
+  if (type) {
+    where.push("type = ?");
+    params.push(type);
+  }
+  const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM feedback_items ${filter}`).bind(...params).first();
+  const rows = await ctx.env.DB.prepare(
+    `SELECT id, public_id, type, product_area, priority, status, title, description,
+            contact_email, page_url, client_version, environment, rating, survey_answers,
+            admin_notes, client_ip, user_agent, created_at, updated_at
+     FROM feedback_items
+     ${filter}
+     ORDER BY
+       CASE status WHEN 'new' THEN 0 WHEN 'triaged' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END,
+       updated_at DESC,
+       id DESC
+     LIMIT ? OFFSET ?`
+  ).bind(...params, options.limit, options.offset).all();
+
+  return json(pageResponse(rows.results || [], total, options));
 });
 
 route("GET", "/v1/releases/latest", async (ctx) => {
@@ -1289,6 +1363,41 @@ async function revokeAdminLicense(ctx) {
     .run();
   await audit(ctx.env, "revoke_license", "admin_api", { license_id: licenseId });
   return json({ revoked: true, license_id: licenseId });
+}
+
+async function updateAdminFeedback(ctx) {
+  requireAdmin(ctx);
+  const feedbackId = Number(ctx.feedbackId || 0);
+  if (!Number.isInteger(feedbackId) || feedbackId <= 0) {
+    return json({ error: "feedback_id_invalid" }, 400);
+  }
+  const existing = await ctx.env.DB.prepare("SELECT * FROM feedback_items WHERE id = ?").bind(feedbackId).first();
+  if (!existing) {
+    return json({ error: "feedback_not_found" }, 404);
+  }
+
+  const body = await readJson(ctx.request);
+  const status = normalizeFeedbackStatus(body.status || existing.status, existing.status || "new");
+  const priority = normalizeFeedbackPriority(body.priority || existing.priority, existing.priority || "normal");
+  const adminNotes = body.admin_notes !== undefined ? safeText(body.admin_notes, 2000) : existing.admin_notes || "";
+  const updatedAt = nowIso();
+
+  await ctx.env.DB.prepare(
+    `UPDATE feedback_items
+     SET status = ?, priority = ?, admin_notes = ?, updated_at = ?
+     WHERE id = ?`
+  )
+    .bind(status, priority, adminNotes, updatedAt, feedbackId)
+    .run();
+  await audit(ctx.env, "update_feedback", "admin_api", {
+    feedback_id: feedbackId,
+    public_id: existing.public_id,
+    status,
+    priority,
+  });
+
+  const updated = await ctx.env.DB.prepare("SELECT * FROM feedback_items WHERE id = ?").bind(feedbackId).first();
+  return json(updated);
 }
 
 route("GET", "/v1/scorpio_v1_admin/licenses", async (ctx) => {
@@ -2460,6 +2569,76 @@ function safeUsername(value) {
 
 function safeText(value, maxLength) {
   return String(value || "").trim().slice(0, maxLength);
+}
+
+function normalizeFeedbackSubmission(body) {
+  const type = normalizeFeedbackType(body.type || body.kind || "experience", "experience");
+  const contactEmail = normalizeEmail(body.contact_email || body.email || "");
+  const title = safeText(body.title || "", 160);
+  const description = safeText(body.description || body.message || "", 5000);
+  const rating = Number(body.rating || body.satisfaction || 0);
+  const surveyAnswers = typeof body.survey_answers === "object" && body.survey_answers
+    ? body.survey_answers
+    : {};
+
+  if (!title) {
+    throwHttp(400, "feedback_title_required");
+  }
+  if (!description) {
+    throwHttp(400, "feedback_description_required");
+  }
+  if (contactEmail && !isEmail(contactEmail)) {
+    throwHttp(400, "email_invalid");
+  }
+
+  return {
+    type,
+    product_area: normalizeFeedbackArea(body.product_area || body.area || "website"),
+    priority: normalizeFeedbackPriority(body.priority || body.severity || "normal", "normal"),
+    title,
+    description,
+    contact_email: contactEmail,
+    page_url: safeUrl(body.page_url || body.url || ""),
+    client_version: safeText(body.client_version || body.version || "", 80),
+    environment: safeText(body.environment || body.os || "", 500),
+    rating: Number.isFinite(rating) ? Math.max(0, Math.min(5, Math.round(rating))) : 0,
+    survey_answers: {
+      role: safeText(surveyAnswers.role || body.role || "", 80),
+      usage_stage: safeText(surveyAnswers.usage_stage || body.usage_stage || "", 80),
+      main_goal: safeText(surveyAnswers.main_goal || body.main_goal || "", 240),
+      biggest_blocker: safeText(surveyAnswers.biggest_blocker || body.biggest_blocker || "", 500),
+      expected_improvement: safeText(surveyAnswers.expected_improvement || body.expected_improvement || "", 500),
+      allow_contact: Boolean(surveyAnswers.allow_contact || body.allow_contact),
+    },
+  };
+}
+
+function normalizeFeedbackType(value, fallback = "experience") {
+  const type = String(value || fallback).trim().toLowerCase().replaceAll("-", "_");
+  return ["bug", "experience", "survey", "question"].includes(type) ? type : fallback;
+}
+
+function normalizeFeedbackArea(value) {
+  const area = String(value || "website").trim().toLowerCase().replaceAll("-", "_");
+  return ["website", "account", "license", "desktop", "data_sync", "research", "admin", "other"].includes(area)
+    ? area
+    : "other";
+}
+
+function normalizeFeedbackPriority(value, fallback = "normal") {
+  const priority = String(value || fallback).trim().toLowerCase();
+  return ["low", "normal", "high", "urgent"].includes(priority) ? priority : fallback;
+}
+
+function normalizeFeedbackStatus(value, fallback = "new") {
+  const status = String(value || fallback).trim().toLowerCase().replaceAll("-", "_");
+  return ["new", "triaged", "in_progress", "resolved", "closed"].includes(status) ? status : fallback;
+}
+
+function safeUrl(value) {
+  const text = safeText(value, 500);
+  if (!text) return "";
+  return /^https?:\/\//i.test(text) ? text : "";
 }
 
 function normalizeEdition(value) {
