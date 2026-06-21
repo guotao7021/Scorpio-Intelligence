@@ -1,8 +1,10 @@
 (function () {
   const API_BASE = "https://api.scorpio-intelligence.tech/v1";
   const TOKEN_KEY = "scorpio_user_auth";
+  const LICENSE_KEY = "scorpio_user_license";
 
   const state = loadAuth();
+  const licenseState = loadLicenseState();
 
   const els = {
     sessionEmail: byId("sessionEmail"),
@@ -59,6 +61,7 @@
     els.logoutButton.addEventListener("click", logout);
     renderSession();
     refreshRelease();
+    refreshSavedLicenseStatus();
     if (window.lucide) {
       window.lucide.createIcons();
     }
@@ -160,24 +163,36 @@
   async function onActivate(event) {
     event.preventDefault();
     requireLogin();
+    const activationCode = els.activationCode.value.trim();
+    const machineFingerprint = els.machineFingerprint.value.trim();
     setLicenseStatus("激活中", "正在激活");
     setMessage(els.licenseMessage, "正在激活授权...", "loading");
     const data = await request("/license/activate", {
       method: "POST",
       body: {
-        activation_code: els.activationCode.value.trim(),
-        machine_fingerprint: els.machineFingerprint.value.trim(),
+        activation_code: activationCode,
+        machine_fingerprint: machineFingerprint,
         client_version: "web-account",
       },
       auth: true,
     });
-    els.licenseId.value = data.license_id || "";
-    setLicenseStatus(data.edition || "已激活", "已激活");
-    els.nextStepText.textContent = "回到桌面端同步数据";
-    els.syncState.textContent = "可同步";
+    saveLicenseState({
+      email: state.email,
+      user_id: state.user_id,
+      activation_code: activationCode,
+      machine_fingerprint: machineFingerprint,
+      license_id: data.license_id || "",
+      edition: data.edition || "",
+      expires_at: data.expires_at || "",
+      valid: true,
+      updated_at: new Date().toISOString(),
+    });
+    renderLicenseState();
     setMessage(
       els.licenseMessage,
-      `授权已激活：${data.edition || "当前版本"}，有效期至 ${data.expires_at || "待确认"}。`,
+      data.idempotent
+        ? `授权已存在并恢复：${data.edition || "当前版本"}，有效期至 ${data.expires_at || "待确认"}。`
+        : `授权已激活：${data.edition || "当前版本"}，有效期至 ${data.expires_at || "待确认"}。`,
       "success"
     );
   }
@@ -196,9 +211,18 @@
       auth: true,
     });
     const type = data.valid ? "success" : "warn";
-    setLicenseStatus(data.valid ? "授权有效" : "需要处理", data.valid ? "有效" : "异常");
-    els.nextStepText.textContent = data.valid ? "回到桌面端同步数据" : "检查授权信息";
-    els.syncState.textContent = data.valid ? "可同步" : "等待授权";
+    saveLicenseState({
+      email: state.email,
+      user_id: state.user_id,
+      activation_code: els.activationCode.value.trim() || licenseState.activation_code || "",
+      machine_fingerprint: els.machineFingerprint.value.trim(),
+      license_id: data.license_id || els.licenseId.value.trim(),
+      edition: data.edition || licenseState.edition || "",
+      expires_at: data.expires_at || licenseState.expires_at || "",
+      valid: Boolean(data.valid),
+      updated_at: new Date().toISOString(),
+    });
+    renderLicenseState();
     setMessage(
       els.licenseMessage,
       data.valid ? "授权有效，可以回到桌面端同步数据。" : `授权不可用：${data.message || data.reason || "unknown"}`,
@@ -299,6 +323,7 @@
     els.nextStepText.textContent = loggedIn ? "激活或检查授权" : "登录后激活授权";
     els.syncState.textContent = loggedIn ? "等待授权" : "等待登录";
     els.logoutButton.disabled = !loggedIn;
+    renderLicenseState();
   }
 
   function logout() {
@@ -307,6 +332,8 @@
     state.email = "";
     state.user_id = "";
     saveAuth();
+    clearLicenseState();
+    clearLicenseFields();
     renderSession();
     setLicenseStatus("待激活", "待激活");
     setMessage(els.authMessage, "已退出登录。", "success");
@@ -315,6 +342,69 @@
   function setLicenseStatus(stateText, chipText) {
     els.licenseState.textContent = stateText;
     els.licenseChip.textContent = chipText;
+  }
+
+  function renderLicenseState() {
+    const loggedIn = Boolean(state.access_token);
+    if (!loggedIn || !isLicenseStateForCurrentUser()) {
+      setLicenseStatus("待激活", "待激活");
+      return;
+    }
+
+    els.activationCode.value = licenseState.activation_code || els.activationCode.value;
+    els.machineFingerprint.value = licenseState.machine_fingerprint || els.machineFingerprint.value;
+    els.licenseId.value = licenseState.license_id || els.licenseId.value;
+
+    if (licenseState.valid && licenseState.license_id) {
+      setLicenseStatus(licenseState.edition || "授权有效", "有效");
+      els.nextStepText.textContent = "回到桌面端同步数据";
+      els.syncState.textContent = "可同步";
+      return;
+    }
+
+    if (licenseState.license_id) {
+      setLicenseStatus("需要处理", "异常");
+      els.nextStepText.textContent = "检查授权信息";
+      els.syncState.textContent = "等待授权";
+    } else {
+      setLicenseStatus("待激活", "待激活");
+    }
+  }
+
+  async function refreshSavedLicenseStatus() {
+    if (!state.access_token || !isLicenseStateForCurrentUser() || !licenseState.license_id || !licenseState.machine_fingerprint) {
+      return;
+    }
+    try {
+      const data = await request("/license/status", {
+        method: "POST",
+        body: {
+          license_id: licenseState.license_id,
+          machine_fingerprint: licenseState.machine_fingerprint,
+          client_version: "web-account",
+        },
+        auth: true,
+      });
+      saveLicenseState({
+        ...licenseState,
+        valid: Boolean(data.valid),
+        edition: data.edition || licenseState.edition || "",
+        expires_at: data.expires_at || licenseState.expires_at || "",
+        updated_at: new Date().toISOString(),
+      });
+      renderLicenseState();
+    } catch {
+      // Keep the last known local state; the visible status can still be checked manually.
+    }
+  }
+
+  function isLicenseStateForCurrentUser() {
+    return Boolean(
+      licenseState.license_id &&
+      state.email &&
+      licenseState.email &&
+      String(licenseState.email).toLowerCase() === String(state.email).toLowerCase()
+    );
   }
 
   function loadAuth() {
@@ -327,6 +417,31 @@
 
   function saveAuth() {
     localStorage.setItem(TOKEN_KEY, JSON.stringify(state));
+  }
+
+  function loadLicenseState() {
+    try {
+      return JSON.parse(localStorage.getItem(LICENSE_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  }
+
+  function saveLicenseState(nextState) {
+    Object.keys(licenseState).forEach((key) => delete licenseState[key]);
+    Object.assign(licenseState, nextState);
+    localStorage.setItem(LICENSE_KEY, JSON.stringify(licenseState));
+  }
+
+  function clearLicenseState() {
+    Object.keys(licenseState).forEach((key) => delete licenseState[key]);
+    localStorage.removeItem(LICENSE_KEY);
+  }
+
+  function clearLicenseFields() {
+    els.activationCode.value = "";
+    els.machineFingerprint.value = "";
+    els.licenseId.value = "";
   }
 
   function setMessage(el, text, type) {
