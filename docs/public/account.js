@@ -372,7 +372,11 @@
   }
 
   async function refreshSavedLicenseStatus() {
-    if (!state.access_token || !isLicenseStateForCurrentUser() || !licenseState.license_id || !licenseState.machine_fingerprint) {
+    if (!state.access_token) {
+      return;
+    }
+    if (!isLicenseStateForCurrentUser() || !licenseState.license_id || !licenseState.machine_fingerprint) {
+      await loadCurrentLicense();
       return;
     }
     try {
@@ -395,6 +399,32 @@
       renderLicenseState();
     } catch {
       // Keep the last known local state; the visible status can still be checked manually.
+    }
+  }
+
+  async function loadCurrentLicense() {
+    try {
+      const data = await request("/license/current", {
+        method: "GET",
+        auth: true,
+      });
+      if (!data.active || !data.license_id) {
+        return;
+      }
+      saveLicenseState({
+        email: state.email,
+        user_id: state.user_id,
+        activation_code: licenseState.activation_code || "",
+        machine_fingerprint: data.machine_fingerprint || "",
+        license_id: data.license_id || "",
+        edition: data.edition || "",
+        expires_at: data.expires_at || "",
+        valid: Boolean(data.valid),
+        updated_at: new Date().toISOString(),
+      });
+      renderLicenseState();
+    } catch {
+      // A missing current license should not block login or release information.
     }
   }
 

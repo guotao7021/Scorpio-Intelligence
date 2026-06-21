@@ -459,6 +459,29 @@ route("POST", "/v1/license/status", async (ctx) => {
   });
 });
 
+route("GET", "/v1/license/current", async (ctx) => {
+  const user = await requireUser(ctx);
+  const lic = await ctx.env.DB.prepare(
+    `SELECT *
+     FROM licenses
+     WHERE user_id = ? AND is_active = 1 AND revoked = 0
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`
+  )
+    .bind(user.id)
+    .first();
+  if (!lic) {
+    return json({ active: false, message: "active_license_not_found" });
+  }
+  const valid = lic.expires_at >= todayIso() && !["pending", "rejected"].includes(String(lic.approval_status || ""));
+  return json({
+    active: valid,
+    valid,
+    message: valid ? "ok" : "license_inactive",
+    ...licenseActivationResponse(lic),
+  });
+});
+
 route("POST", "/v1/license/rebind", async (ctx) => {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
@@ -547,6 +570,7 @@ function licenseActivationResponse(license, extras = {}) {
     edition: license.edition || payload.edition || "",
     expires_at: license.expires_at || payload.expires_at || "",
     customer_name: payload.customer_name || "",
+    machine_fingerprint: license.machine_fingerprint || payload.machine_fingerprint || "",
     features: payload.features || {},
     license_file: payload,
     ...extras,
