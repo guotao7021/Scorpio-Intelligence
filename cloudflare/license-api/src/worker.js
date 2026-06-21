@@ -263,7 +263,59 @@ route("POST", "/v1/license/activate", async (ctx) => {
   const code = await ctx.env.DB.prepare("SELECT * FROM activation_codes WHERE code = ?")
     .bind(activationCode)
     .first();
-  if (!code || !canUseActivationCode(user, code)) {
+  if (!code) {
+    return json({ error: "activation_code_invalid_or_used" }, 400);
+  }
+
+  const existingLicense = await ctx.env.DB.prepare(
+    `SELECT *
+     FROM licenses
+     WHERE activation_code_id = ? AND user_id = ? AND machine_fingerprint = ? AND revoked = 0
+     ORDER BY id DESC
+     LIMIT 1`
+  )
+    .bind(code.id, user.id, machineFingerprint)
+    .first();
+  if (existingLicense) {
+    const now = nowIso();
+    const isUsableExisting =
+      Number(existingLicense.is_active || 0) &&
+      !["pending", "rejected"].includes(String(existingLicense.approval_status || "")) &&
+      existingLicense.expires_at >= todayIso();
+    await ctx.env.DB.batch([
+      ctx.env.DB.prepare(
+        `INSERT INTO validation_logs
+         (license_id, user_id, machine_fingerprint, client_version, client_ip, is_valid, fail_reason, validated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        existingLicense.license_id,
+        user.id,
+        machineFingerprint,
+        clientVersion,
+        clientIp(ctx.request),
+        isUsableExisting ? 1 : 0,
+        isUsableExisting ? "" : "existing_license_inactive",
+        now
+      ),
+      isUsableExisting
+        ? ctx.env.DB.prepare("UPDATE licenses SET last_online_check = ? WHERE id = ?").bind(now, existingLicense.id)
+        : ctx.env.DB.prepare("SELECT 1").bind(),
+    ]);
+    if (!isUsableExisting) {
+      return json({
+        error: "existing_license_inactive",
+        license_id: existingLicense.license_id,
+        edition: existingLicense.edition,
+        expires_at: existingLicense.expires_at,
+      }, 400);
+    }
+    return json(licenseActivationResponse(existingLicense, {
+      idempotent: true,
+      message: "activation_already_completed",
+    }));
+  }
+
+  if (!canUseActivationCode(user, code, machineFingerprint)) {
     return json({ error: "activation_code_invalid_or_used" }, 400);
   }
 
@@ -333,14 +385,12 @@ route("POST", "/v1/license/activate", async (ctx) => {
   }
 
   return json(
-    {
+    licenseActivationResponse({
       license_id: issued.license_id,
       edition: issued.edition,
       expires_at: issued.expires_at,
-      customer_name: issued.payload.customer_name,
-      features: issued.payload.features || {},
-      license_file: issued.payload,
-    },
+      signed_payload: JSON.stringify(issued.payload),
+    }),
     201
   );
 });
@@ -488,6 +538,19 @@ async function downloadLicenseFile(ctx) {
   return json(payload, 200, {
     "content-disposition": `attachment; filename="license-${licenseId}.json"`,
   });
+}
+
+function licenseActivationResponse(license, extras = {}) {
+  const payload = parseJson(license.signed_payload, {});
+  return {
+    license_id: license.license_id,
+    edition: license.edition || payload.edition || "",
+    expires_at: license.expires_at || payload.expires_at || "",
+    customer_name: payload.customer_name || "",
+    features: payload.features || {},
+    license_file: payload,
+    ...extras,
+  };
 }
 
 route("POST", "/v1/usage/report", async (ctx) => {
@@ -2469,10 +2532,18 @@ function activationCode() {
   return parts.join("-");
 }
 
-function canUseActivationCode(user, code) {
-  if (!["active", "assigned"].includes(String(code.status || ""))) return false;
+function canUseActivationCode(user, code, machineFingerprint = "") {
+  const status = String(code.status || "");
+  if (status === "used") {
+    if (!code.used_by_user_id || Number(code.used_by_user_id) !== Number(user.id)) return false;
+  } else if (!["active", "assigned"].includes(status)) {
+    return false;
+  }
   if (code.assigned_to_user_id && Number(code.assigned_to_user_id) !== Number(user.id)) return false;
   if (code.customer_email && normalizeEmail(code.customer_email) !== normalizeEmail(user.email)) return false;
+  if (code.machine_fingerprint_prebind && String(code.machine_fingerprint_prebind).trim() !== String(machineFingerprint || "").trim()) {
+    return false;
+  }
   return true;
 }
 
