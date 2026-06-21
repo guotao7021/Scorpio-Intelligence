@@ -8,10 +8,13 @@ const TEXT_HEADERS = {
   "content-type": "text/plain; charset=utf-8",
 };
 
+const DEFAULT_ANALYSIS_COMPUTE_TIMEOUT_MS = 4500;
+const DEFAULT_ANALYSIS_SHARED_CACHE_SECONDS = 300;
+
 const ROUTES = new Map();
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, executionCtx) {
     const corsHeaders = cors(request, env);
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
@@ -58,7 +61,7 @@ export default {
         }
         return json({ error: "not_found" }, 404, corsHeaders);
       }
-      const result = await handler({ request, env, url, corsHeaders });
+      const result = await handler({ request, env, url, corsHeaders, executionCtx });
       return withCors(result, corsHeaders);
     } catch (error) {
       const message = error && error.publicMessage ? error.publicMessage : "internal_server_error";
@@ -1819,6 +1822,12 @@ async function verifyAnalysisLicense(env, user, licenseId) {
 async function proxyAnalysisCompute(ctx, options) {
   const baseUrl = String(ctx.env.ANALYSIS_COMPUTE_URL || "").replace(/\/+$/, "");
   const token = String(ctx.env.ANALYSIS_COMPUTE_TOKEN || "");
+  const timeoutMs = clampNumber(
+    intEnv(ctx.env.ANALYSIS_COMPUTE_TIMEOUT_MS, DEFAULT_ANALYSIS_COMPUTE_TIMEOUT_MS),
+    1000,
+    15000,
+    DEFAULT_ANALYSIS_COMPUTE_TIMEOUT_MS
+  );
   const headers = {
     "content-type": "application/json",
     "x-scorpio-user-id": String(options.user.id),
@@ -1826,27 +1835,65 @@ async function proxyAnalysisCompute(ctx, options) {
   if (token) {
     headers.authorization = `Bearer ${token}`;
   }
-  const response = await fetch(`${baseUrl}${options.endpoint}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(options.body),
-  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("analysis_compute_timeout"), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${options.endpoint}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(options.body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    const timedOut = controller.signal.aborted || (error && (error.name === "AbortError" || String(error).includes("analysis_compute_timeout")));
+    const status = timedOut ? "compute_timeout" : "compute_error";
+    await recordAnalysisRequest(ctx.env, {
+      user: options.user,
+      license: options.license,
+      endpoint: options.endpoint,
+      assetType: options.body.asset_type || "",
+      assetCode: options.body.code || options.body.market || "",
+      request: options.body,
+      clientIp: clientIp(ctx.request),
+      status,
+      latencyMs: Date.now() - options.startedAt,
+    });
+    return json(analysisComputeFallback(options, status, timeoutMs), timedOut ? 504 : 502);
+  } finally {
+    clearTimeout(timeout);
+  }
+
   const text = await response.text();
   await recordAnalysisRequest(ctx.env, {
     user: options.user,
     license: options.license,
     endpoint: options.endpoint,
     assetType: options.body.asset_type || "",
-    assetCode: options.body.code || "",
+    assetCode: options.body.code || options.body.market || "",
     request: options.body,
     clientIp: clientIp(ctx.request),
     status: response.ok ? "compute_proxy" : "compute_error",
     latencyMs: Date.now() - options.startedAt,
   });
-  return new Response(text, {
+  const proxied = new Response(text, {
     status: response.status,
     headers: JSON_HEADERS,
   });
+  if (response.ok && options.cacheKey && options.cacheSeconds > 0 && typeof caches !== "undefined" && caches.default) {
+    const cached = new Response(text, {
+      status: 200,
+      headers: {
+        ...JSON_HEADERS,
+        "cache-control": `public, max-age=${options.cacheSeconds}`,
+        "x-scorpio-analysis-cache": "store",
+      },
+    });
+    ctx.executionCtx?.waitUntil(caches.default.put(options.cacheKey, cached));
+  }
+  return proxied;
 }
 
 async function handleStockAnalysisPost(ctx, options) {
@@ -1899,12 +1946,48 @@ async function handleSharedAnalysisGet(ctx, options) {
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
 
   if (analysisComputeConfigured(ctx.env)) {
+    const cacheSeconds = clampNumber(
+      intEnv(ctx.env.ANALYSIS_SHARED_CACHE_SECONDS, DEFAULT_ANALYSIS_SHARED_CACHE_SECONDS),
+      0,
+      3600,
+      DEFAULT_ANALYSIS_SHARED_CACHE_SECONDS
+    );
+    const cacheKey = analysisCacheKey(ctx, {
+      endpoint: options.endpoint,
+      market,
+      edition: license ? license.edition : "unlicensed",
+    });
+    if (cacheSeconds > 0 && typeof caches !== "undefined" && caches.default) {
+      const cached = await caches.default.match(cacheKey);
+      if (cached) {
+        await recordAnalysisRequest(ctx.env, {
+          user,
+          license,
+          endpoint: options.endpoint,
+          assetType: options.assetType,
+          assetCode: market,
+          request,
+          clientIp: clientIp(ctx.request),
+          status: "cache_hit",
+          latencyMs: Date.now() - startedAt,
+        });
+        const headers = new Headers(cached.headers);
+        headers.set("x-scorpio-analysis-cache", "hit");
+        return new Response(cached.body, {
+          status: cached.status,
+          statusText: cached.statusText,
+          headers,
+        });
+      }
+    }
     return proxyAnalysisCompute(ctx, {
       endpoint: options.endpoint,
       body: { ...request, user_id: user.id, email: user.email },
       user,
       license,
       startedAt,
+      cacheKey,
+      cacheSeconds,
     });
   }
 
@@ -2031,6 +2114,41 @@ function contractFeatureBundle(request, options) {
     next_actions: ["Bind Analysis Compute before client production rollout."],
     source: safeAnalysisSource(options.endpoint, options.user, options.license),
   };
+}
+
+function analysisComputeFallback(options, status, timeoutMs) {
+  const request = options.body || {};
+  const response = contractFeatureBundle(request, {
+    user: options.user,
+    license: options.license,
+    endpoint: options.endpoint,
+    feature: request.asset_type || "analysis",
+  });
+  response.status = status;
+  response.data_quality = {
+    level: "degraded",
+    freshness: "not_refreshed",
+    missing: ["analysis_compute_response"],
+  };
+  response.summary = {
+    title: status === "compute_timeout" ? "Analysis compute timed out" : "Analysis compute unavailable",
+    brief:
+      status === "compute_timeout"
+        ? `The compute service did not respond within ${timeoutMs}ms. Please retry or use the latest cached result when available.`
+        : "The compute service could not be reached. Please retry after the upstream service is restored.",
+    risk_level: "unknown",
+  };
+  response.next_actions = ["Retry after the compute service recovers.", "Check the admin analysis request log for upstream latency."];
+  return response;
+}
+
+function analysisCacheKey(ctx, options) {
+  const key = new URL(ctx.request.url);
+  key.pathname = `/__analysis_cache${normalizePath(options.endpoint)}`;
+  key.search = "";
+  key.searchParams.set("market", options.market || "CN");
+  key.searchParams.set("edition", options.edition || "unlicensed");
+  return new Request(key.toString(), { method: "GET" });
 }
 
 function safeAnalysisSource(endpoint, user, license) {

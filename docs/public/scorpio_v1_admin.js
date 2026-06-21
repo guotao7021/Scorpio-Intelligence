@@ -754,8 +754,8 @@
       shortText(row.endpoint || "-", 36),
       row.asset_type || "-",
       row.asset_code || "-",
-      row.status || "-",
-      `${row.latency_ms || 0}ms`,
+      { html: analysisStatusBadge(row.status) },
+      { html: latencyBadge(row.latency_ms || 0) },
       row.client_version || "-",
     ]));
   }
@@ -944,10 +944,40 @@
       <div class="admin-table-scroll">
         <table>
           <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+          <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${renderTableCell(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
         </table>
       </div>
     `;
+  }
+
+  function renderTableCell(cell) {
+    if (cell && typeof cell === "object" && Object.prototype.hasOwnProperty.call(cell, "html")) {
+      return cell.html;
+    }
+    return escapeHtml(cell);
+  }
+
+  function analysisStatusBadge(status) {
+    const key = String(status || "unknown").toLowerCase();
+    const labels = {
+      compute_proxy: "实时计算",
+      cache_hit: "缓存命中",
+      compute_timeout: "计算超时",
+      compute_error: "计算异常",
+      contract_ready: "契约就绪",
+    };
+    const level = key === "compute_proxy" || key === "cache_hit" || key === "contract_ready"
+      ? "ok"
+      : key === "compute_timeout"
+        ? "warn"
+        : "danger";
+    return `<span class="status-chip ${level}">${escapeHtml(labels[key] || status || "-")}</span>`;
+  }
+
+  function latencyBadge(value) {
+    const ms = Number(value || 0);
+    const level = ms >= 5000 ? "danger" : ms >= 2000 ? "warn" : "ok";
+    return `<span class="latency-chip ${level}">${escapeHtml(`${ms}ms`)}</span>`;
   }
 
   function switchTab(tab) {

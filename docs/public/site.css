@@ -946,6 +946,36 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
 .admin-table tr:last-child td {
   border-bottom: 0;
 }
+.status-chip,
+.latency-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+.status-chip.ok,
+.latency-chip.ok {
+  color: #7dd3fc;
+  background: rgba(14, 116, 144, 0.16);
+}
+.status-chip.warn,
+.latency-chip.warn {
+  color: var(--gold);
+  border-color: rgba(252, 211, 77, 0.32);
+  background: rgba(252, 211, 77, 0.12);
+}
+.status-chip.danger,
+.latency-chip.danger {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.32);
+  background: rgba(251, 113, 133, 0.12);
+}
 .table-actions {
   display: flex;
   gap: 8px;
