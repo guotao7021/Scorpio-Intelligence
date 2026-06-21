@@ -8,6 +8,11 @@
     sessionEmail: byId("sessionEmail"),
     sessionHint: byId("sessionHint"),
     authStatus: byId("authStatus"),
+    nextStepText: byId("nextStepText"),
+    licenseState: byId("licenseState"),
+    licenseChip: byId("licenseChip"),
+    releaseState: byId("releaseState"),
+    syncState: byId("syncState"),
     authMessage: byId("authMessage"),
     licenseMessage: byId("licenseMessage"),
     loginForm: byId("loginForm"),
@@ -99,7 +104,7 @@
     state.user_id = data.user_id;
     saveAuth();
     renderSession();
-    setMessage(els.authMessage, "登录成功。现在可以激活授权或回到桌面端同步数据。", "success");
+    setMessage(els.authMessage, "登录成功。现在可以激活授权，或回到桌面端同步数据。", "success");
   }
 
   async function onRegister(event) {
@@ -134,7 +139,7 @@
     });
     els.loginEmail.value = els.resetEmail.value.trim();
     switchAuthTab("login");
-    setMessage(els.authMessage, "密码已重置。请重新登录。", "success");
+    setMessage(els.authMessage, "密码已重置，请重新登录。", "success");
   }
 
   async function sendCode(email, purpose, target) {
@@ -155,6 +160,7 @@
   async function onActivate(event) {
     event.preventDefault();
     requireLogin();
+    setLicenseStatus("激活中", "正在激活");
     setMessage(els.licenseMessage, "正在激活授权...", "loading");
     const data = await request("/license/activate", {
       method: "POST",
@@ -166,9 +172,12 @@
       auth: true,
     });
     els.licenseId.value = data.license_id || "";
+    setLicenseStatus(data.edition || "已激活", "已激活");
+    els.nextStepText.textContent = "回到桌面端同步数据";
+    els.syncState.textContent = "可同步";
     setMessage(
       els.licenseMessage,
-      `授权已激活：${data.edition || ""}，有效期至 ${data.expires_at || "待确认"}。`,
+      `授权已激活：${data.edition || "当前版本"}，有效期至 ${data.expires_at || "待确认"}。`,
       "success"
     );
   }
@@ -187,11 +196,19 @@
       auth: true,
     });
     const type = data.valid ? "success" : "warn";
-    setMessage(els.licenseMessage, data.valid ? "授权有效，可以回到桌面端同步数据。" : `授权不可用：${data.message || data.reason || "unknown"}`, type);
+    setLicenseStatus(data.valid ? "授权有效" : "需要处理", data.valid ? "有效" : "异常");
+    els.nextStepText.textContent = data.valid ? "回到桌面端同步数据" : "检查授权信息";
+    els.syncState.textContent = data.valid ? "可同步" : "等待授权";
+    setMessage(
+      els.licenseMessage,
+      data.valid ? "授权有效，可以回到桌面端同步数据。" : `授权不可用：${data.message || data.reason || "unknown"}`,
+      type
+    );
   }
 
   async function refreshRelease() {
     els.releaseBox.classList.add("loading");
+    els.releaseState.textContent = "读取中";
     els.releaseVersion.textContent = "正在读取...";
     els.releaseMeta.textContent = "连接 Cloudflare API 获取最新发行信息。";
     try {
@@ -199,15 +216,18 @@
       els.releaseVersion.textContent = data.version || data.latest_version || "--";
       els.releaseMeta.textContent = data.release_notes || `发布时间：${data.release_date || "未提供"}`;
       if (data.download_url) {
+        els.releaseState.textContent = "可下载";
         els.downloadLink.href = data.download_url;
         els.downloadLink.classList.remove("disabled");
         els.downloadLink.removeAttribute("aria-disabled");
       } else {
+        els.releaseState.textContent = "暂无下载";
         els.downloadLink.href = "#";
         els.downloadLink.classList.add("disabled");
         els.downloadLink.setAttribute("aria-disabled", "true");
       }
     } catch (error) {
+      els.releaseState.textContent = "暂不可用";
       els.releaseVersion.textContent = "暂不可用";
       els.releaseMeta.textContent = error.message || "发行信息读取失败。";
     } finally {
@@ -276,6 +296,8 @@
       ? "已登录。桌面端需要使用同一账号，并绑定有效 License ID 与机器码。"
       : "登录后可激活授权、检查发行包，并让桌面端使用同一账号同步云端数据。";
     els.authStatus.textContent = loggedIn ? "已登录" : "未登录";
+    els.nextStepText.textContent = loggedIn ? "激活或检查授权" : "登录后激活授权";
+    els.syncState.textContent = loggedIn ? "等待授权" : "等待登录";
     els.logoutButton.disabled = !loggedIn;
   }
 
@@ -286,7 +308,13 @@
     state.user_id = "";
     saveAuth();
     renderSession();
+    setLicenseStatus("待激活", "待激活");
     setMessage(els.authMessage, "已退出登录。", "success");
+  }
+
+  function setLicenseStatus(stateText, chipText) {
+    els.licenseState.textContent = stateText;
+    els.licenseChip.textContent = chipText;
   }
 
   function loadAuth() {

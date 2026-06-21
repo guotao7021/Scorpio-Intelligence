@@ -1961,3 +1961,426 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
     justify-content: flex-start;
   }
 }
+
+/* Account console */
+.account-console {
+  width: min(1280px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 38px 0 86px;
+}
+
+.account-page {
+  overflow-x: hidden;
+}
+
+.account-page .site-header {
+  max-width: 100%;
+}
+
+.account-page .site-header nav {
+  min-width: 0;
+}
+
+.account-console-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 16px;
+  padding: 30px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(31, 182, 255, 0.13), transparent 38%),
+    linear-gradient(180deg, rgba(18, 26, 46, 0.94), rgba(8, 13, 25, 0.98));
+}
+
+.account-title-block {
+  min-width: 0;
+}
+
+.account-console * {
+  min-width: 0;
+}
+
+.account-title-block h1 {
+  max-width: none;
+  font-size: 48px;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.account-title-block p:not(.section-kicker) {
+  max-width: 720px;
+  margin: 18px 0 0;
+  color: rgba(244, 241, 248, 0.76);
+  font-size: 17px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.account-next-step {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid rgba(24, 198, 163, 0.24);
+  border-radius: 8px;
+  background: rgba(24, 198, 163, 0.08);
+}
+
+.account-next-step span,
+.account-status-card span {
+  color: rgba(244, 241, 248, 0.58);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.account-next-step strong {
+  color: var(--white);
+  font-size: 21px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.account-next-step p {
+  margin: 0;
+  color: rgba(244, 241, 248, 0.72);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.account-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.account-status-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  column-gap: 12px;
+  min-height: 130px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 18, 34, 0.92);
+}
+
+.account-status-card svg {
+  grid-row: 1 / span 3;
+  width: 24px;
+  height: 24px;
+  color: var(--constellation);
+}
+
+.account-status-card strong {
+  margin-top: 9px;
+  color: var(--white);
+  font-size: 21px;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.account-status-card small {
+  margin-top: 8px;
+  color: rgba(244, 241, 248, 0.56);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.account-console-grid {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.account-rail,
+.account-main {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.account-panel,
+.account-checklist {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(18, 26, 46, 0.96), rgba(8, 13, 25, 0.98));
+}
+
+.account-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.account-auth-card {
+  justify-content: stretch;
+  padding: 24px;
+}
+
+.account-console .panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.account-console .panel-heading h2 {
+  margin: 0;
+  font-size: 29px;
+  line-height: 1.18;
+}
+
+.account-console .panel-heading.compact {
+  display: block;
+}
+
+.account-console .panel-heading.compact h2 {
+  font-size: 27px;
+}
+
+.account-console .panel-heading svg {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  color: var(--constellation);
+}
+
+.account-console .status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  color: var(--gold);
+  border: 1px solid rgba(242, 201, 76, 0.36);
+  border-radius: 999px;
+  background: rgba(242, 201, 76, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.account-license-panel > p,
+.account-panel > p {
+  margin: 0;
+  color: rgba(244, 241, 248, 0.74);
+  line-height: 1.7;
+}
+
+.account-auth-card .auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.account-auth-card .auth-tab {
+  min-width: 0;
+  min-height: 42px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.account-console .auth-form {
+  gap: 14px;
+}
+
+.account-console .auth-form label {
+  min-width: 0;
+}
+
+.account-console .auth-form input {
+  min-width: 0;
+}
+
+.account-console .account-button {
+  width: fit-content;
+  min-width: 132px;
+}
+
+.account-console .code-field {
+  grid-template-columns: minmax(0, 1fr) 126px;
+}
+
+.license-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.license-check-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding-top: 16px;
+  border-top: 1px solid rgba(125, 211, 252, 0.12);
+}
+
+.account-checklist {
+  display: grid;
+  gap: 14px;
+}
+
+.account-checklist ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-checklist li {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.account-checklist li span {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: #07101d;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--cyan), var(--teal));
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.account-checklist li strong {
+  color: var(--white);
+  line-height: 1.35;
+}
+
+.account-checklist li small {
+  color: rgba(244, 241, 248, 0.62);
+  line-height: 1.55;
+}
+
+.account-lower-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.account-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(244, 241, 248, 0.76);
+  line-height: 1.65;
+}
+
+.account-console .release-box {
+  min-height: 126px;
+  border-radius: 8px;
+}
+
+.account-console .release-box strong {
+  overflow-wrap: anywhere;
+}
+
+.account-console .download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.account-console .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  color: var(--ivory);
+  border: 1px solid rgba(244, 241, 248, 0.28);
+  border-radius: 8px;
+  background: rgba(7, 11, 22, 0.42);
+  cursor: pointer;
+}
+
+.account-console .icon-button:hover {
+  border-color: rgba(31, 182, 255, 0.68);
+  color: var(--white);
+}
+
+@media (max-width: 980px) {
+  .account-console {
+    width: auto;
+    max-width: none;
+    margin: 0 14px;
+    padding-top: 26px;
+  }
+
+  .account-page .site-header nav {
+    width: 100%;
+  }
+
+  .account-console-head,
+  .account-console-grid,
+  .account-lower-grid,
+  .license-form,
+  .license-check-form {
+    grid-template-columns: 1fr;
+  }
+
+  .account-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .account-page .site-header nav {
+    display: grid;
+    grid-template-columns: repeat(4, max-content);
+    gap: 12px 16px;
+    font-size: 13px;
+  }
+
+  .account-console p,
+  .account-console small,
+  .account-console li,
+  .account-console strong {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+  }
+
+  .account-console-head,
+  .account-panel,
+  .account-checklist {
+    padding: 20px;
+  }
+
+  .account-title-block h1 {
+    font-size: 36px;
+  }
+
+  .account-status-grid,
+  .account-auth-card .auth-tabs,
+  .account-console .code-field {
+    grid-template-columns: 1fr;
+  }
+
+  .account-console .account-button,
+  .account-console .code-button,
+  .account-console .download-actions .button {
+    width: 100%;
+  }
+}
