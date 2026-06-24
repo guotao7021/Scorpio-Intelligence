@@ -119,10 +119,15 @@
           ? await apiPut(`${ADMIN_PATH}/customers/${customerId}`, payload)
           : await apiPost(`${ADMIN_PATH}/customers`, payload);
         await loadCustomers();
+        if (isTestRecord(result)) {
+          state.showTestRecords = true;
+          if (els.showTestRecords) els.showTestRecords.checked = true;
+        }
         renderMetrics();
         renderCustomerOptions();
         clearCustomerForm();
-        setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}`, "success");
+        const suffix = isTestRecord(result) ? "；已自动打开“显示测试记录”。" : "";
+        setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}${suffix}`, "success");
       });
     });
 
@@ -347,13 +352,15 @@
 
   function renderCustomers() {
     const baseRows = visibleRows(state.customers);
+    const hiddenTestCount = state.customers.length - baseRows.length;
     const rows = baseRows.filter((row) => {
       const matchesStatus = !state.customerStatus || row.status === state.customerStatus;
       const text = [row.customer_name, row.customer_email, row.edition, row.status, row.notes].join(" ").toLowerCase();
       return matchesStatus && (!state.customerQuery || text.includes(state.customerQuery));
     });
     if (!baseRows.length) {
-      els.customersTable.innerHTML = '<div class="empty-state">暂无客户台账。新增客户后会在这里维护。</div>';
+      const hiddenHint = hiddenTestCount > 0 ? `当前隐藏了 ${hiddenTestCount} 条测试记录，勾选右上角“显示测试记录”后可维护。` : "新增客户后会在这里维护。";
+      els.customersTable.innerHTML = `<div class="empty-state">暂无客户台账。${escapeHtml(hiddenHint)}</div>`;
       return;
     }
     if (!rows.length) {
