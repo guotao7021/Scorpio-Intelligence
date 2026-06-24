@@ -1222,6 +1222,12 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
   });
 });
 
+route("GET", "/v1/scorpio_v1_admin/signing/health", async (ctx) => {
+  requireAdmin(ctx);
+  const info = await signingKeyHealth(ctx.env);
+  return json(info);
+});
+
 route("GET", "/v1/scorpio_v1_admin/activation-codes", async (ctx) => {
   requireAdmin(ctx);
   const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
@@ -1366,6 +1372,36 @@ async function deleteAdminCustomer(ctx) {
     return json({ error: "customer_not_found" }, 404);
   }
 
+  if (adminForceDelete(ctx.request)) {
+    const licenseIds = await linkedLicenseIdsForCustomer(ctx.env, customerId);
+    for (const licenseId of licenseIds) {
+      await deleteLicenseDependents(ctx.env, licenseId);
+    }
+    await ctx.env.DB.prepare(
+      `DELETE FROM licenses
+       WHERE activation_code_id IN (SELECT id FROM activation_codes WHERE customer_id = ?)`
+    )
+      .bind(customerId)
+      .run();
+    const deletedCodes = await ctx.env.DB.prepare("DELETE FROM activation_codes WHERE customer_id = ?")
+      .bind(customerId)
+      .run();
+    await ctx.env.DB.prepare("DELETE FROM customers WHERE id = ?").bind(customerId).run();
+    await audit(ctx.env, "force_delete_customer", "admin_api", {
+      customer_id: customerId,
+      email: existing.customer_email,
+      activation_code_count: numberField(deletedCodes.meta || {}, "changes"),
+      license_count: licenseIds.length,
+    });
+    return json({
+      deleted: true,
+      force_deleted: true,
+      id: customerId,
+      activation_code_count: numberField(deletedCodes.meta || {}, "changes"),
+      license_count: licenseIds.length,
+    });
+  }
+
   const linked = await ctx.env.DB.prepare(
     "SELECT COUNT(*) AS activation_code_count FROM activation_codes WHERE customer_id = ?"
   )
@@ -1451,6 +1487,22 @@ async function revokeAdminActivationCode(ctx) {
   const existing = await ctx.env.DB.prepare("SELECT * FROM activation_codes WHERE code = ?").bind(codeText).first();
   if (!existing) {
     return json({ error: "activation_code_not_found" }, 404);
+  }
+  if (adminForceDelete(ctx.request)) {
+    const licenseRows = await ctx.env.DB.prepare("SELECT license_id FROM licenses WHERE activation_code_id = ?")
+      .bind(existing.id)
+      .all();
+    const licenseIds = (licenseRows.results || []).map((row) => row.license_id).filter(Boolean);
+    for (const licenseId of licenseIds) {
+      await deleteLicenseDependents(ctx.env, licenseId);
+    }
+    await ctx.env.DB.prepare("DELETE FROM licenses WHERE activation_code_id = ?").bind(existing.id).run();
+    await ctx.env.DB.prepare("DELETE FROM activation_codes WHERE id = ?").bind(existing.id).run();
+    await audit(ctx.env, "force_delete_activation_code", "admin_api", {
+      code: codeText,
+      license_count: licenseIds.length,
+    });
+    return json({ deleted: true, force_deleted: true, code: codeText, license_count: licenseIds.length });
   }
   if (String(existing.status || "") === "used") {
     return json({ error: "used_activation_code_cannot_be_deleted_revoke_license_instead" }, 409);
@@ -1550,6 +1602,12 @@ async function revokeAdminLicense(ctx) {
   const existing = await ctx.env.DB.prepare("SELECT * FROM licenses WHERE license_id = ?").bind(licenseId).first();
   if (!existing) {
     return json({ error: "license_not_found" }, 404);
+  }
+  if (adminForceDelete(ctx.request)) {
+    await deleteLicenseDependents(ctx.env, licenseId);
+    await ctx.env.DB.prepare("DELETE FROM licenses WHERE license_id = ?").bind(licenseId).run();
+    await audit(ctx.env, "force_delete_license", "admin_api", { license_id: licenseId });
+    return json({ deleted: true, force_deleted: true, license_id: licenseId });
   }
   await ctx.env.DB.prepare(
     `UPDATE licenses
@@ -2791,9 +2849,65 @@ async function issueLicensePayload(env, options) {
 async function signEd25519(env, payload) {
   const privateKeyText = secret(env, "STOCK_SIGNING_PRIVATE_KEY");
   const keyBytes = base64UrlDecode(privateKeyText);
+  if (keyBytes.length !== 32) {
+    throwHttp(500, "stock_signing_private_key_invalid");
+  }
   const data = new TextEncoder().encode(canonicalJson(payload));
   const signature = ed25519.sign(data, keyBytes);
   return `ed25519:${base64UrlEncode(signature)}`;
+}
+
+async function signingKeyHealth(env) {
+  let keyBytes;
+  try {
+    const privateKeyText = secret(env, "STOCK_SIGNING_PRIVATE_KEY");
+    keyBytes = base64UrlDecode(privateKeyText);
+  } catch (error) {
+    return {
+      ok: false,
+      algorithm: "ed25519",
+      private_key_valid: false,
+      key_length: 0,
+      error: error.publicMessage || "stock_signing_private_key_invalid",
+    };
+  }
+  if (keyBytes.length !== 32) {
+    return {
+      ok: false,
+      algorithm: "ed25519",
+      private_key_valid: false,
+      key_length: keyBytes.length,
+      error: "stock_signing_private_key_invalid",
+    };
+  }
+  const publicKey = ed25519.getPublicKey(keyBytes);
+  return {
+    ok: true,
+    algorithm: "ed25519",
+    private_key_valid: true,
+    public_key_fingerprint: `sha256:${await sha256Hex(base64UrlEncode(publicKey))}`,
+  };
+}
+
+function adminForceDelete(request) {
+  const url = new URL(request.url);
+  return url.searchParams.get("force") === "1" && url.searchParams.get("confirm") === "DELETE_TEST_RECORDS";
+}
+
+async function linkedLicenseIdsForCustomer(env, customerId) {
+  const rows = await env.DB.prepare(
+    `SELECT license_id
+     FROM licenses
+     WHERE activation_code_id IN (SELECT id FROM activation_codes WHERE customer_id = ?)`
+  )
+    .bind(customerId)
+    .all();
+  return (rows.results || []).map((row) => row.license_id).filter(Boolean);
+}
+
+async function deleteLicenseDependents(env, licenseId) {
+  await env.DB.prepare("DELETE FROM validation_logs WHERE license_id = ?").bind(licenseId).run();
+  await env.DB.prepare("DELETE FROM usage_reports WHERE license_id = ?").bind(licenseId).run();
 }
 
 function canonicalJson(value) {

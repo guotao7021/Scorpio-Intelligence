@@ -673,6 +673,14 @@ h3 { margin: 0 0 10px; color: var(--white); font-size: 20px; }
   background: var(--teal);
   box-shadow: 0 0 0 5px rgba(24, 198, 163, 0.12);
 }
+.badge-dot.ok {
+  background: var(--teal);
+  box-shadow: 0 0 0 5px rgba(24, 198, 163, 0.12);
+}
+.badge-dot.warn {
+  background: #ff5f7a;
+  box-shadow: 0 0 0 5px rgba(255, 95, 122, 0.14);
+}
 .delivery-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

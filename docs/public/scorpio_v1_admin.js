@@ -6,6 +6,7 @@
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || "",
     overview: null,
+    signingHealth: null,
     customers: [],
     codes: [],
     licenses: [],
@@ -201,6 +202,7 @@
     const customerId = Number(button.dataset.customerId || 0);
     if (button.dataset.customerAction === "edit") editCustomer(customerId);
     if (button.dataset.customerAction === "delete") await deleteCustomer(customerId);
+    if (button.dataset.customerAction === "force-delete") await forceDeleteCustomer(customerId);
   }
 
   async function onCodesTableClick(event) {
@@ -214,6 +216,7 @@
     }
     if (button.dataset.codeAction === "edit") await editActivationCode(code);
     if (button.dataset.codeAction === "revoke") await revokeActivationCode(code);
+    if (button.dataset.codeAction === "force-delete") await forceDeleteActivationCode(code);
   }
 
   async function onLicensesTableClick(event) {
@@ -234,6 +237,7 @@
     if (button.dataset.licenseAction === "extend") await extendLicense(licenseId);
     if (button.dataset.licenseAction === "revoke") await revokeLicense(licenseId);
     if (button.dataset.licenseAction === "restore") await restoreLicense(licenseId);
+    if (button.dataset.licenseAction === "force-delete") await forceDeleteLicense(licenseId);
   }
 
   async function refreshAll() {
@@ -245,6 +249,7 @@
       setMessage("正在读取运营数据...", "loading");
       await Promise.all([
         loadOverview(),
+        loadSigningHealth(),
         loadCustomers(),
         loadCodes(),
         loadLicenses(),
@@ -288,6 +293,10 @@
 
   async function loadOverview() {
     state.overview = await apiGet(`${ADMIN_PATH}/overview`);
+  }
+
+  async function loadSigningHealth() {
+    state.signingHealth = await apiGet(`${ADMIN_PATH}/signing/health`);
   }
 
   async function loadCustomers() {
@@ -366,6 +375,7 @@
         `<div class="table-actions">
           <button class="text-action" type="button" data-customer-action="edit" data-customer-id="${escapeAttr(row.id)}">编辑</button>
           <button class="text-action danger" type="button" data-customer-action="delete" data-customer-id="${escapeAttr(row.id)}">删除/归档</button>
+          ${isTestRecord(row) ? `<button class="text-action danger" type="button" data-customer-action="force-delete" data-customer-id="${escapeAttr(row.id)}">硬删除测试记录</button>` : ""}
         </div>`,
       ])
     );
@@ -407,6 +417,7 @@
           <button class="text-action" type="button" data-code-action="copy" data-code="${escapeAttr(row.code)}">复制</button>
           <button class="text-action" type="button" data-code-action="edit" data-code="${escapeAttr(row.code)}">编辑</button>
           <button class="text-action danger" type="button" data-code-action="revoke" data-code="${escapeAttr(row.code)}" ${row.status === "used" ? "disabled" : ""}>撤销</button>
+          ${isTestRecord(row) ? `<button class="text-action danger" type="button" data-code-action="force-delete" data-code="${escapeAttr(row.code)}">硬删除测试记录</button>` : ""}
         </div>`,
       ])
     );
@@ -446,6 +457,7 @@
             ${row.revoked
               ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeAttr(licenseId)}">恢复</button>`
               : `<button class="text-action danger" type="button" data-license-action="revoke" data-license-id="${escapeAttr(licenseId)}">撤销</button>`}
+            ${isTestRecord(row) ? `<button class="text-action danger" type="button" data-license-action="force-delete" data-license-id="${escapeAttr(licenseId)}">硬删除测试记录</button>` : ""}
           </div>
         </div>
         <div class="license-meta-grid">
@@ -570,6 +582,25 @@
     });
   }
 
+  async function forceDeleteCustomer(customerId) {
+    const row = state.customers.find((item) => Number(item.id) === Number(customerId));
+    if (!row) {
+      setMessage("未找到这条客户记录，请刷新后重试。", "warn");
+      return;
+    }
+    const label = row.customer_name || row.customer_email || `客户#${row.id}`;
+    const confirmation = window.prompt(`硬删除会级联删除 ${label} 的授权码、授权记录、校验日志和使用上报。仅用于清理测试数据。\n请输入 DELETE_TEST_RECORDS 确认。`);
+    if (confirmation !== "DELETE_TEST_RECORDS") {
+      setMessage("已取消硬删除。", "warn");
+      return;
+    }
+    await runAdminAction("正在硬删除测试客户记录...", async () => {
+      const result = await apiDelete(`${ADMIN_PATH}/customers/${customerId}?force=1&confirm=DELETE_TEST_RECORDS`);
+      await refreshAll();
+      setMessage(`测试客户已硬删除：${label}，授权码 ${result.activation_code_count || 0} 条，授权记录 ${result.license_count || 0} 条。`, "success");
+    });
+  }
+
   async function editActivationCode(code) {
     const row = state.codes.find((item) => item.code === code);
     if (!row) return;
@@ -611,6 +642,19 @@
       renderCodes();
       renderMetrics();
       setMessage(`授权码已撤销：${code}`, "success");
+    });
+  }
+
+  async function forceDeleteActivationCode(code) {
+    const confirmation = window.prompt(`硬删除会级联删除授权码 ${code} 关联的授权记录、校验日志和使用上报。仅用于清理测试数据。\n请输入 DELETE_TEST_RECORDS 确认。`);
+    if (confirmation !== "DELETE_TEST_RECORDS") {
+      setMessage("已取消硬删除。", "warn");
+      return;
+    }
+    await runAdminAction("正在硬删除测试授权码...", async () => {
+      const result = await apiDelete(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}?force=1&confirm=DELETE_TEST_RECORDS`);
+      await refreshAll();
+      setMessage(`测试授权码已硬删除：${code}，关联授权记录 ${result.license_count || 0} 条。`, "success");
     });
   }
 
@@ -662,6 +706,19 @@
     });
   }
 
+  async function forceDeleteLicense(licenseId) {
+    const confirmation = window.prompt(`硬删除会删除授权记录 ${licenseId}、校验日志和使用上报。仅用于清理测试数据。\n请输入 DELETE_TEST_RECORDS 确认。`);
+    if (confirmation !== "DELETE_TEST_RECORDS") {
+      setMessage("已取消硬删除。", "warn");
+      return;
+    }
+    await runAdminAction("正在硬删除测试授权记录...", async () => {
+      await apiDelete(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}?force=1&confirm=DELETE_TEST_RECORDS`);
+      await refreshAll();
+      setMessage(`测试授权记录已硬删除：${licenseId}`, "success");
+    });
+  }
+
   async function restoreLicense(licenseId) {
     const row = state.licenses.find((item) => item.license_id === licenseId);
     if (!row) return;
@@ -693,6 +750,9 @@
     els.metricLicensesMeta.textContent = `${licenses.filter((row) => Number(row.is_active) && !Number(row.revoked)).length} 有效`;
     els.metricReleases.textContent = String(releases.length);
     els.metricReleasesMeta.textContent = releases[0] ? `最新 ${releases[0].version || "-"}` : "暂无发行";
+    if (state.signingHealth) {
+      els.metricApi.textContent = state.signingHealth.ok ? "签名正常" : "签名异常";
+    }
   }
 
   function switchTab(tab) {
@@ -804,10 +864,16 @@
   }
 
   function renderStatus(connected) {
+    const signingOk = Boolean(state.signingHealth && state.signingHealth.ok);
+    const signingText = connected
+      ? (signingOk
+        ? `API 已连接，签名密钥正常，公钥指纹 ${shortText(state.signingHealth.public_key_fingerprint || "-", 18)}`
+        : "API 已连接，但签名密钥异常，请检查 STOCK_SIGNING_PRIVATE_KEY")
+      : "输入 Admin Token 后读取数据";
     els.adminStatus.innerHTML = connected
-      ? '<span class="badge-dot ok"></span><div><strong>已连接</strong><small>Cloudflare API 校验通过</small></div>'
+      ? `<span class="badge-dot ${signingOk ? "ok" : "warn"}"></span><div><strong>${signingOk ? "签名正常" : "签名异常"}</strong><small>${escapeHtml(signingText)}</small></div>`
       : '<span class="badge-dot"></span><div><strong>未连接</strong><small>输入 Admin Token 后读取数据</small></div>';
-    els.metricApi.textContent = connected ? "已连接" : "未连接";
+    els.metricApi.textContent = connected ? (signingOk ? "签名正常" : "签名异常") : "未连接";
   }
 
   function showLogin() {
