@@ -5,17 +5,18 @@
 
   const state = {
     token: localStorage.getItem(TOKEN_KEY) || "",
+    overview: null,
     customers: [],
     codes: [],
     licenses: [],
     releases: [],
-    overview: null,
     auditEvents: [],
     usageReports: [],
     analysisRequests: [],
     customerQuery: "",
     customerStatus: "",
     showTestRecords: false,
+    currentTab: "customers",
   };
 
   const els = {
@@ -37,8 +38,8 @@
     clearCustomerFormButton: byId("clearCustomerFormButton"),
     codeForm: byId("codeForm"),
     codeCustomerSelect: byId("codeCustomerSelect"),
-    releaseForm: byId("releaseForm"),
     generatedCodes: byId("generatedCodes"),
+    releaseForm: byId("releaseForm"),
     refreshCustomersButton: byId("refreshCustomersButton"),
     refreshCodesButton: byId("refreshCodesButton"),
     refreshReleasesButton: byId("refreshReleasesButton"),
@@ -65,89 +66,144 @@
     metricApi: byId("metricApi"),
   };
 
-  els.adminToken.value = state.token;
-  els.adminLoginToken.value = state.token;
+  init();
 
-  els.adminLoginForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const token = els.adminLoginToken.value.trim();
-    if (!token) {
-      setLoginMessage("请输入 Admin Token。", "warn");
-      return;
-    }
-    state.token = token;
-    localStorage.setItem(TOKEN_KEY, token);
-    els.adminToken.value = token;
-    setLoginMessage("正在验证管理员身份...", "loading");
-    const ok = await refreshAll();
-    if (ok) {
-      setLoginMessage("", "");
-      showConsole();
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
-      state.token = "";
-      els.adminToken.value = "";
-      els.adminLoginToken.focus();
-    }
-  });
-
-  els.logoutButton.addEventListener("click", () => {
-    clearSession("已退出管理员后台。");
-  });
-
-  els.saveTokenButton.addEventListener("click", async () => {
-    state.token = els.adminToken.value.trim();
-    if (!state.token) {
-      setMessage("请先输入 Admin Token。", "warn");
-      renderStatus(false);
-      return;
-    }
-    localStorage.setItem(TOKEN_KEY, state.token);
+  function init() {
+    els.adminToken.value = state.token;
     els.adminLoginToken.value = state.token;
-    const ok = await refreshAll();
-    if (ok) showConsole();
-  });
 
-  els.clearTokenButton.addEventListener("click", () => {
-    clearSession("已清除本地 Token。");
-  });
-
-  els.customerForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await runAdminAction("正在保存客户台账...", async () => {
-      const payload = formPayload(els.customerForm);
-      payload.license_days = Number(payload.license_days || 365);
-      const customerId = Number(payload.customer_id || 0);
-      delete payload.customer_id;
-      const result = customerId > 0
-        ? await apiPut(`${ADMIN_PATH}/customers/${customerId}`, payload)
-        : await apiPost(`${ADMIN_PATH}/customers`, payload);
-      await loadCustomers();
-      renderMetrics();
-      clearCustomerForm();
-      setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}`, "success");
+    els.adminLoginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const token = els.adminLoginToken.value.trim();
+      if (!token) {
+        setLoginMessage("请输入 Admin Token。", "warn");
+        return;
+      }
+      state.token = token;
+      localStorage.setItem(TOKEN_KEY, token);
+      els.adminToken.value = token;
+      setLoginMessage("正在验证管理员身份...", "loading");
+      const ok = await refreshAll();
+      if (ok) {
+        setLoginMessage("", "");
+        showConsole();
+      } else {
+        clearStoredToken();
+      }
     });
-  });
 
-  els.clearCustomerFormButton.addEventListener("click", () => {
-    clearCustomerForm();
-    setMessage("已切换为新建客户模式。", "success");
-  });
+    els.logoutButton.addEventListener("click", () => clearSession("已退出管理员后台。"));
+    els.saveTokenButton.addEventListener("click", async () => {
+      state.token = els.adminToken.value.trim();
+      if (!state.token) {
+        setMessage("请先输入 Admin Token。", "warn");
+        renderStatus(false);
+        return;
+      }
+      localStorage.setItem(TOKEN_KEY, state.token);
+      els.adminLoginToken.value = state.token;
+      const ok = await refreshAll();
+      if (ok) showConsole();
+    });
+    els.clearTokenButton.addEventListener("click", () => clearSession("已清除本地 Token。"));
 
-  els.customersTable.addEventListener("click", async (event) => {
+    els.customerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await runAdminAction("正在保存客户台账...", async () => {
+        const payload = formPayload(els.customerForm);
+        const customerId = Number(payload.customer_id || 0);
+        payload.license_days = Number(payload.license_days || 365);
+        delete payload.customer_id;
+        const result = customerId > 0
+          ? await apiPut(`${ADMIN_PATH}/customers/${customerId}`, payload)
+          : await apiPost(`${ADMIN_PATH}/customers`, payload);
+        await loadCustomers();
+        renderMetrics();
+        renderCustomerOptions();
+        clearCustomerForm();
+        setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}`, "success");
+      });
+    });
+
+    els.clearCustomerFormButton.addEventListener("click", () => {
+      clearCustomerForm();
+      setMessage("已切换为新建客户模式。", "success");
+    });
+
+    els.codeForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await runAdminAction("正在生成授权码...", async () => {
+        const payload = formPayload(els.codeForm);
+        payload.customer_id = payload.customer_id ? Number(payload.customer_id) : undefined;
+        payload.count = Number(payload.count || 1);
+        payload.license_days = Number(payload.license_days || 365);
+        payload.max_devices = Number(payload.max_devices || 1);
+        const result = await apiPost(`${ADMIN_PATH}/activation-codes`, payload);
+        renderGeneratedCodes(result.codes || []);
+        await Promise.all([loadCustomers(), loadCodes()]);
+        renderMetrics();
+        renderCustomerOptions();
+        setMessage("授权码已生成并刷新列表。", "success");
+      });
+    });
+
+    els.releaseForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await runAdminAction("正在保存发行记录...", async () => {
+        const payload = formPayload(els.releaseForm);
+        payload.file_size_bytes = Number(payload.file_size_bytes || 0);
+        payload.is_required = Boolean(payload.is_required);
+        await apiPost(`${ADMIN_PATH}/releases`, payload);
+        await loadReleases();
+        renderMetrics();
+        setMessage("发行记录已保存，用户中心会读取最新 stable 记录。", "success");
+      });
+    });
+
+    els.customersTable.addEventListener("click", onCustomerTableClick);
+    els.codesTable.addEventListener("click", onCodesTableClick);
+    els.licensesTable.addEventListener("click", onLicensesTableClick);
+    els.refreshCustomersButton.addEventListener("click", () => runAdminAction("正在刷新客户台账...", loadCustomersAndRender));
+    els.refreshCodesButton.addEventListener("click", () => runAdminAction("正在刷新授权码...", loadCodesAndRender));
+    els.refreshReleasesButton.addEventListener("click", () => runAdminAction("正在刷新发行包...", loadReleasesAndRender));
+    els.refreshAllButton.addEventListener("click", refreshAll);
+    els.showTestRecordsToggle.addEventListener("change", () => {
+      state.showTestRecords = els.showTestRecordsToggle.checked;
+      renderAllTables();
+      renderMetrics();
+    });
+    els.customerSearch.addEventListener("input", () => {
+      state.customerQuery = els.customerSearch.value.trim().toLowerCase();
+      renderCustomers();
+    });
+    els.customerStatusFilter.addEventListener("change", () => {
+      state.customerStatus = els.customerStatusFilter.value;
+      renderCustomers();
+    });
+    document.querySelectorAll("[data-admin-tab]").forEach((button) => {
+      button.addEventListener("click", () => switchTab(button.dataset.adminTab));
+    });
+
+    showLogin();
+    renderStatus(false);
+    renderAllTables();
+    renderMetrics();
+    if (state.token) {
+      refreshAll().then((ok) => {
+        if (ok) showConsole();
+      });
+    }
+  }
+
+  async function onCustomerTableClick(event) {
     const button = event.target.closest("[data-customer-action]");
     if (!button) return;
     const customerId = Number(button.dataset.customerId || 0);
-    if (button.dataset.customerAction === "edit") {
-      editCustomer(customerId);
-      return;
-    }
-    if (button.dataset.customerAction === "delete") {
-      await deleteCustomer(customerId);
-    }
-  });
+    if (button.dataset.customerAction === "edit") editCustomer(customerId);
+    if (button.dataset.customerAction === "delete") await deleteCustomer(customerId);
+  }
 
-  els.codesTable.addEventListener("click", async (event) => {
+  async function onCodesTableClick(event) {
     const button = event.target.closest("[data-code-action]");
     if (!button) return;
     const code = button.dataset.code || "";
@@ -156,22 +212,17 @@
       setMessage(`授权码已复制：${code}`, "success");
       return;
     }
-    if (button.dataset.codeAction === "edit") {
-      await editActivationCode(code);
-      return;
-    }
-    if (button.dataset.codeAction === "revoke") {
-      await revokeActivationCode(code);
-    }
-  });
+    if (button.dataset.codeAction === "edit") await editActivationCode(code);
+    if (button.dataset.codeAction === "revoke") await revokeActivationCode(code);
+  }
 
-  els.licensesTable.addEventListener("click", async (event) => {
+  async function onLicensesTableClick(event) {
     const button = event.target.closest("[data-license-action]");
     if (!button) return;
     const licenseId = button.dataset.licenseId || "";
     if (button.dataset.licenseAction === "copy-machine") {
       await copyText(button.dataset.machineFingerprint || "");
-      setMessage("机器指纹已复制。", "success");
+      setMessage("机器码已复制。", "success");
       return;
     }
     if (button.dataset.licenseAction === "copy-license") {
@@ -179,101 +230,20 @@
       setMessage("授权 ID 已复制。", "success");
       return;
     }
-    if (button.dataset.licenseAction === "extend") {
-      await extendLicense(licenseId);
-      return;
-    }
-    if (button.dataset.licenseAction === "revoke") {
-      await revokeLicense(licenseId);
-      return;
-    }
-    if (button.dataset.licenseAction === "restore") {
-      await restoreLicense(licenseId);
-    }
-  });
-
-  els.codeForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await runAdminAction("正在生成授权码...", async () => {
-      const payload = formPayload(els.codeForm);
-      payload.customer_id = payload.customer_id ? Number(payload.customer_id) : undefined;
-      payload.count = Number(payload.count || 1);
-      payload.license_days = Number(payload.license_days || 365);
-      payload.max_devices = Number(payload.max_devices || 1);
-      const result = await apiPost(`${ADMIN_PATH}/activation-codes`, payload);
-      renderGeneratedCodes(result.codes || []);
-      await loadCustomers();
-      await loadCodes();
-      renderMetrics();
-      setMessage("授权码已生成，并已刷新列表。", "success");
-    });
-  });
-
-  els.releaseForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    await runAdminAction("正在保存发行记录...", async () => {
-      const payload = formPayload(els.releaseForm);
-      payload.file_size_bytes = Number(payload.file_size_bytes || 0);
-      payload.is_required = Boolean(payload.is_required);
-      await apiPost(`${ADMIN_PATH}/releases`, payload);
-      await loadReleases();
-      renderMetrics();
-      setMessage("发行记录已保存。用户交付页会读取最新 stable 记录。", "success");
-    });
-  });
-
-  els.refreshCodesButton.addEventListener("click", () => runAdminAction("正在刷新授权码...", async () => {
-    await loadCodes();
-    renderMetrics();
-  }));
-  els.refreshCustomersButton.addEventListener("click", () => runAdminAction("正在刷新客户台账...", async () => {
-    await loadCustomers();
-    renderMetrics();
-  }));
-  els.refreshReleasesButton.addEventListener("click", () => runAdminAction("正在刷新发行包...", async () => {
-    await loadReleases();
-    renderMetrics();
-  }));
-  els.refreshAllButton.addEventListener("click", refreshAll);
-  els.showTestRecordsToggle.addEventListener("change", () => {
-    state.showTestRecords = els.showTestRecordsToggle.checked;
-    renderAllTables();
-    renderMetrics();
-  });
-  els.customerSearch.addEventListener("input", () => {
-    state.customerQuery = els.customerSearch.value.trim().toLowerCase();
-    renderCustomers();
-  });
-  els.customerStatusFilter.addEventListener("change", () => {
-    state.customerStatus = els.customerStatusFilter.value;
-    renderCustomers();
-  });
-
-  document.querySelectorAll("[data-admin-tab]").forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.adminTab));
-  });
-
-  showLogin();
-  renderStatus(false);
-  renderAllTables();
-  renderMetrics();
-  if (state.token) {
-    setLoginMessage("正在恢复管理员登录...", "loading");
-    refreshAll().then((ok) => {
-      if (ok) {
-        setLoginMessage("", "");
-        showConsole();
-      } else {
-        localStorage.removeItem(TOKEN_KEY);
-        state.token = "";
-        els.adminToken.value = "";
-      }
-    });
+    if (button.dataset.licenseAction === "download") await downloadLicense(licenseId);
+    if (button.dataset.licenseAction === "extend") await extendLicense(licenseId);
+    if (button.dataset.licenseAction === "revoke") await revokeLicense(licenseId);
+    if (button.dataset.licenseAction === "restore") await restoreLicense(licenseId);
   }
 
   async function refreshAll() {
-    return runAdminAction("正在连接管理员 API...", async () => {
-      const results = await Promise.allSettled([
+    if (!state.token) {
+      renderStatus(false);
+      return false;
+    }
+    try {
+      setMessage("正在读取运营数据...", "loading");
+      await Promise.all([
         loadOverview(),
         loadCustomers(),
         loadCodes(),
@@ -283,22 +253,37 @@
         loadUsageReports(),
         loadAnalysisRequests(),
       ]);
-      const rejected = results.filter((item) => item.status === "rejected");
-      const tokenError = rejected.find((item) => item.reason && item.reason.code === "admin_token_required");
-      if (tokenError) {
-        throw tokenError.reason;
-      }
-      if (rejected.length) {
-        throw rejected[0].reason || new Error("admin_api_unavailable");
-      }
       renderStatus(true);
+      renderAllTables();
       renderMetrics();
-      if (rejected.some((item) => item.reason && item.reason.code === "not_found")) {
-        setMessage("基础管理员接口已连接；发行包接口需要重新部署 Cloudflare Worker 后可用。", "warn");
-        return;
-      }
-      setMessage("管理员 API 已连接。", "success");
-    });
+      renderCustomerOptions();
+      setMessage("运营数据已刷新。", "success");
+      return true;
+    } catch (error) {
+      renderStatus(false);
+      setMessage(error.message || "后台连接失败。", "error");
+      setLoginMessage(error.message || "后台连接失败。", "error");
+      return false;
+    }
+  }
+
+  async function loadCustomersAndRender() {
+    await loadCustomers();
+    renderCustomers();
+    renderCustomerOptions();
+    renderMetrics();
+  }
+
+  async function loadCodesAndRender() {
+    await loadCodes();
+    renderCodes();
+    renderMetrics();
+  }
+
+  async function loadReleasesAndRender() {
+    await loadReleases();
+    renderReleases();
+    renderMetrics();
   }
 
   async function loadOverview() {
@@ -306,46 +291,38 @@
   }
 
   async function loadCustomers() {
-    const data = await apiGet(`${ADMIN_PATH}/customers`);
-    state.customers = data.results || [];
-    renderCustomers();
-    renderCustomerOptions();
+    const data = await apiGet(`${ADMIN_PATH}/customers?limit=500`);
+    state.customers = data.items || data.customers || [];
   }
 
   async function loadCodes() {
-    const data = await apiGet(`${ADMIN_PATH}/activation-codes`);
-    state.codes = data.results || [];
-    renderCodes();
+    const data = await apiGet(`${ADMIN_PATH}/activation-codes?limit=500`);
+    state.codes = data.items || data.codes || [];
   }
 
   async function loadLicenses() {
-    const data = await apiGet(`${ADMIN_PATH}/licenses`);
-    state.licenses = data.results || [];
-    renderLicenses();
+    const data = await apiGet(`${ADMIN_PATH}/licenses?limit=500`);
+    state.licenses = data.items || data.licenses || [];
   }
 
   async function loadReleases() {
-    const data = await apiGet(`${ADMIN_PATH}/releases`);
-    state.releases = data.results || [];
-    renderReleases();
+    const data = await apiGet(`${ADMIN_PATH}/releases?limit=100`);
+    state.releases = data.items || data.releases || [];
   }
 
   async function loadAuditEvents() {
-    const data = await apiGet(`${ADMIN_PATH}/audit-events`);
-    state.auditEvents = data.results || [];
-    renderAuditEvents();
+    const data = await apiGet(`${ADMIN_PATH}/audit-events?limit=100`);
+    state.auditEvents = data.items || data.events || [];
   }
 
   async function loadUsageReports() {
-    const data = await apiGet(`${ADMIN_PATH}/usage-reports`);
-    state.usageReports = data.results || [];
-    renderUsageReports();
+    const data = await apiGet(`${ADMIN_PATH}/usage-reports?limit=100`);
+    state.usageReports = data.items || data.reports || [];
   }
 
   async function loadAnalysisRequests() {
-    const data = await apiGet(`${ADMIN_PATH}/analysis-requests`);
-    state.analysisRequests = data.results || [];
-    renderAnalysisRequests();
+    const data = await apiGet(`${ADMIN_PATH}/analysis-requests?limit=100`);
+    state.analysisRequests = data.items || data.requests || [];
   }
 
   function renderAllTables() {
@@ -356,97 +333,42 @@
     renderAuditEvents();
     renderUsageReports();
     renderAnalysisRequests();
-    renderCustomerOptions();
-  }
-
-  function visibleRows(rows) {
-    return state.showTestRecords ? rows : rows.filter((row) => !isTestRecord(row));
-  }
-
-  function isTestRecord(row) {
-    const fields = [
-      row.code,
-      row.activation_code,
-      row.license_id,
-      row.customer_name,
-      row.customer_email,
-      row.email,
-      row.username,
-      row.machine_fingerprint,
-      row.machine_fingerprint_prebind,
-      row.notes,
-    ].join(" ").toLowerCase();
-    return (
-      fields.includes("cf-test") ||
-      fields.includes("@example.com") ||
-      /\+cf\d*@/.test(fields) ||
-      /^cf-test-/i.test(String(row.machine_fingerprint || row.code || ""))
-    );
+    switchTab(state.currentTab);
   }
 
   function renderCustomers() {
     const baseRows = visibleRows(state.customers);
     const rows = baseRows.filter((row) => {
       const matchesStatus = !state.customerStatus || row.status === state.customerStatus;
-      const haystack = [
-        row.customer_name,
-        row.customer_email,
-        row.edition,
-        row.status,
-        row.notes,
-      ].join(" ").toLowerCase();
-      const matchesQuery = !state.customerQuery || haystack.includes(state.customerQuery);
-      return matchesStatus && matchesQuery;
+      const text = [row.customer_name, row.customer_email, row.edition, row.status, row.notes].join(" ").toLowerCase();
+      return matchesStatus && (!state.customerQuery || text.includes(state.customerQuery));
     });
     if (!baseRows.length) {
-      els.customersTable.innerHTML = '<div class="empty-state">暂无客户台账。新增测试客户后会在这里维护。</div>';
+      els.customersTable.innerHTML = '<div class="empty-state">暂无客户台账。新增客户后会在这里维护。</div>';
       return;
     }
     if (!rows.length) {
-      els.customersTable.innerHTML = '<div class="empty-state">没有匹配的客户记录。请调整搜索条件或状态过滤。</div>';
+      els.customersTable.innerHTML = '<div class="empty-state">没有匹配的客户记录，请调整搜索条件。</div>';
       return;
     }
-    els.customersTable.innerHTML = `
-      <div class="admin-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>客户</th>
-              <th>邮箱</th>
-              <th>版本</th>
-              <th>天数</th>
-              <th>状态</th>
-              <th>授权码</th>
-              <th>已使用</th>
-              <th>最近发码</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                <td><strong>${escapeHtml(row.customer_name || `客户#${row.id}`)}</strong></td>
-                <td>${escapeHtml(row.customer_email || "-")}</td>
-                <td>${escapeHtml(row.edition || "-")}</td>
-                <td>${escapeHtml(row.license_days || "-")}</td>
-                <td>${escapeHtml(customerStatusLabel(row.status))}</td>
-                <td>${escapeHtml(row.activation_code_count || 0)}</td>
-                <td>${escapeHtml(row.used_code_count || 0)}</td>
-                <td>${escapeHtml(formatDate(row.latest_code_created_at))}</td>
-                <td>${escapeHtml(formatDate(row.updated_at))}</td>
-                <td>
-                  <div class="table-actions">
-                    <button class="text-action" type="button" data-customer-action="edit" data-customer-id="${escapeHtml(row.id)}">编辑</button>
-                    <button class="text-action danger" type="button" data-customer-action="delete" data-customer-id="${escapeHtml(row.id)}">删除</button>
-                  </div>
-                </td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-    `;
+    els.customersTable.innerHTML = tableHtml(
+      ["客户", "邮箱", "版本", "天数", "状态", "授权码", "已使用", "最近发码", "更新", "操作"],
+      rows.map((row) => [
+        `<strong>${escapeHtml(row.customer_name || `客户#${row.id}`)}</strong>`,
+        escapeHtml(row.customer_email || "-"),
+        escapeHtml(row.edition || "-"),
+        escapeHtml(row.license_days || "-"),
+        escapeHtml(customerStatusLabel(row.status)),
+        escapeHtml(row.activation_code_count || 0),
+        escapeHtml(row.used_code_count || 0),
+        escapeHtml(formatDate(row.latest_code_created_at)),
+        escapeHtml(formatDate(row.updated_at)),
+        `<div class="table-actions">
+          <button class="text-action" type="button" data-customer-action="edit" data-customer-id="${escapeAttr(row.id)}">编辑</button>
+          <button class="text-action danger" type="button" data-customer-action="delete" data-customer-id="${escapeAttr(row.id)}">删除/归档</button>
+        </div>`,
+      ])
+    );
   }
 
   function renderCustomerOptions() {
@@ -454,8 +376,8 @@
     els.codeCustomerSelect.innerHTML = [
       '<option value="">不关联台账</option>',
       ...visibleRows(state.customers).map((row) => {
-        const label = `${row.customer_name || row.customer_email || `客户#${row.id}`} ${row.customer_email ? `(${row.customer_email})` : ""}`;
-        return `<option value="${escapeHtml(row.id)}">${escapeHtml(label)}</option>`;
+        const label = `${row.customer_name || row.customer_email || `客户#${row.id}`}${row.customer_email ? ` (${row.customer_email})` : ""}`;
+        return `<option value="${escapeAttr(row.id)}">${escapeHtml(label)}</option>`;
       }),
     ].join("");
     if ([...els.codeCustomerSelect.options].some((option) => option.value === selected)) {
@@ -463,10 +385,143 @@
     }
   }
 
+  function renderCodes() {
+    const rows = visibleRows(state.codes);
+    if (!rows.length) {
+      els.codesTable.innerHTML = '<div class="empty-state">暂无授权码。</div>';
+      return;
+    }
+    els.codesTable.innerHTML = tableHtml(
+      ["授权码", "版本", "天数", "设备", "状态", "客户", "邮箱", "创建", "使用", "操作"],
+      rows.map((row) => [
+        `<strong>${escapeHtml(row.code)}</strong>`,
+        escapeHtml(row.edition || "-"),
+        escapeHtml(row.license_days || "-"),
+        escapeHtml(row.max_devices || "-"),
+        escapeHtml(statusLabel(row.status)),
+        escapeHtml(row.customer_name || (row.customer_id ? `客户#${row.customer_id}` : "-")),
+        escapeHtml(row.customer_email || "-"),
+        escapeHtml(formatDate(row.created_at)),
+        escapeHtml(formatDate(row.used_at)),
+        `<div class="table-actions">
+          <button class="text-action" type="button" data-code-action="copy" data-code="${escapeAttr(row.code)}">复制</button>
+          <button class="text-action" type="button" data-code-action="edit" data-code="${escapeAttr(row.code)}">编辑</button>
+          <button class="text-action danger" type="button" data-code-action="revoke" data-code="${escapeAttr(row.code)}" ${row.status === "used" ? "disabled" : ""}>撤销</button>
+        </div>`,
+      ])
+    );
+  }
+
+  function renderLicenses() {
+    const rows = visibleRows(state.licenses);
+    if (!rows.length) {
+      els.licensesTable.innerHTML = state.licenses.length
+        ? '<div class="empty-state">测试授权记录已隐藏。打开“显示测试记录”可查看。</div>'
+        : '<div class="empty-state">暂无授权记录。</div>';
+      return;
+    }
+    els.licensesTable.innerHTML = `
+      <div class="license-record-list">
+        ${rows.map((row) => licenseCard(row)).join("")}
+      </div>
+    `;
+  }
+
+  function licenseCard(row) {
+    const licenseId = row.license_id || "-";
+    const machineFingerprint = row.machine_fingerprint || "-";
+    const statusText = row.revoked ? "已撤销" : row.is_active ? "有效" : "停用";
+    return `
+      <article class="license-record">
+        <div class="license-record-head">
+          <div class="license-identity">
+            <strong>${escapeHtml(row.email || row.username || "-")}</strong>
+            <span>${escapeHtml(row.edition || "-")} / ${escapeHtml(statusText)} / ${escapeHtml(row.approval_status || "-")}</span>
+          </div>
+          <div class="table-actions">
+            <button class="text-action" type="button" data-license-action="copy-license" data-license-id="${escapeAttr(licenseId)}">复制授权 ID</button>
+            <button class="text-action" type="button" data-license-action="copy-machine" data-machine-fingerprint="${escapeAttr(row.machine_fingerprint || "")}" data-license-id="${escapeAttr(licenseId)}">复制机器码</button>
+            <button class="text-action" type="button" data-license-action="download" data-license-id="${escapeAttr(licenseId)}">下载授权文件</button>
+            <button class="text-action" type="button" data-license-action="extend" data-license-id="${escapeAttr(licenseId)}">延期/编辑</button>
+            ${row.revoked
+              ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeAttr(licenseId)}">恢复</button>`
+              : `<button class="text-action danger" type="button" data-license-action="revoke" data-license-id="${escapeAttr(licenseId)}">撤销</button>`}
+          </div>
+        </div>
+        <div class="license-meta-grid">
+          <div><span>授权 ID</span><code>${escapeHtml(licenseId)}</code></div>
+          <div><span>授权码</span><code>${escapeHtml(row.activation_code || "-")}</code></div>
+          <div><span>到期日</span><strong>${escapeHtml(formatDate(row.expires_at))}</strong></div>
+          <div><span>最近在线</span><strong>${escapeHtml(formatDate(row.last_online_check))}</strong></div>
+        </div>
+        <div class="machine-block">
+          <span>机器指纹</span>
+          <code class="machine-fingerprint" title="${escapeAttr(machineFingerprint)}">${escapeHtml(machineFingerprint)}</code>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderReleases() {
+    renderTable(els.releasesTable, ["版本", "通道", "版本类型", "下载地址", "SHA256", "强制", "发布时间"], state.releases.map((row) => [
+      `v${String(row.version || "").replace(/^v/i, "")}`,
+      row.channel,
+      row.edition,
+      shortText(row.download_url || "-", 46),
+      row.file_hash_sha256 ? shortText(row.file_hash_sha256, 18) : "-",
+      row.is_required ? "是" : "否",
+      formatDate(row.released_at),
+    ]));
+  }
+
+  function renderAuditEvents() {
+    renderTable(els.auditTable, ["时间", "操作", "操作者", "内容"], state.auditEvents.map((row) => [
+      formatDate(row.created_at),
+      row.action,
+      row.actor,
+      shortText(row.payload || "-", 90),
+    ]));
+  }
+
+  function renderUsageReports() {
+    renderTable(els.usageTable, ["时间", "授权", "机器", "版本", "会话秒数"], state.usageReports.map((row) => [
+      formatDate(row.created_at || row.session_start),
+      shortText(row.license_id || "-", 24),
+      shortText(row.machine_fingerprint || "-", 28),
+      row.client_version || "-",
+      row.session_duration_seconds || "-",
+    ]));
+  }
+
+  function renderAnalysisRequests() {
+    renderTable(els.analysisTable, ["时间", "接口", "标的", "状态", "耗时"], state.analysisRequests.map((row) => [
+      formatDate(row.created_at),
+      row.endpoint || "-",
+      [row.asset_type, row.asset_code].filter(Boolean).join(":") || "-",
+      row.status || "-",
+      row.latency_ms ? `${row.latency_ms}ms` : "-",
+    ]));
+  }
+
+  function renderGeneratedCodes(codes) {
+    if (!codes.length) {
+      els.generatedCodes.classList.add("hidden");
+      els.generatedCodes.innerHTML = "";
+      return;
+    }
+    els.generatedCodes.classList.remove("hidden");
+    els.generatedCodes.innerHTML = `
+      <strong>本次生成</strong>
+      <div class="code-list">
+        ${codes.map((code) => `<code>${escapeHtml(code)}</code>`).join("")}
+      </div>
+    `;
+  }
+
   function editCustomer(customerId) {
     const row = state.customers.find((item) => Number(item.id) === Number(customerId));
     if (!row) {
-      setMessage("未找到这条客户记录，请刷新客户台账后重试。", "warn");
+      setMessage("未找到这条客户记录，请刷新后重试。", "warn");
       return;
     }
     const fields = els.customerForm.elements;
@@ -495,148 +550,40 @@
   async function deleteCustomer(customerId) {
     const row = state.customers.find((item) => Number(item.id) === Number(customerId));
     if (!row) {
-      setMessage("未找到这条客户记录，请刷新客户台账后重试。", "warn");
+      setMessage("未找到这条客户记录，请刷新后重试。", "warn");
       return;
     }
     const label = row.customer_name || row.customer_email || `客户#${row.id}`;
-    const codeCount = Number(row.activation_code_count || 0);
-    const prompt = codeCount > 0
-      ? `${label} 已有关联授权码，将改为“已取消/归档”，保留审计链路。确认处理？`
-      : `确认删除测试客户 ${label}？`;
+    const linked = Number(row.activation_code_count || 0);
+    const prompt = linked > 0
+      ? `${label} 已有关联授权码或授权记录，将归档为“取消”以保留审计链路。确认处理？`
+      : `确认删除客户 ${label}？`;
     if (!window.confirm(prompt)) return;
-
     await runAdminAction("正在处理客户记录...", async () => {
       const result = await apiDelete(`${ADMIN_PATH}/customers/${customerId}`);
       await loadCustomers();
+      renderCustomerOptions();
+      renderCustomers();
       renderMetrics();
-      if (Number(els.customerId.value || 0) === Number(customerId)) {
-        clearCustomerForm();
-      }
+      if (Number(els.customerId.value || 0) === Number(customerId)) clearCustomerForm();
       setMessage(result.archived ? `客户已归档：${label}` : `客户已删除：${label}`, "success");
     });
-  }
-
-  function renderCodes() {
-    const rows = visibleRows(state.codes);
-    if (!rows.length) {
-      els.codesTable.innerHTML = '<div class="empty-state">暂无授权码</div>';
-      return;
-    }
-    els.codesTable.innerHTML = `
-      <div class="admin-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>授权码</th>
-              <th>版本</th>
-              <th>天数</th>
-              <th>设备</th>
-              <th>状态</th>
-              <th>客户</th>
-              <th>客户邮箱</th>
-              <th>创建时间</th>
-              <th>使用时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => `
-              <tr>
-                <td><strong>${escapeHtml(row.code)}</strong></td>
-                <td>${escapeHtml(row.edition || "-")}</td>
-                <td>${escapeHtml(row.license_days || "-")}</td>
-                <td>${escapeHtml(row.max_devices || "-")}</td>
-                <td>${escapeHtml(statusLabel(row.status))}</td>
-                <td>${escapeHtml(row.customer_name || (row.customer_id ? `客户#${row.customer_id}` : "-"))}</td>
-                <td>${escapeHtml(row.customer_email || "-")}</td>
-                <td>${escapeHtml(formatDate(row.created_at))}</td>
-                <td>${escapeHtml(formatDate(row.used_at))}</td>
-                <td>
-                  <div class="table-actions">
-                    <button class="text-action" type="button" data-code-action="copy" data-code="${escapeHtml(row.code)}">复制</button>
-                    <button class="text-action" type="button" data-code-action="edit" data-code="${escapeHtml(row.code)}">编辑</button>
-                    <button class="text-action danger" type="button" data-code-action="revoke" data-code="${escapeHtml(row.code)}" ${row.status === "used" ? "disabled" : ""}>撤销</button>
-                  </div>
-                </td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  function renderLicenses() {
-    const rows = visibleRows(state.licenses);
-    if (!rows.length) {
-      els.licensesTable.innerHTML = state.licenses.length
-        ? '<div class="empty-state">测试授权记录已隐藏。需要核对历史测试数据时，打开右上角“显示测试记录”。</div>'
-        : '<div class="empty-state">暂无授权记录</div>';
-      return;
-    }
-    els.licensesTable.innerHTML = `
-      <div class="license-record-list">
-        ${rows.map((row) => {
-          const licenseId = row.license_id || "-";
-          const machineFingerprint = row.machine_fingerprint || "-";
-          const statusText = row.revoked ? "已撤销" : row.is_active ? "有效" : "停用";
-          return `
-            <article class="license-record">
-              <div class="license-record-head">
-                <div class="license-identity">
-                  <strong>${escapeHtml(row.email || row.username || "-")}</strong>
-                  <span>${escapeHtml(row.edition || "-")} · ${escapeHtml(statusText)} · ${escapeHtml(row.approval_status || "-")}</span>
-                </div>
-                <div class="table-actions">
-                  <button class="text-action" type="button" data-license-action="copy-machine" data-machine-fingerprint="${escapeHtml(row.machine_fingerprint || "")}" data-license-id="${escapeHtml(licenseId)}">复制机器码</button>
-                  <button class="text-action" type="button" data-license-action="copy-license" data-license-id="${escapeHtml(licenseId)}">复制授权</button>
-                  <button class="text-action" type="button" data-license-action="extend" data-license-id="${escapeHtml(licenseId)}">延期</button>
-                  ${row.revoked
-                    ? `<button class="text-action" type="button" data-license-action="restore" data-license-id="${escapeHtml(licenseId)}">恢复</button>`
-                    : `<button class="text-action danger" type="button" data-license-action="revoke" data-license-id="${escapeHtml(licenseId)}">撤销</button>`}
-                </div>
-              </div>
-              <div class="license-meta-grid">
-                <div>
-                  <span>授权 ID</span>
-                  <code>${escapeHtml(licenseId)}</code>
-                </div>
-                <div>
-                  <span>授权码</span>
-                  <code>${escapeHtml(row.activation_code || "-")}</code>
-                </div>
-                <div>
-                  <span>到期</span>
-                  <strong>${escapeHtml(formatDate(row.expires_at))}</strong>
-                </div>
-                <div>
-                  <span>最近在线</span>
-                  <strong>${escapeHtml(formatDate(row.last_online_check))}</strong>
-                </div>
-              </div>
-              <div class="machine-block">
-                <span>机器指纹</span>
-                <code class="machine-fingerprint" title="${escapeHtml(machineFingerprint)}">${escapeHtml(machineFingerprint)}</code>
-              </div>
-            </article>
-          `;
-        }).join("")}
-      </div>
-    `;
   }
 
   async function editActivationCode(code) {
     const row = state.codes.find((item) => item.code === code);
     if (!row) return;
-    const days = window.prompt("授权天数。已使用的授权码不会反向修改已签发授权。", row.license_days || 365);
+    const days = promptNumber("授权天数。已使用授权码不会反向修改已签发授权。", row.license_days || 365);
     if (days === null) return;
-    const maxDevices = window.prompt("设备数。已使用的授权码不会反向修改已签发授权。", row.max_devices || 1);
+    const maxDevices = promptNumber("设备数。已使用授权码不会反向修改已签发授权。", row.max_devices || 1);
     if (maxDevices === null) return;
-    const status = row.status === "used" ? "used" : (window.prompt("状态：active / assigned / suspended / revoked", row.status || "active") || row.status);
+    const status = row.status === "used"
+      ? "used"
+      : (window.prompt("状态：active / assigned / suspended / revoked", row.status || "active") || row.status);
     await runAdminAction("正在更新授权码...", async () => {
       await apiPut(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}`, {
-        license_days: Number(days || row.license_days || 365),
-        max_devices: Number(maxDevices || row.max_devices || 1),
+        license_days: days,
+        max_devices: maxDevices,
         status,
         customer_name: row.customer_name || "",
         customer_email: row.customer_email || "",
@@ -644,6 +591,7 @@
         notes: row.notes || "",
       });
       await loadCodes();
+      renderCodes();
       renderMetrics();
       setMessage("授权码已更新。已签发授权请在“授权记录”中单独延期或撤销。", "success");
     });
@@ -660,31 +608,46 @@
     await runAdminAction("正在撤销授权码...", async () => {
       await apiDelete(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}`);
       await loadCodes();
+      renderCodes();
       renderMetrics();
       setMessage(`授权码已撤销：${code}`, "success");
     });
   }
 
+  async function downloadLicense(licenseId) {
+    if (!licenseId || licenseId === "-") return;
+    window.open(`${API_BASE}/license/download/${encodeURIComponent(licenseId)}`, "_blank", "noopener");
+  }
+
   async function extendLicense(licenseId) {
     const row = state.licenses.find((item) => item.license_id === licenseId);
     if (!row) return;
-    const days = window.prompt("从当前到期日继续延期天数", "30");
-    if (days === null) return;
-    const value = Number(days);
-    if (!Number.isFinite(value) || value <= 0) {
-      setMessage("延期天数必须大于 0。", "warn");
-      return;
+    const mode = window.prompt("输入延期天数，或直接输入新的到期日 YYYY-MM-DD。", "30");
+    if (mode === null) return;
+    const payload = {
+      is_active: true,
+      revoked: false,
+      approval_status: row.approval_status || "auto",
+    };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(mode.trim())) {
+      payload.expires_at = mode.trim();
+    } else {
+      const days = Number(mode);
+      if (!Number.isFinite(days) || days <= 0) {
+        setMessage("延期天数必须大于 0，或输入 YYYY-MM-DD 格式到期日。", "warn");
+        return;
+      }
+      payload.extend_days = days;
     }
-    await runAdminAction("正在延期并重新签名授权...", async () => {
-      await apiPut(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`, {
-        extend_days: value,
-        is_active: true,
-        revoked: false,
-        approval_status: row.approval_status || "auto",
-      });
+    const machine = window.prompt("机器码。如不调整请保持原值。", row.machine_fingerprint || "");
+    if (machine === null) return;
+    payload.machine_fingerprint = machine.trim();
+    await runAdminAction("正在更新并重新签名授权...", async () => {
+      await apiPut(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`, payload);
       await loadLicenses();
+      renderLicenses();
       renderMetrics();
-      setMessage("授权已延期并重新签名。客户端在线校验或刷新授权后生效。", "success");
+      setMessage("授权已更新并重新签名。客户端在线校验或重新下载授权文件后生效。", "success");
     });
   }
 
@@ -693,6 +656,7 @@
     await runAdminAction("正在撤销授权...", async () => {
       await apiDelete(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`);
       await loadLicenses();
+      renderLicenses();
       renderMetrics();
       setMessage("授权已撤销。", "success");
     });
@@ -710,171 +674,140 @@
         approval_status: row.approval_status || "auto",
       });
       await loadLicenses();
+      renderLicenses();
       renderMetrics();
       setMessage("授权已恢复。", "success");
     });
   }
 
-  function renderReleases() {
-    renderTable(els.releasesTable, ["版本", "通道", "版本类型", "下载地址", "SHA256", "强制", "发布时间"], state.releases.map((row) => [
-      `v${String(row.version || "").replace(/^v/i, "")}`,
-      row.channel,
-      row.edition,
-      shortText(row.download_url || "-", 46),
-      row.file_hash_sha256 ? shortText(row.file_hash_sha256, 18) : "-",
-      row.is_required ? "是" : "否",
-      formatDate(row.released_at),
-    ]));
-  }
-
-  function renderAuditEvents() {
-    renderTable(els.auditTable, ["时间", "操作", "操作者", "内容"], state.auditEvents.map((row) => [
-      formatDate(row.created_at),
-      row.action || "-",
-      row.actor || "-",
-      shortText(row.payload || "-", 86),
-    ]));
-  }
-
-  function renderUsageReports() {
-    renderTable(els.usageTable, ["上报时间", "授权 ID", "用户", "版本", "系统", "会话秒数", "功能使用"], state.usageReports.map((row) => [
-      formatDate(row.reported_at),
-      shortText(row.license_id || "-", 26),
-      row.user_id || "-",
-      row.client_version || "-",
-      row.os_version || "-",
-      row.session_duration_seconds || 0,
-      shortText(row.feature_usage || "{}", 86),
-    ]));
-  }
-
-  function renderAnalysisRequests() {
-    renderTable(els.analysisTable, ["时间", "接口", "资产", "代码", "状态", "耗时", "客户端"], state.analysisRequests.map((row) => [
-      formatDate(row.created_at),
-      shortText(row.endpoint || "-", 36),
-      row.asset_type || "-",
-      row.asset_code || "-",
-      { html: analysisStatusBadge(row.status) },
-      { html: latencyBadge(row.latency_ms || 0) },
-      row.client_version || "-",
-    ]));
-  }
-
   function renderMetrics() {
-    const visibleCustomers = visibleRows(state.customers);
-    const visibleCodes = visibleRows(state.codes);
-    const visibleLicenses = visibleRows(state.licenses);
-    const activeCustomers = visibleCustomers.filter((row) => ["active", "issued"].includes(row.status)).length;
-    const activeCodes = visibleCodes.filter((row) => row.status === "active" || row.status === "assigned").length;
-    const usedCodes = visibleCodes.filter((row) => row.status === "used").length;
-    const activeLicenses = visibleLicenses.filter((row) => row.is_active && !row.revoked).length;
+    const customers = visibleRows(state.customers);
+    const codes = visibleRows(state.codes);
+    const licenses = visibleRows(state.licenses);
+    const releases = state.releases;
+    els.metricCustomers.textContent = String(customers.length);
+    els.metricCustomersMeta.textContent = `${countBy(customers, "active")} 活跃 / ${countBy(customers, "cancelled")} 归档`;
+    els.metricCodes.textContent = String(codes.length);
+    els.metricCodesMeta.textContent = `${countBy(codes, "active")} 可用 / ${countBy(codes, "used")} 已用`;
+    els.metricLicenses.textContent = String(licenses.length);
+    els.metricLicensesMeta.textContent = `${licenses.filter((row) => Number(row.is_active) && !Number(row.revoked)).length} 有效`;
+    els.metricReleases.textContent = String(releases.length);
+    els.metricReleasesMeta.textContent = releases[0] ? `最新 ${releases[0].version || "-"}` : "暂无发行";
+  }
 
-    if (state.overview) {
-      const overview = state.overview;
-      const analysis = overview.analysis || {};
+  function switchTab(tab) {
+    state.currentTab = tab || "customers";
+    document.querySelectorAll("[data-admin-tab]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.adminTab === state.currentTab);
+    });
+    els.customerTableToolbar.classList.toggle("hidden", state.currentTab !== "customers");
+    els.customersTable.classList.toggle("hidden", state.currentTab !== "customers");
+    els.codesTable.classList.toggle("hidden", state.currentTab !== "codes");
+    els.licensesTable.classList.toggle("hidden", state.currentTab !== "licenses");
+    els.releasesTable.classList.toggle("hidden", state.currentTab !== "releases");
+    els.auditTable.classList.toggle("hidden", state.currentTab !== "audit");
+    els.usageTable.classList.toggle("hidden", state.currentTab !== "usage");
+    els.analysisTable.classList.toggle("hidden", state.currentTab !== "analysis");
+  }
 
-      els.metricCustomers.textContent = String(visibleCustomers.length || 0);
-      els.metricCustomersMeta.textContent = `活跃/已交付 ${activeCustomers}`;
-      els.metricCodes.textContent = String(visibleCodes.length || 0);
-      els.metricCodesMeta.textContent = `可用 ${activeCodes} / 已用 ${usedCodes}`;
-      els.metricLicenses.textContent = String(activeLicenses || 0);
-      els.metricLicensesMeta.textContent = `总记录 ${visibleLicenses.length}`;
-      els.metricReleases.textContent = state.releases[0] ? `v${String(state.releases[0].version || "").replace(/^v/i, "")}` : "-";
-      els.metricReleasesMeta.textContent = overview.release_latest_released_at
-        ? formatDate(overview.release_latest_released_at)
-        : "等待发行记录";
-      els.metricApi.textContent = state.token
-        ? `已连接 / 分析异常 ${analysis.exceptions_24h || 0}`
-        : "未连接";
-      return;
+  async function runAdminAction(label, action) {
+    try {
+      setMessage(label, "loading");
+      await action();
+    } catch (error) {
+      setMessage(error.message || String(error), "error");
     }
-
-    const latestRelease = state.releases[0];
-
-    els.metricCustomers.textContent = visibleCustomers.length ? String(visibleCustomers.length) : "-";
-    els.metricCustomersMeta.textContent = visibleCustomers.length ? `活跃/已交付 ${activeCustomers}` : "等待连接";
-    els.metricCodes.textContent = visibleCodes.length ? String(visibleCodes.length) : "-";
-    els.metricCodesMeta.textContent = visibleCodes.length ? `可用 ${activeCodes} / 已用 ${usedCodes}` : "等待连接";
-    els.metricLicenses.textContent = visibleLicenses.length ? String(activeLicenses) : "-";
-    els.metricLicensesMeta.textContent = visibleLicenses.length ? `总记录 ${visibleLicenses.length}` : "等待连接";
-    els.metricReleases.textContent = latestRelease ? `v${String(latestRelease.version || "").replace(/^v/i, "")}` : "-";
-    els.metricReleasesMeta.textContent = latestRelease ? `${latestRelease.channel} / ${latestRelease.edition}` : "等待发行记录";
-    els.metricApi.textContent = state.token ? "已连接" : "未连接";
   }
 
   async function apiGet(path) {
-    return parseResponse(await fetch(`${API_BASE}${path}`, {
-      method: "GET",
-      headers: adminHeaders(),
-    }));
+    return request(path, { method: "GET" });
   }
 
   async function apiPost(path, body) {
-    return parseResponse(await fetch(`${API_BASE}${path}`, {
-      method: "POST",
-      headers: { ...adminHeaders(), "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }));
+    return request(path, { method: "POST", body });
   }
 
   async function apiPut(path, body) {
-    return parseResponse(await fetch(`${API_BASE}${path}`, {
-      method: "PUT",
-      headers: { ...adminHeaders(), "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }));
+    return request(path, { method: "PUT", body });
   }
 
   async function apiDelete(path) {
-    return parseResponse(await fetch(`${API_BASE}${path}`, {
-      method: "DELETE",
-      headers: adminHeaders(),
-    }));
+    return request(path, { method: "DELETE" });
   }
 
-  function adminHeaders() {
-    return {
-      accept: "application/json",
-      "x-admin-token": state.token,
-    };
-  }
-
-  async function parseResponse(response) {
-    let payload = {};
-    try {
-      payload = await response.json();
-    } catch {
-      payload = {};
-    }
+  async function request(path, options = {}) {
+    if (!state.token) throw new Error("缺少 Admin Token。");
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: options.method || "GET",
+      headers: {
+        "content-type": "application/json",
+        "x-admin-token": state.token,
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    const text = await response.text();
+    const data = text ? parseJson(text) : {};
     if (!response.ok) {
-      const error = new Error(payload.error || `http_${response.status}`);
-      error.code = payload.error || `http_${response.status}`;
-      throw error;
+      throw new Error(errorLabel(data.error || response.statusText));
     }
-    return payload;
+    return data;
   }
 
-  async function runAdminAction(loadingText, task) {
-    if (!state.token) {
-      setMessage("请先输入 Admin Token。", "warn");
-      renderStatus(false);
-      return false;
+  function formPayload(form) {
+    const data = {};
+    new FormData(form).forEach((value, key) => {
+      data[key] = typeof value === "string" ? value.trim() : value;
+    });
+    form.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      data[input.name] = input.checked;
+    });
+    return data;
+  }
+
+  function tableHtml(headers, rows) {
+    return `
+      <div class="admin-table-scroll">
+        <table>
+          <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderTable(target, headers, rows) {
+    if (!rows.length) {
+      target.innerHTML = '<div class="empty-state">暂无记录。</div>';
+      return;
     }
-    setMessage(loadingText, "loading");
-    setBusy(true);
-    try {
-      await task();
-      renderStatus(true);
-      return true;
-    } catch (error) {
-      renderStatus(false);
-      const text = errorToText(error);
-      setMessage(text, "error");
-      setLoginMessage(text, "error");
-      return false;
-    } finally {
-      setBusy(false);
-    }
+    target.innerHTML = tableHtml(headers, rows.map((row) => row.map((cell) => escapeHtml(cell))));
+  }
+
+  function visibleRows(rows) {
+    return state.showTestRecords ? rows : rows.filter((row) => !isTestRecord(row));
+  }
+
+  function isTestRecord(row) {
+    const fields = [
+      row.code,
+      row.activation_code,
+      row.license_id,
+      row.customer_name,
+      row.customer_email,
+      row.email,
+      row.username,
+      row.machine_fingerprint,
+      row.machine_fingerprint_prebind,
+      row.notes,
+    ].join(" ").toLowerCase();
+    return fields.includes("cf-test") || fields.includes("@example.com") || /\+cf\d*@/.test(fields);
+  }
+
+  function renderStatus(connected) {
+    els.adminStatus.innerHTML = connected
+      ? '<span class="badge-dot ok"></span><div><strong>已连接</strong><small>Cloudflare API 校验通过</small></div>'
+      : '<span class="badge-dot"></span><div><strong>未连接</strong><small>输入 Admin Token 后读取数据</small></div>';
+    els.metricApi.textContent = connected ? "已连接" : "未连接";
   }
 
   function showLogin() {
@@ -890,187 +823,130 @@
   }
 
   function clearSession(message) {
-    state.token = "";
-    state.customers = [];
-    state.codes = [];
-    state.licenses = [];
-    state.releases = [];
-    localStorage.removeItem(TOKEN_KEY);
-    els.adminToken.value = "";
-    els.adminLoginToken.value = "";
+    clearStoredToken();
+    showLogin();
+    setLoginMessage(message || "", message ? "success" : "");
     renderStatus(false);
     renderAllTables();
     renderMetrics();
-    showLogin();
-    setLoginMessage(message, "success");
-    setMessage("", "");
   }
 
-  function renderStatus(isConnected) {
-    els.adminStatus.innerHTML = isConnected
-      ? '<span class="badge-dot online"></span><div><strong>已连接</strong><small>管理员 API 可用</small></div>'
-      : '<span class="badge-dot"></span><div><strong>未连接</strong><small>输入 Admin Token 后读取数据</small></div>';
+  function clearStoredToken() {
+    localStorage.removeItem(TOKEN_KEY);
+    state.token = "";
+    els.adminToken.value = "";
+    els.adminLoginToken.value = "";
   }
 
-  function renderGeneratedCodes(codes) {
-    els.generatedCodes.classList.toggle("hidden", codes.length === 0);
-    els.generatedCodes.innerHTML = codes.length
-      ? `<strong>本次生成</strong><pre>${escapeHtml(codes.join("\n"))}</pre>`
-      : "";
+  function setMessage(message, type) {
+    els.adminMessage.textContent = message || "";
+    els.adminMessage.className = `admin-message ${type || ""}`;
   }
 
-  async function copyText(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return;
+  function setLoginMessage(message, type) {
+    els.loginMessage.textContent = message || "";
+    els.loginMessage.className = `admin-message ${type || ""}`;
+  }
+
+  function countBy(rows, status) {
+    return rows.filter((row) => row.status === status).length;
+  }
+
+  function statusLabel(value) {
+    return {
+      active: "可用",
+      assigned: "已分配",
+      used: "已使用",
+      suspended: "暂停",
+      revoked: "已撤销",
+    }[value] || value || "-";
+  }
+
+  function customerStatusLabel(value) {
+    return {
+      draft: "草稿",
+      active: "活跃",
+      issued: "已交付",
+      suspended: "暂停",
+      cancelled: "取消",
+    }[value] || value || "-";
+  }
+
+  function errorLabel(value) {
+    return {
+      unauthorized: "管理员 Token 无效或已过期。",
+      not_found: "当前 API 版本还没有部署对应接口，请先重新部署 Cloudflare Worker。",
+      customer_has_activation_codes: "该客户已有授权码或授权记录，已改为归档处理。",
+      used_activation_code_cannot_be_deleted_revoke_license_instead: "已使用授权码不能删除，请撤销对应授权记录。",
+      used_activation_code_status_locked: "已使用授权码状态不能回退。",
+      license_not_found: "未找到授权记录。",
+      activation_code_not_found: "未找到授权码。",
+    }[value] || value || "操作失败";
+  }
+
+  function promptNumber(message, fallback) {
+    const value = window.prompt(message, String(fallback || ""));
+    if (value === null) return null;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setMessage("请输入大于 0 的数字。", "warn");
+      return null;
     }
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
-  }
-
-  function renderTable(container, headers, rows) {
-    if (!rows.length) {
-      container.innerHTML = '<div class="empty-state">暂无数据</div>';
-      return;
-    }
-    container.innerHTML = `
-      <div class="admin-table-scroll">
-        <table>
-          <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${renderTableCell(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  function renderTableCell(cell) {
-    if (cell && typeof cell === "object" && Object.prototype.hasOwnProperty.call(cell, "html")) {
-      return cell.html;
-    }
-    return escapeHtml(cell);
-  }
-
-  function analysisStatusBadge(status) {
-    const key = String(status || "unknown").toLowerCase();
-    const labels = {
-      compute_proxy: "实时计算",
-      cache_hit: "缓存命中",
-      compute_timeout: "计算超时",
-      compute_error: "计算异常",
-      contract_ready: "契约就绪",
-    };
-    const level = key === "compute_proxy" || key === "cache_hit" || key === "contract_ready"
-      ? "ok"
-      : key === "compute_timeout"
-        ? "warn"
-        : "danger";
-    return `<span class="status-chip ${level}">${escapeHtml(labels[key] || status || "-")}</span>`;
-  }
-
-  function latencyBadge(value) {
-    const ms = Number(value || 0);
-    const level = ms >= 5000 ? "danger" : ms >= 2000 ? "warn" : "ok";
-    return `<span class="latency-chip ${level}">${escapeHtml(`${ms}ms`)}</span>`;
-  }
-
-  function switchTab(tab) {
-    document.querySelectorAll("[data-admin-tab]").forEach((button) => {
-      button.classList.toggle("active", button.dataset.adminTab === tab);
-    });
-    els.customerTableToolbar.classList.toggle("hidden", tab !== "customers");
-    els.codesTable.classList.toggle("hidden", tab !== "codes");
-    els.customersTable.classList.toggle("hidden", tab !== "customers");
-    els.licensesTable.classList.toggle("hidden", tab !== "licenses");
-    els.releasesTable.classList.toggle("hidden", tab !== "releases");
-    els.auditTable.classList.toggle("hidden", tab !== "audit");
-    els.usageTable.classList.toggle("hidden", tab !== "usage");
-    els.analysisTable.classList.toggle("hidden", tab !== "analysis");
-  }
-
-  function setBusy(isBusy) {
-    document.querySelectorAll("button").forEach((button) => {
-      button.disabled = isBusy;
-    });
-  }
-
-  function setMessage(text, type) {
-    els.adminMessage.textContent = text || "";
-    els.adminMessage.className = `admin-message ${type || ""}`.trim();
-  }
-
-  function setLoginMessage(text, type) {
-    els.loginMessage.textContent = text || "";
-    els.loginMessage.className = `admin-message ${type || ""}`.trim();
-  }
-
-  function formPayload(form) {
-    const data = new FormData(form);
-    const payload = {};
-    data.forEach((value, key) => {
-      payload[key] = String(value).trim();
-    });
-    form.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-      payload[input.name] = input.checked;
-    });
-    return payload;
-  }
-
-  function statusLabel(status) {
-    const map = { active: "可用", assigned: "已分配", used: "已使用", revoked: "已撤销" };
-    return map[status] || status || "-";
-  }
-
-  function customerStatusLabel(status) {
-    const map = { draft: "草稿", active: "活跃", issued: "已交付", suspended: "暂停", cancelled: "取消" };
-    return map[status] || status || "-";
+    return parsed;
   }
 
   function formatDate(value) {
     if (!value) return "-";
-    return String(value).replace("T", " ").replace(/\.\d+Z$/, "").replace(/Z$/, "");
+    const text = String(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return text;
+    return date.toLocaleString("zh-CN", { hour12: false });
   }
 
-  function errorToText(error) {
-    const code = error && error.code ? error.code : "";
-    const map = {
-      admin_token_required: "Admin Token 不正确或未配置。",
-      version_required: "请填写安装包版本号。",
-      download_url_https_required: "下载地址必须使用 https://。",
-      not_found: "当前 API 版本还没有部署对应管理员接口，请先重新部署 Cloudflare Worker。",
-      customer_id_invalid: "客户 ID 无效，请刷新台账后重试。",
-      customer_not_found: "客户记录不存在，可能已被删除，请刷新台账。",
-      customer_identity_required: "客户名称和客户邮箱至少填写一项。",
-      email_invalid: "客户邮箱格式不正确。",
-      customer_has_activation_codes: "该客户已有授权码或授权记录，不能硬删除；请编辑状态为暂停或取消。",
-      "failed to fetch": "管理员登录校验失败，请确认官网域名已生效，或稍后重试。",
-      failed_to_fetch: "管理员登录校验失败，请确认官网域名已生效，或稍后重试。",
-    };
-    return map[code] || `操作失败：${code || error.message || "unknown_error"}`;
-  }
-
-  function shortText(value, maxLength) {
+  function shortText(value, length) {
     const text = String(value || "");
-    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+    return text.length > length ? `${text.slice(0, length - 1)}...` : text;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(String(text || ""));
+      return;
+    }
+    const input = document.createElement("textarea");
+    input.value = String(text || "");
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
   }
 
   function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, (char) => ({
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
       "&": "&amp;",
       "<": "&lt;",
       ">": "&gt;",
-      "\"": "&quot;",
-      "'": "&#039;",
-    })[char]);
+      '"': "&quot;",
+      "'": "&#39;",
+    }[char]));
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value);
+  }
+
+  function parseJson(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
   }
 
   function byId(id) {
-    return document.getElementById(id);
+    const element = document.getElementById(id);
+    if (!element) throw new Error(`Missing element: ${id}`);
+    return element;
   }
 })();

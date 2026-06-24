@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>管理员后台 | Scorpio Intelligence</title>
-  <meta name="description" content="Scorpio Intelligence 管理员后台，用于授权码、授权记录与安装包发行管理。">
+  <title>商业授权运营后台 | Scorpio Intelligence</title>
+  <meta name="description" content="Scorpio Intelligence 商业授权运营后台，用于客户台账、授权码、授权记录和安装包发行管理。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260619-admin-usability">
+  <link rel="stylesheet" href="site.css?v=20260624-admin-p0">
 </head>
 <body class="admin-page">
   <section class="admin-login" id="adminLogin">
@@ -22,7 +22,7 @@
       <div class="admin-login-copy">
         <p class="section-kicker">Admin Access</p>
         <h1>管理员登录</h1>
-        <p>请输入管理员 Token 后进入后台。登录凭据只保存在当前浏览器本地，后台接口仍由服务端二次校验。</p>
+        <p>请输入管理员 Token 后进入后台。页面不内置密钥，所有运营接口仍由 Cloudflare Worker 服务端二次校验。</p>
       </div>
       <form class="admin-login-form" id="adminLoginForm">
         <label>Admin Token
@@ -33,7 +33,7 @@
       <div class="admin-message" id="loginMessage" role="status" aria-live="polite"></div>
       <div class="admin-login-note">
         <strong>安全边界</strong>
-        <span>此页面不内置管理员密钥；未通过 API 校验不会展示授权码、授权记录和发行包信息。</span>
+        <span>未通过 API 校验前不展示客户、授权码、授权记录、发行包等敏感运营数据。</span>
       </div>
     </div>
   </section>
@@ -49,7 +49,7 @@
     <nav class="admin-nav" aria-label="管理员导航">
       <a href="index-cn.html">官网首页</a>
       <a href="account.html">用户中心</a>
-      <a class="active" href="scorpio_v1_admin.html">管理员后台</a>
+      <a class="active" href="scorpio_v1_admin.html">运营后台</a>
       <button class="admin-logout" id="logoutButton" type="button">退出登录</button>
     </nav>
   </header>
@@ -57,9 +57,9 @@
   <main class="admin-console hidden" id="adminConsole">
     <section class="admin-command-bar">
       <div>
-        <p class="section-kicker">Admin Console</p>
-        <h1>授权与发行运营台</h1>
-        <p>集中处理客户授权码、机器授权记录、客户端安装包发行。Admin Token 只保存在当前浏览器本地，不进入仓库。</p>
+        <p class="section-kicker">Operations Console</p>
+        <h1>授权与交付运营台</h1>
+        <p>集中维护客户台账、授权码、授权记录和客户端安装包发行信息。测试记录默认隐藏，需要时可手动显示。</p>
       </div>
       <div class="admin-live-card" id="adminStatus">
         <span class="badge-dot"></span>
@@ -82,7 +82,7 @@
         <small id="metricCodesMeta">等待连接</small>
       </article>
       <article>
-        <span>有效授权</span>
+        <span>授权记录</span>
         <strong id="metricLicenses">-</strong>
         <small id="metricLicensesMeta">等待连接</small>
       </article>
@@ -114,9 +114,9 @@
           </div>
           <div class="admin-message" id="adminMessage" role="status" aria-live="polite"></div>
           <ul class="admin-boundary">
-            <li>Token 只存本地浏览器。</li>
-            <li>后台页面不公开挂导航入口。</li>
-            <li>发行包地址必须使用 HTTPS。</li>
+            <li>Token 只保存到当前浏览器。</li>
+            <li>后台页面不暴露在官网主导航。</li>
+            <li>发行包下载地址必须使用 HTTPS。</li>
           </ul>
         </article>
 
@@ -126,10 +126,10 @@
             <h2>交付检查</h2>
           </div>
           <ol class="admin-runbook">
-            <li>生成客户授权码。</li>
-            <li>录入最新安装包下载地址。</li>
-            <li>确认授权记录与机器指纹。</li>
-            <li>客户页下载按钮读取发行记录。</li>
+            <li>先建立客户台账，确认邮箱和版本。</li>
+            <li>再生成授权码并发给客户。</li>
+            <li>客户激活后，在授权记录里核对机器码和到期日。</li>
+            <li>如需处理测试数据，使用删除/归档/撤销按钮。</li>
           </ol>
         </article>
       </aside>
@@ -165,7 +165,7 @@
                 <option value="cancelled">取消</option>
               </select>
             </label>
-            <label>预绑定机器<input name="machine_fingerprint_prebind" type="text" placeholder="可选"></label>
+            <label>预绑定机器码<input name="machine_fingerprint_prebind" type="text" placeholder="可选"></label>
             <label class="wide">备注<textarea name="notes" rows="3" placeholder="销售来源、交付说明、风险备注等"></textarea></label>
             <div class="form-actions wide">
               <button class="button primary sm" id="customerSubmitButton" type="submit">保存客户</button>
@@ -285,6 +285,6 @@
     </section>
   </main>
 
-  <script src="scorpio_v1_admin.js?v=20260619-admin-usability"></script>
+  <script src="scorpio_v1_admin.js?v=20260624-admin-p0"></script>
 </body>
 </html>
