@@ -8,13 +8,10 @@ const TEXT_HEADERS = {
   "content-type": "text/plain; charset=utf-8",
 };
 
-const DEFAULT_ANALYSIS_COMPUTE_TIMEOUT_MS = 4500;
-const DEFAULT_ANALYSIS_SHARED_CACHE_SECONDS = 300;
-
 const ROUTES = new Map();
 
 export default {
-  async fetch(request, env, executionCtx) {
+  async fetch(request, env) {
     const corsHeaders = cors(request, env);
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
@@ -30,6 +27,28 @@ export default {
         if (request.method === "GET" && path.startsWith("/v1/license/download/")) {
           const licenseId = decodeURIComponent(path.slice("/v1/license/download/".length)).trim();
           return withCors(await downloadLicenseFile({ request, env, licenseId }), corsHeaders);
+        }
+        if (request.method === "GET" && path.startsWith("/v1/data-packages/")) {
+          const packageId = decodeURIComponent(path.slice("/v1/data-packages/".length)).trim();
+          return withCors(await getDataPackageDetail({ request, env, url, packageId }), corsHeaders);
+        }
+        if (request.method === "GET" && path.startsWith("/v1/data-sync/tables/") && path.endsWith("/rows")) {
+          const tableName = decodeURIComponent(
+            path.slice("/v1/data-sync/tables/".length, -"/rows".length)
+          ).trim();
+          return withCors(await getDataSyncTableRows({ request, env, url, tableName }), corsHeaders);
+        }
+        if (request.method === "GET" && path.startsWith("/v1/scorpio_v1_admin/cloud-db/tables/")) {
+          const tableName = decodeURIComponent(
+            path.slice("/v1/scorpio_v1_admin/cloud-db/tables/".length)
+          ).trim();
+          return withCors(await getAdminCloudDbTableDetail({ request, env, url, tableName }), corsHeaders);
+        }
+        if (request.method === "GET" && path.startsWith("/v1/scorpio_v1_admin/production-uploads/")) {
+          const batchId = decodeURIComponent(
+            path.slice("/v1/scorpio_v1_admin/production-uploads/".length)
+          ).trim();
+          return withCors(await getAdminProductionUploadBatchDetail({ request, env, url, batchId }), corsHeaders);
         }
         if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/customers/")) {
           const customerId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/customers/".length)).trim());
@@ -56,12 +75,20 @@ export default {
           const feedbackId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/feedback/".length)).trim());
           return withCors(await updateAdminFeedback({ request, env, feedbackId }), corsHeaders);
         }
+
+        if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/data-packages/")) {
+          const packageId = decodeURIComponent(path.slice("/v1/scorpio_v1_admin/data-packages/".length)).trim();
+          if (request.method === "PUT") {
+            return withCors(await updateAdminDataPackage({ request, env, packageId }), corsHeaders);
+          }
+          return withCors(await deactivateAdminDataPackage({ request, env, packageId }), corsHeaders);
+        }
         if (request.method === "GET" && path === "/health") {
           return json({ ok: true, service: "scorpio-license-api" }, 200, corsHeaders);
         }
         return json({ error: "not_found" }, 404, corsHeaders);
       }
-      const result = await handler({ request, env, url, corsHeaders, executionCtx });
+      const result = await handler({ request, env, url, corsHeaders });
       return withCors(result, corsHeaders);
     } catch (error) {
       const message = error && error.publicMessage ? error.publicMessage : "internal_server_error";
@@ -714,11 +741,96 @@ route("GET", "/v1/releases/check", async (ctx) => {
   });
 });
 
+route("GET", "/v1/data-packages/latest", async (ctx) => {
+  const user = await requireUser(ctx);
+  const request = normalizeDataPackageRequest(ctx.url.searchParams);
+  const license = await verifyDataPackageLicense(ctx.env, user, request);
+  const row = await latestDataPackage(ctx.env, license.edition, request.channel, request.client_version);
+  if (!row) {
+    await recordDeviceSyncLog(ctx.env, {
+      user,
+      license,
+      request,
+      packageId: "",
+      status: "not_found",
+      errorMessage: "data_package_not_found",
+      clientIp: clientIp(ctx.request),
+    });
+    return json({ ok: false, error: "data_package_not_found", edition: license.edition, channel: request.channel }, 404);
+  }
+  await recordDeviceSyncLog(ctx.env, {
+    user,
+    license,
+    request,
+    packageId: row.package_id,
+    status: "catalog_checked",
+    clientIp: clientIp(ctx.request),
+  });
+  return json({ ok: true, package: dataPackagePayload(row, ctx.env) });
+});
+
+route("POST", "/v1/data-packages/sync-log", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeDataPackageBody(body);
+  const license = await verifyDataPackageLicense(ctx.env, user, request);
+  const status = normalizeSyncStatus(body.status || "client_reported");
+  await recordDeviceSyncLog(ctx.env, {
+    user,
+    license,
+    request,
+    packageId: safeText(body.package_id || "", 128),
+    status,
+    errorMessage: safeText(body.error_message || "", 500),
+    clientIp: clientIp(ctx.request),
+  });
+  return json({ accepted: true, status });
+});
+
+route("GET", "/v1/data-sync/manifest", async (ctx) => {
+  const user = await requireUser(ctx);
+  const request = normalizeDataSyncRequest(ctx.url.searchParams);
+  const license = await verifyDataPackageLicense(ctx.env, user, request);
+  const manifest = await dataSyncManifest(ctx.env, license, request);
+  await recordDeviceSyncLog(ctx.env, {
+    user,
+    license,
+    request,
+    packageId: `row-sync:${request.module}`,
+    status: "catalog_checked",
+    clientIp: clientIp(ctx.request),
+  });
+  return json({ ok: true, ...manifest });
+});
+
+route("POST", "/v1/data-sync/client-log", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeDataSyncBody(body);
+  const license = await verifyDataPackageLicense(ctx.env, user, request);
+  const status = normalizeSyncStatus(body.status || "client_reported");
+  await recordDeviceSyncLog(ctx.env, {
+    user,
+    license,
+    request,
+    packageId: `row-sync:${request.module}:${safeText(body.table_name || "", 96)}`,
+    status,
+    errorMessage: safeText(body.error_message || "", 500),
+    clientIp: clientIp(ctx.request),
+  });
+  return json({ accepted: true, status });
+});
+
 route("GET", "/v1/analysis/health", async (ctx) => {
+  const compute = await analysisComputeHealth(ctx.env);
+  const mode = !compute.configured ? "contract_ready" : compute.ok ? "compute_proxy" : "compute_unreachable";
   return json({
     ok: true,
     service: "scorpio-analysis-api",
-    mode: analysisComputeConfigured(ctx.env) ? "compute_proxy" : "contract_ready",
+    mode,
+    ready: !compute.configured || compute.ok,
+    gateway: { ok: true },
+    compute,
     generated_at: nowIso(),
   });
 });
@@ -1563,6 +1675,74 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   return json(pageResponse(rows.results || [], total, options));
 });
 
+route("GET", "/v1/scorpio_v1_admin/data-packages", async (ctx) => {
+  requireAdmin(ctx);
+  const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
+  const where = [];
+  const params = [];
+  addListTextSearch(where, params, ["package_id", "version", "data_date", "download_url", "r2_key"], options.q);
+  if (options.edition) {
+    where.push("edition = ?");
+    params.push(options.edition);
+  }
+  if (options.channel) {
+    where.push("channel = ?");
+    params.push(options.channel);
+  }
+  if (options.status === "active") {
+    where.push("is_active = 1");
+  } else if (options.status === "inactive") {
+    where.push("is_active = 0");
+  }
+  const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM data_packages ${filter}`).bind(...params).first();
+  const rows = await ctx.env.DB.prepare(
+    `SELECT id, package_id, edition, channel, version, schema_version, data_date, valid_from,
+            expires_at, min_client_version, detail_level, r2_key, download_url, sha256,
+            signature, size_bytes, capability_scope, manifest_summary, is_active,
+            published_at, created_at, updated_at
+     FROM data_packages
+     ${filter}
+     ORDER BY published_at DESC, id DESC
+     LIMIT ? OFFSET ?`
+  ).bind(...params, options.limit, options.offset).all();
+  return json(pageResponse(rows.results || [], total, options));
+});
+
+route("GET", "/v1/scorpio_v1_admin/production-uploads", async (ctx) => {
+  requireAdmin(ctx);
+  const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
+  const where = [];
+  const params = [];
+  addListTextSearch(where, params, ["batch_id", "module", "status", "edition_scope"], options.q);
+  if (options.status) {
+    where.push("status = ?");
+    params.push(options.status);
+  }
+  const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM production_upload_batches ${filter}`).bind(...params).first();
+  const rows = await ctx.env.DB.prepare(
+    `SELECT batch_id, module, source, mode, edition_scope, status, table_count, row_count,
+            received_row_count, received_chunk_count, manifest_hash, error_message,
+            created_at, updated_at, committed_at
+     FROM production_upload_batches
+     ${filter}
+     ORDER BY created_at DESC
+     LIMIT ? OFFSET ?`
+  ).bind(...params, options.limit, options.offset).all();
+  return json(pageResponse(rows.results || [], total, options));
+});
+
+route("GET", "/v1/scorpio_v1_admin/cloud-db/overview", async (ctx) => {
+  requireAdmin(ctx);
+  return json(await adminCloudDbOverview(ctx.env, ctx.url));
+});
+
+route("GET", "/v1/scorpio_v1_admin/cloud-db/tables", async (ctx) => {
+  requireAdmin(ctx);
+  return json(await adminCloudDbTables(ctx.env, ctx.url));
+});
+
 route("GET", "/v1/scorpio_v1_admin/audit-events", async (ctx) => {
   requireAdmin(ctx);
   const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
@@ -1672,6 +1852,203 @@ route("POST", "/v1/scorpio_v1_admin/releases", async (ctx) => {
     released_at: releasedAt,
   }, 201);
 });
+
+route("POST", "/v1/scorpio_v1_admin/data-packages", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const record = normalizeAdminDataPackage(body);
+  await upsertDataPackage(ctx.env, record);
+  await audit(ctx.env, "upsert_data_package", "admin_api", {
+    package_id: record.package_id,
+    edition: record.edition,
+    channel: record.channel,
+    version: record.version,
+  });
+  return json(record, 201);
+});
+
+route("POST", "/v1/scorpio_v1_admin/production-uploads/batches", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const record = normalizeProductionUploadBatch(body);
+  const existing = await ctx.env.DB.prepare("SELECT * FROM production_upload_batches WHERE batch_id = ?")
+    .bind(record.batch_id)
+    .first();
+  if (existing && String(existing.status || "") === "committed") {
+    return json({ ok: true, batch_id: record.batch_id, status: "committed", already_committed: true });
+  }
+  if (existing && body.resume && String(existing.manifest_hash || "") === record.manifest_hash && !["aborted", "committing"].includes(String(existing.status || ""))) {
+    const chunks = await listProductionUploadChunks(ctx.env, record.batch_id);
+    return json({
+      ok: true,
+      batch_id: record.batch_id,
+      status: existing.status || "created",
+      resumed: true,
+      received_row_count: numberField(existing, "received_row_count"),
+      received_chunk_count: numberField(existing, "received_chunk_count"),
+      chunks,
+    });
+  }
+  if (existing && String(existing.status || "") === "aborted") {
+    await ctx.env.DB.prepare("DELETE FROM production_upload_chunks WHERE batch_id = ?").bind(record.batch_id).run();
+    await ctx.env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(record.batch_id).run();
+  } else if (existing) {
+    await ctx.env.DB.prepare("DELETE FROM production_upload_chunks WHERE batch_id = ?").bind(record.batch_id).run();
+    await ctx.env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(record.batch_id).run();
+  }
+  await insertProductionUploadBatch(ctx.env, record);
+  await audit(ctx.env, "create_production_upload_batch", "admin_api", {
+    batch_id: record.batch_id,
+    module: record.module,
+    edition_scope: record.edition_scope,
+    row_count: record.row_count,
+  });
+  return json({ ok: true, batch_id: record.batch_id, status: record.status, chunks: [] }, 201);
+});
+
+route("POST", "/v1/scorpio_v1_admin/production-uploads/chunks", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const chunk = normalizeProductionUploadChunk(body);
+  const batch = await ctx.env.DB.prepare("SELECT * FROM production_upload_batches WHERE batch_id = ?")
+    .bind(chunk.batch_id)
+    .first();
+  if (!batch) {
+    throwHttp(404, "production_upload_batch_not_found");
+  }
+  if (["committed", "aborted", "committing"].includes(String(batch.status || ""))) {
+    throwHttp(409, `production_upload_batch_${batch.status}`);
+  }
+  const existingChunk = await ctx.env.DB.prepare(
+    "SELECT row_count, chunk_hash FROM production_upload_chunks WHERE batch_id = ? AND table_name = ? AND chunk_index = ?"
+  ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index).first();
+  if (existingChunk) {
+    if (
+      String(existingChunk.chunk_hash || "") === chunk.chunk_hash
+      && Number(existingChunk.row_count || 0) === chunk.rows.length
+    ) {
+      return json({
+        ok: true,
+        batch_id: chunk.batch_id,
+        table_name: chunk.table_name,
+        chunk_index: chunk.chunk_index,
+        row_count: chunk.rows.length,
+        duplicate: true,
+      });
+    }
+    throwHttp(409, "production_upload_chunk_conflict");
+  }
+  await storeProductionUploadChunk(ctx.env, chunk);
+  return json({
+    ok: true,
+    batch_id: chunk.batch_id,
+    table_name: chunk.table_name,
+    chunk_index: chunk.chunk_index,
+    row_count: chunk.rows.length,
+  });
+});
+
+route("POST", "/v1/scorpio_v1_admin/production-uploads/commit", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const batchId = safeText(body.batch_id || "", 96);
+  if (!batchId) {
+    throwHttp(400, "production_upload_batch_id_required");
+  }
+  const batch = await ctx.env.DB.prepare("SELECT * FROM production_upload_batches WHERE batch_id = ?")
+    .bind(batchId)
+    .first();
+  if (!batch) {
+    throwHttp(404, "production_upload_batch_not_found");
+  }
+  if (String(batch.status || "") === "committed") {
+    return json({ ok: true, batch_id: batchId, status: "committed", already_committed: true });
+  }
+  if (String(batch.status || "") === "aborted") {
+    throwHttp(409, "production_upload_batch_aborted");
+  }
+  const stats = await ctx.env.DB.prepare(
+    `SELECT COUNT(*) AS chunk_count, COALESCE(SUM(row_count), 0) AS row_count
+     FROM production_upload_chunks
+     WHERE batch_id = ?`
+  ).bind(batchId).first();
+  const expectedRows = Math.max(Number(body.expected_row_count || 0), 0);
+  const expectedChunks = Math.max(Number(body.expected_chunk_count || 0), 0);
+  const rowCount = Number(stats && stats.row_count ? stats.row_count : 0);
+  const chunkCount = Number(stats && stats.chunk_count ? stats.chunk_count : 0);
+  if (expectedRows && expectedRows !== rowCount) {
+    throwHttp(409, "production_upload_row_count_mismatch");
+  }
+  if (expectedChunks && expectedChunks !== chunkCount) {
+    throwHttp(409, "production_upload_chunk_count_mismatch");
+  }
+  const staging = await ctx.env.DB.prepare(
+    "SELECT COUNT(*) AS row_count FROM production_upload_staging_rows WHERE batch_id = ?"
+  ).bind(batchId).first();
+  const stagingRows = Number(staging && staging.row_count ? staging.row_count : 0);
+  if (stagingRows !== rowCount) {
+    throwHttp(409, "production_upload_staging_row_count_mismatch");
+  }
+  const now = nowIso();
+  await ctx.env.DB.prepare(
+    "UPDATE production_upload_batches SET status = 'committing', updated_at = ? WHERE batch_id = ?"
+  ).bind(now, batchId).run();
+  await commitProductionUploadBatch(ctx.env, batch, batchId);
+  await ctx.env.DB.prepare(
+    `UPDATE production_upload_batches
+     SET status = 'committed',
+         received_row_count = ?,
+         received_chunk_count = ?,
+         committed_at = ?,
+         updated_at = ?
+     WHERE batch_id = ?`
+  ).bind(rowCount, chunkCount, now, now, batchId).run();
+  await audit(ctx.env, "commit_production_upload_batch", "admin_api", {
+    batch_id: batchId,
+    row_count: rowCount,
+    chunk_count: chunkCount,
+    manifest_hash: safeText(body.manifest_hash || "", 128),
+  });
+  return json({ ok: true, batch_id: batchId, row_count: rowCount, chunk_count: chunkCount, status: "committed" });
+});
+
+route("POST", "/v1/scorpio_v1_admin/production-uploads/rollback", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const batchId = safeText(body.batch_id || "", 96);
+  if (!batchId) {
+    throwHttp(400, "production_upload_batch_id_required");
+  }
+  await rollbackProductionUploadBatch(ctx.env, batchId, safeText(body.reason || "rollback_requested", 500));
+  await audit(ctx.env, "rollback_production_upload_batch", "admin_api", {
+    batch_id: batchId,
+    reason: safeText(body.reason || "", 500),
+  });
+  return json({ ok: true, batch_id: batchId, status: "aborted" });
+});
+
+async function getAdminProductionUploadBatchDetail(ctx) {
+  requireAdmin(ctx);
+  const batchId = safeText(ctx.batchId || "", 96);
+  if (!batchId) {
+    throwHttp(400, "production_upload_batch_id_required");
+  }
+  const batch = await ctx.env.DB.prepare(
+    `SELECT batch_id, module, source, mode, edition_scope, status, table_count, row_count,
+            received_row_count, received_chunk_count, manifest_hash, error_message,
+            created_at, updated_at, committed_at
+     FROM production_upload_batches
+     WHERE batch_id = ?`
+  ).bind(batchId).first();
+  if (!batch) {
+    throwHttp(404, "production_upload_batch_not_found");
+  }
+  return json({
+    ok: true,
+    batch,
+    chunks: await listProductionUploadChunks(ctx.env, batchId),
+  });
+}
 
 function route(method, path, handler) {
   ROUTES.set(`${method.toUpperCase()} ${normalizePath(path)}`, handler);
@@ -1795,13 +2172,60 @@ async function requireUser(ctx) {
 
 function requireAdmin(ctx) {
   const configured = String(ctx.env.ADMIN_API_TOKEN || "");
-  if (!configured || ctx.request.headers.get("X-Admin-Token") !== configured) {
+  const provided = String(ctx.request.headers.get("X-Admin-Token") || "");
+  if (!configured || !timingSafeEqual(provided, configured)) {
     throwHttp(403, "admin_token_required");
   }
 }
 
 function analysisComputeConfigured(env) {
   return Boolean(String(env.ANALYSIS_COMPUTE_URL || "").trim());
+}
+
+async function analysisComputeHealth(env) {
+  if (!analysisComputeConfigured(env)) {
+    return {
+      configured: false,
+      ok: false,
+      mode: "not_configured",
+      message: "Analysis Compute is not configured; contract fallback is active.",
+    };
+  }
+  const baseUrl = String(env.ANALYSIS_COMPUTE_URL || "").replace(/\/+$/, "");
+  const token = String(env.ANALYSIS_COMPUTE_TOKEN || "");
+  const startedAt = Date.now();
+  const headers = {};
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+  try {
+    const response = await fetch(`${baseUrl}/health`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(intEnv(env.ANALYSIS_COMPUTE_HEALTH_TIMEOUT_MS, 3000)),
+    });
+    const text = await response.text();
+    const data = parseJson(text, {});
+    return {
+      configured: true,
+      ok: response.ok && data.ok !== false,
+      mode: response.ok ? "upstream_ready" : "upstream_error",
+      http_status: response.status,
+      latency_ms: Date.now() - startedAt,
+      service: safeText(data.service || "", 80),
+      version: safeText(data.version || "", 80),
+      message: response.ok ? "" : safeText(data.message || data.error || text, 240),
+    };
+  } catch (error) {
+    return {
+      configured: true,
+      ok: false,
+      mode: "upstream_unreachable",
+      http_status: 0,
+      latency_ms: Date.now() - startedAt,
+      error: safeText(error && error.message ? error.message : String(error), 240),
+    };
+  }
 }
 
 function normalizeAnalysisRequest(body, assetType) {
@@ -1909,12 +2333,6 @@ async function verifyAnalysisLicense(env, user, licenseId) {
 async function proxyAnalysisCompute(ctx, options) {
   const baseUrl = String(ctx.env.ANALYSIS_COMPUTE_URL || "").replace(/\/+$/, "");
   const token = String(ctx.env.ANALYSIS_COMPUTE_TOKEN || "");
-  const timeoutMs = clampNumber(
-    intEnv(ctx.env.ANALYSIS_COMPUTE_TIMEOUT_MS, DEFAULT_ANALYSIS_COMPUTE_TIMEOUT_MS),
-    1000,
-    15000,
-    DEFAULT_ANALYSIS_COMPUTE_TIMEOUT_MS
-  );
   const headers = {
     "content-type": "application/json",
     "x-scorpio-user-id": String(options.user.id),
@@ -1922,65 +2340,98 @@ async function proxyAnalysisCompute(ctx, options) {
   if (token) {
     headers.authorization = `Bearer ${token}`;
   }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("analysis_compute_timeout"), timeoutMs);
   let response;
   try {
     response = await fetch(`${baseUrl}${options.endpoint}`, {
       method: "POST",
       headers,
       body: JSON.stringify(options.body),
-      signal: controller.signal,
+      signal: AbortSignal.timeout(intEnv(ctx.env.ANALYSIS_COMPUTE_REQUEST_TIMEOUT_MS, 20000)),
     });
   } catch (error) {
-    clearTimeout(timeout);
-    const timedOut = controller.signal.aborted || (error && (error.name === "AbortError" || String(error).includes("analysis_compute_timeout")));
-    const status = timedOut ? "compute_timeout" : "compute_error";
+    const payload = analysisComputeFetchErrorPayload(error, options.endpoint);
     await recordAnalysisRequest(ctx.env, {
       user: options.user,
       license: options.license,
       endpoint: options.endpoint,
       assetType: options.body.asset_type || "",
-      assetCode: options.body.code || options.body.market || "",
+      assetCode: options.body.code || "",
       request: options.body,
       clientIp: clientIp(ctx.request),
-      status,
+      status: "compute_unreachable",
       latencyMs: Date.now() - options.startedAt,
     });
-    return json(analysisComputeFallback(options, status, timeoutMs), timedOut ? 504 : 502);
-  } finally {
-    clearTimeout(timeout);
+    return json(payload, 503);
   }
-
   const text = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+  let payload = text;
+  if (!contentType.includes("application/json")) {
+    payload = JSON.stringify(analysisComputeErrorPayload(response.status, text, options.endpoint));
+  }
   await recordAnalysisRequest(ctx.env, {
     user: options.user,
     license: options.license,
     endpoint: options.endpoint,
     assetType: options.body.asset_type || "",
-    assetCode: options.body.code || options.body.market || "",
+    assetCode: options.body.code || "",
     request: options.body,
     clientIp: clientIp(ctx.request),
     status: response.ok ? "compute_proxy" : "compute_error",
     latencyMs: Date.now() - options.startedAt,
   });
-  const proxied = new Response(text, {
+  return new Response(payload, {
     status: response.status,
     headers: JSON_HEADERS,
   });
-  if (response.ok && options.cacheKey && options.cacheSeconds > 0 && typeof caches !== "undefined" && caches.default) {
-    const cached = new Response(text, {
-      status: 200,
-      headers: {
-        ...JSON_HEADERS,
-        "cache-control": `public, max-age=${options.cacheSeconds}`,
-        "x-scorpio-analysis-cache": "store",
+}
+
+function analysisComputeFetchErrorPayload(error, endpoint) {
+  return {
+    ok: false,
+    error: "analysis_compute_fetch_failed",
+    message:
+      "实时分析 API 网关已连接，但分析计算服务请求失败。请检查 Analysis Compute 进程、Cloudflare Tunnel 和源站健康状态。",
+    detail: safeText(error && error.message ? error.message : String(error), 500),
+    source: {
+      provider: "scorpio_analysis_api",
+      endpoint,
+      diagnostic: "analysis_compute_fetch_failed",
+      http_status: 503,
+    },
+  };
+}
+
+function analysisComputeErrorPayload(status, rawText, endpoint) {
+  const raw = String(rawText || "");
+  const cloudflareOriginStatus = [521, 522, 523, 524, 525, 526, 530];
+  if (cloudflareOriginStatus.includes(Number(status)) || /Error (521|522|523|524|525|526|530)/.test(raw)) {
+    return {
+      ok: false,
+      error: "analysis_compute_origin_unreachable",
+      message:
+        "实时分析 API 网关已连接，但分析计算服务上游不可达。请检查 ANALYSIS_COMPUTE_URL、DNS、Cloudflare Tunnel 或源站域名配置。",
+      detail: "Cloudflare origin status indicates the proxy cannot resolve or connect to the configured compute origin hostname.",
+      source: {
+        provider: "scorpio_analysis_api",
+        endpoint,
+        diagnostic: "cloudflare_origin_hostname_unresolved",
+        http_status: Number(status) || 530,
       },
-    });
-    ctx.executionCtx?.waitUntil(caches.default.put(options.cacheKey, cached));
+    };
   }
-  return proxied;
+  return {
+    ok: false,
+    error: "analysis_compute_non_json_response",
+    message: "实时分析计算服务返回了非 JSON 响应，请检查计算服务健康状态和代理配置。",
+    detail: raw.slice(0, 500),
+    source: {
+      provider: "scorpio_analysis_api",
+      endpoint,
+      diagnostic: "compute_non_json_response",
+      http_status: Number(status) || 0,
+    },
+  };
 }
 
 async function handleStockAnalysisPost(ctx, options) {
@@ -2033,48 +2484,12 @@ async function handleSharedAnalysisGet(ctx, options) {
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
 
   if (analysisComputeConfigured(ctx.env)) {
-    const cacheSeconds = clampNumber(
-      intEnv(ctx.env.ANALYSIS_SHARED_CACHE_SECONDS, DEFAULT_ANALYSIS_SHARED_CACHE_SECONDS),
-      0,
-      3600,
-      DEFAULT_ANALYSIS_SHARED_CACHE_SECONDS
-    );
-    const cacheKey = analysisCacheKey(ctx, {
-      endpoint: options.endpoint,
-      market,
-      edition: license ? license.edition : "unlicensed",
-    });
-    if (cacheSeconds > 0 && typeof caches !== "undefined" && caches.default) {
-      const cached = await caches.default.match(cacheKey);
-      if (cached) {
-        await recordAnalysisRequest(ctx.env, {
-          user,
-          license,
-          endpoint: options.endpoint,
-          assetType: options.assetType,
-          assetCode: market,
-          request,
-          clientIp: clientIp(ctx.request),
-          status: "cache_hit",
-          latencyMs: Date.now() - startedAt,
-        });
-        const headers = new Headers(cached.headers);
-        headers.set("x-scorpio-analysis-cache", "hit");
-        return new Response(cached.body, {
-          status: cached.status,
-          statusText: cached.statusText,
-          headers,
-        });
-      }
-    }
     return proxyAnalysisCompute(ctx, {
       endpoint: options.endpoint,
       body: { ...request, user_id: user.id, email: user.email },
       user,
       license,
       startedAt,
-      cacheKey,
-      cacheSeconds,
     });
   }
 
@@ -2201,41 +2616,6 @@ function contractFeatureBundle(request, options) {
     next_actions: ["Bind Analysis Compute before client production rollout."],
     source: safeAnalysisSource(options.endpoint, options.user, options.license),
   };
-}
-
-function analysisComputeFallback(options, status, timeoutMs) {
-  const request = options.body || {};
-  const response = contractFeatureBundle(request, {
-    user: options.user,
-    license: options.license,
-    endpoint: options.endpoint,
-    feature: request.asset_type || "analysis",
-  });
-  response.status = status;
-  response.data_quality = {
-    level: "degraded",
-    freshness: "not_refreshed",
-    missing: ["analysis_compute_response"],
-  };
-  response.summary = {
-    title: status === "compute_timeout" ? "Analysis compute timed out" : "Analysis compute unavailable",
-    brief:
-      status === "compute_timeout"
-        ? `The compute service did not respond within ${timeoutMs}ms. Please retry or use the latest cached result when available.`
-        : "The compute service could not be reached. Please retry after the upstream service is restored.",
-    risk_level: "unknown",
-  };
-  response.next_actions = ["Retry after the compute service recovers.", "Check the admin analysis request log for upstream latency."];
-  return response;
-}
-
-function analysisCacheKey(ctx, options) {
-  const key = new URL(ctx.request.url);
-  key.pathname = `/__analysis_cache${normalizePath(options.endpoint)}`;
-  key.search = "";
-  key.searchParams.set("market", options.market || "CN");
-  key.searchParams.set("edition", options.edition || "unlicensed");
-  return new Request(key.toString(), { method: "GET" });
 }
 
 function safeAnalysisSource(endpoint, user, license) {
@@ -2556,18 +2936,10 @@ function activationCode() {
   return parts.join("-");
 }
 
-function canUseActivationCode(user, code, machineFingerprint = "") {
-  const status = String(code.status || "");
-  if (status === "used") {
-    if (!code.used_by_user_id || Number(code.used_by_user_id) !== Number(user.id)) return false;
-  } else if (!["active", "assigned"].includes(status)) {
-    return false;
-  }
+function canUseActivationCode(user, code) {
+  if (!["active", "assigned"].includes(String(code.status || ""))) return false;
   if (code.assigned_to_user_id && Number(code.assigned_to_user_id) !== Number(user.id)) return false;
   if (code.customer_email && normalizeEmail(code.customer_email) !== normalizeEmail(user.email)) return false;
-  if (code.machine_fingerprint_prebind && String(code.machine_fingerprint_prebind).trim() !== String(machineFingerprint || "").trim()) {
-    return false;
-  }
   return true;
 }
 
@@ -2606,6 +2978,1019 @@ function appendNote(existing, note) {
   const current = safeText(existing || "", 1800);
   const next = `[${nowIso()}] ${note}`;
   return current ? `${current}\n${next}` : next;
+}
+
+async function getDataPackageDetail(ctx) {
+  const user = await requireUser(ctx);
+  const packageId = safeText(ctx.packageId || "", 128);
+  if (!packageId || packageId === "latest") {
+    return json({ error: "data_package_id_required" }, 400);
+  }
+  const request = normalizeDataPackageRequest(ctx.url.searchParams);
+  const license = await verifyDataPackageLicense(ctx.env, user, request);
+  const row = await ctx.env.DB.prepare(
+    `SELECT *
+     FROM data_packages
+     WHERE package_id = ? AND is_active = 1
+     LIMIT 1`
+  )
+    .bind(packageId)
+    .first();
+  if (!row) {
+    await recordDeviceSyncLog(ctx.env, {
+      user,
+      license,
+      request,
+      packageId,
+      status: "not_found",
+      errorMessage: "data_package_not_found",
+      clientIp: clientIp(ctx.request),
+    });
+    return json({ ok: false, error: "data_package_not_found", package_id: packageId }, 404);
+  }
+  assertDataPackageEntitlement(row, license, request);
+  await recordDeviceSyncLog(ctx.env, {
+    user,
+    license,
+    request,
+    packageId,
+    status: "detail_checked",
+    clientIp: clientIp(ctx.request),
+  });
+  return json({ ok: true, package: dataPackagePayload(row, ctx.env) });
+}
+
+async function updateAdminDataPackage(ctx) {
+  requireAdmin(ctx);
+  const packageId = safeText(ctx.packageId || "", 128);
+  if (!packageId) {
+    return json({ error: "data_package_id_required" }, 400);
+  }
+  const existing = await ctx.env.DB.prepare("SELECT * FROM data_packages WHERE package_id = ?").bind(packageId).first();
+  if (!existing) {
+    return json({ error: "data_package_not_found" }, 404);
+  }
+  const body = await readJson(ctx.request);
+  const record = normalizeAdminDataPackage({ ...existing, ...body, package_id: packageId });
+  await upsertDataPackage(ctx.env, record);
+  await audit(ctx.env, "update_data_package", "admin_api", {
+    package_id: packageId,
+    edition: record.edition,
+    channel: record.channel,
+    version: record.version,
+  });
+  return json(record);
+}
+
+async function deactivateAdminDataPackage(ctx) {
+  requireAdmin(ctx);
+  const packageId = safeText(ctx.packageId || "", 128);
+  if (!packageId) {
+    return json({ error: "data_package_id_required" }, 400);
+  }
+  await ctx.env.DB.prepare("UPDATE data_packages SET is_active = 0, updated_at = ? WHERE package_id = ?")
+    .bind(nowIso(), packageId)
+    .run();
+  await audit(ctx.env, "deactivate_data_package", "admin_api", { package_id: packageId });
+  return json({ deactivated: true, package_id: packageId });
+}
+
+function normalizeDataPackageRequest(params) {
+  return {
+    license_id: safeText(params.get("license_id") || "", 96),
+    machine_fingerprint: safeText(params.get("machine_fingerprint") || params.get("device_id") || "", 160),
+    channel: normalizePackageChannel(params.get("channel") || "stable"),
+    client_version: safeText(params.get("client_version") || "", 64),
+  };
+}
+
+function normalizeDataPackageBody(body) {
+  return {
+    license_id: safeText(body.license_id || "", 96),
+    machine_fingerprint: safeText(body.machine_fingerprint || body.device_id || "", 160),
+    channel: normalizePackageChannel(body.channel || "stable"),
+    client_version: safeText(body.client_version || "", 64),
+  };
+}
+
+function normalizeDataSyncRequest(params) {
+  return {
+    ...normalizeDataPackageRequest(params),
+    module: normalizeDataSyncModule(params.get("module") || "target_research"),
+    since: safeText(params.get("since") || "", 64),
+    limit: Math.max(1, positiveInteger(params.get("limit"), 2000, 2000)),
+    offset: positiveInteger(params.get("offset"), 0, 10000000),
+  };
+}
+
+function normalizeDataSyncBody(body) {
+  return {
+    ...normalizeDataPackageBody(body),
+    module: normalizeDataSyncModule(body.module || "target_research"),
+  };
+}
+
+async function verifyDataPackageLicense(env, user, request) {
+  if (!request.license_id) {
+    throwHttp(400, "license_id_required");
+  }
+  if (!request.machine_fingerprint) {
+    throwHttp(400, "machine_fingerprint_required");
+  }
+  const license = await env.DB.prepare(
+    `SELECT license_id, edition, machine_fingerprint, machine_fingerprint_history,
+            expires_at, is_active, revoked
+     FROM licenses
+     WHERE user_id = ? AND license_id = ?
+     LIMIT 1`
+  )
+    .bind(user.id, request.license_id)
+    .first();
+  if (!license) {
+    throwHttp(403, "license_not_found");
+  }
+  if (!Number(license.is_active) || Number(license.revoked)) {
+    throwHttp(403, "license_inactive");
+  }
+  if (license.expires_at && license.expires_at < todayIso()) {
+    throwHttp(403, "license_expired");
+  }
+  if (!licenseMachineMatches(license, request.machine_fingerprint)) {
+    throwHttp(403, "device_not_bound_to_license");
+  }
+  license.edition = normalizeEdition(license.edition);
+  return license;
+}
+
+function licenseMachineMatches(license, machineFingerprint) {
+  const current = safeText(license.machine_fingerprint || "", 160);
+  if (current && current === machineFingerprint) {
+    return true;
+  }
+  const history = parseJson(license.machine_fingerprint_history || "[]", []);
+  return Array.isArray(history) && history.some((item) => {
+    if (typeof item === "string") return item === machineFingerprint;
+    return safeText(item && item.fingerprint, 160) === machineFingerprint;
+  });
+}
+
+async function latestDataPackage(env, edition, channel, clientVersion) {
+  const now = todayIso();
+  const rows = await env.DB.prepare(
+    `SELECT *
+     FROM data_packages
+     WHERE channel = ?
+       AND is_active = 1
+       AND (edition = ? OR edition = 'all')
+       AND (expires_at IS NULL OR expires_at = '' OR expires_at >= ?)
+     ORDER BY
+       CASE WHEN edition = ? THEN 0 ELSE 1 END,
+       published_at DESC,
+       id DESC
+     LIMIT 20`
+  )
+    .bind(channel, edition, now, edition)
+    .all();
+  return (rows.results || []).find((row) => {
+    const minimum = safeText(row.min_client_version || "", 64);
+    return !minimum || !clientVersion || !versionGreater(minimum, clientVersion);
+  }) || null;
+}
+
+function assertDataPackageEntitlement(row, license, request) {
+  const packageEdition = normalizePackageEdition(row.edition || "all");
+  if (packageEdition !== "all" && packageEdition !== license.edition) {
+    throwHttp(403, "data_package_edition_not_allowed");
+  }
+  if (normalizePackageChannel(row.channel || "stable") !== request.channel) {
+    throwHttp(403, "data_package_channel_not_allowed");
+  }
+  if (row.expires_at && row.expires_at < todayIso()) {
+    throwHttp(410, "data_package_expired");
+  }
+  const minimum = safeText(row.min_client_version || "", 64);
+  if (minimum && request.client_version && versionGreater(minimum, request.client_version)) {
+    throwHttp(426, "client_version_too_old");
+  }
+}
+
+function dataPackagePayload(row, env) {
+  const capabilityScope = parseJson(row.capability_scope || "{}", {});
+  const manifestSummary = parseJson(row.manifest_summary || "{}", {});
+  return {
+    package_id: row.package_id,
+    edition: row.edition,
+    channel: row.channel,
+    version: row.version,
+    schema_version: Number(row.schema_version || 1),
+    data_date: row.data_date || "",
+    valid_from: row.valid_from || "",
+    expires_at: row.expires_at || "",
+    min_client_version: row.min_client_version || "",
+    detail_level: row.detail_level || "",
+    download_url: packageDownloadUrl(row, env),
+    r2_key: row.r2_key || "",
+    sha256: row.sha256 || "",
+    signature: row.signature || "",
+    size_bytes: Number(row.size_bytes || 0),
+    capability_scope: capabilityScope,
+    manifest_summary: manifestSummary,
+    published_at: row.published_at || "",
+  };
+}
+
+function packageDownloadUrl(row, env) {
+  const direct = safeText(row.download_url || "", 2048);
+  if (direct) {
+    return direct;
+  }
+  const base = safeText(env.DATA_PACKAGE_PUBLIC_BASE_URL || "", 2048).replace(/\/+$/, "");
+  const key = safeText(row.r2_key || "", 512).replace(/^\/+/, "");
+  return base && key ? `${base}/${key}` : "";
+}
+
+async function getDataSyncTableRows(ctx) {
+  const user = await requireUser(ctx);
+  const request = normalizeDataSyncRequest(ctx.url.searchParams);
+  const license = await verifyDataPackageLicense(ctx.env, user, request);
+  const tableName = safeText(ctx.tableName || "", 96);
+  if (!PRODUCTION_UPLOAD_TABLES.has(tableName)) {
+    throwHttp(404, "data_sync_table_not_found");
+  }
+  if (request.module !== "all_publishable" && PRODUCTION_UPLOAD_TABLES.get(tableName) !== request.module) {
+    throwHttp(400, "data_sync_table_module_mismatch");
+  }
+
+  const scopes = dataSyncEditionScopes(license.edition);
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const where = [
+    "r.table_name = ?",
+    `r.edition_scope IN (${scopePlaceholders})`,
+    "b.status = 'committed'",
+  ];
+  const params = [tableName, ...scopes];
+  if (request.module !== "all_publishable") {
+    where.push("r.module = ?");
+    params.push(request.module);
+  }
+  if (request.since) {
+    where.push("r.updated_at > ?");
+    params.push(request.since);
+  }
+  const filter = where.join(" AND ");
+  const total = await ctx.env.DB.prepare(
+    `SELECT COUNT(*) AS total
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${filter}`
+  ).bind(...params).first();
+  const rows = await ctx.env.DB.prepare(
+    `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+            r.edition_scope, r.module, r.batch_id, r.updated_at
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${filter}
+     ORDER BY r.updated_at ASC, r.table_name ASC, r.row_key ASC
+     LIMIT ? OFFSET ?`
+  ).bind(...params, request.limit, request.offset).all();
+
+  const results = (rows.results || []).map(dataSyncRowPayload);
+  return json({
+    ok: true,
+    table_name: tableName,
+    module: request.module,
+    edition: license.edition,
+    edition_scopes: scopes,
+    results,
+    page: {
+      limit: request.limit,
+      offset: request.offset,
+      total: numberField(total, "total"),
+      has_more: request.offset + results.length < numberField(total, "total"),
+    },
+  });
+}
+
+async function dataSyncManifest(env, license, request) {
+  const scopes = dataSyncEditionScopes(license.edition);
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const where = [`r.edition_scope IN (${scopePlaceholders})`, "b.status = 'committed'"];
+  const params = [...scopes];
+  if (request.module !== "all_publishable") {
+    where.push("r.module = ?");
+    params.push(request.module);
+  }
+  const rows = await env.DB.prepare(
+    `SELECT r.table_name, r.module, r.edition_scope,
+            COUNT(*) AS row_count,
+            MAX(r.data_date) AS data_date,
+            MAX(r.batch_id) AS latest_batch_id,
+            MAX(r.updated_at) AS updated_at
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${where.join(" AND ")}
+     GROUP BY r.table_name, r.module, r.edition_scope
+     ORDER BY r.module ASC, r.table_name ASC, r.edition_scope ASC`
+  ).bind(...params).all();
+  return {
+    module: request.module,
+    edition: license.edition,
+    edition_scopes: scopes,
+    tables: rows.results || [],
+    generated_at: nowIso(),
+  };
+}
+
+async function adminCloudDbOverview(env, url) {
+  const tables = await cloudDbTableStats(env, cloudDbQueryOptions(url), { includeEmpty: true });
+  const populatedTables = tables.filter((table) => Number(table.row_count || 0) > 0);
+  const totalRows = tables.reduce((total, table) => total + Number(table.row_count || 0), 0);
+  const totalDataDays = tables.reduce((total, table) => total + Number(table.data_day_count || 0), 0);
+  const latestDataDate = maxText(populatedTables.map((table) => table.max_data_date));
+  const latestUpdatedAt = maxText(populatedTables.map((table) => table.updated_at));
+  const latestUpload = await env.DB.prepare(
+    `SELECT batch_id, module, edition_scope, status, table_count, row_count,
+            received_row_count, received_chunk_count, error_message,
+            created_at, updated_at, committed_at
+     FROM production_upload_batches
+     ORDER BY created_at DESC
+     LIMIT 1`
+  ).first();
+  const uploadCounts = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS batch_count,
+       SUM(CASE WHEN status = 'committed' THEN 1 ELSE 0 END) AS committed_count,
+       SUM(CASE WHEN status = 'aborted' THEN 1 ELSE 0 END) AS aborted_count,
+       SUM(CASE WHEN status NOT IN ('committed', 'aborted') THEN 1 ELSE 0 END) AS open_count
+     FROM production_upload_batches`
+  ).first();
+
+  return {
+    ok: true,
+    generated_at: nowIso(),
+    allowed_table_count: PRODUCTION_UPLOAD_TABLES.size,
+    populated_table_count: populatedTables.length,
+    production_row_count: totalRows,
+    data_day_total: totalDataDays,
+    latest_data_date: latestDataDate,
+    latest_updated_at: latestUpdatedAt,
+    latest_upload: latestUpload || null,
+    upload_counts: compactCounts(uploadCounts, ["batch_count", "committed_count", "aborted_count", "open_count"]),
+    warnings: cloudDbWarnings(tables, latestUpload),
+  };
+}
+
+async function adminCloudDbTables(env, url) {
+  const options = cloudDbQueryOptions(url);
+  return {
+    ok: true,
+    generated_at: nowIso(),
+    module: options.module,
+    edition_scope: options.edition_scope,
+    tables: await cloudDbTableStats(env, options, { includeEmpty: true }),
+  };
+}
+
+async function getAdminCloudDbTableDetail(ctx) {
+  requireAdmin(ctx);
+  const tableName = safeText(ctx.tableName || "", 96);
+  if (!PRODUCTION_UPLOAD_TABLES.has(tableName)) {
+    throwHttp(404, "cloud_db_table_not_allowed");
+  }
+  const options = cloudDbQueryOptions(ctx.url);
+  const tableStats = await cloudDbTableStats(ctx.env, { ...options, table_name: tableName }, { includeEmpty: true });
+  const stats = aggregateCloudDbTableStats(tableName, tableStats);
+  const where = ["r.table_name = ?", "b.status = 'committed'"];
+  const params = [tableName];
+  addCloudDbFilters(where, params, options);
+  const recentJoinFilters = [];
+  const recentParams = [tableName];
+  if (options.module && options.module !== "all_publishable") {
+    recentJoinFilters.push("r.module = ?");
+    recentParams.push(options.module);
+  }
+  if (options.edition_scope) {
+    recentJoinFilters.push("r.edition_scope = ?");
+    recentParams.push(options.edition_scope);
+  }
+  const recentBatches = await ctx.env.DB.prepare(
+    `SELECT b.batch_id, b.module, b.edition_scope, b.status, b.table_count, b.row_count,
+            b.received_row_count, b.received_chunk_count, b.error_message,
+            b.created_at, b.updated_at, b.committed_at,
+            COUNT(r.row_key) AS table_row_count,
+            COUNT(DISTINCT CASE WHEN r.data_date <> '' THEN r.data_date ELSE NULL END) AS table_data_day_count,
+            MIN(CASE WHEN r.data_date <> '' THEN r.data_date ELSE NULL END) AS min_data_date,
+            MAX(CASE WHEN r.data_date <> '' THEN r.data_date ELSE NULL END) AS max_data_date
+     FROM production_upload_batches b
+     LEFT JOIN production_table_rows r
+       ON r.batch_id = b.batch_id
+      AND r.table_name = ?
+      ${recentJoinFilters.length ? `AND ${recentJoinFilters.join(" AND ")}` : ""}
+     WHERE b.status = 'committed'
+     GROUP BY b.batch_id, b.module, b.edition_scope, b.status, b.table_count, b.row_count,
+              b.received_row_count, b.received_chunk_count, b.error_message,
+              b.created_at, b.updated_at, b.committed_at
+     HAVING table_row_count > 0
+     ORDER BY b.committed_at DESC, b.updated_at DESC
+     LIMIT ?`
+  ).bind(
+    ...recentParams,
+    Math.max(1, Math.min(positiveInteger(ctx.url.searchParams.get("batch_limit"), 20, 100), 100))
+  ).all();
+  const coverage = await ctx.env.DB.prepare(
+    `SELECT r.data_date, COUNT(*) AS row_count, MAX(r.updated_at) AS updated_at
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${where.join(" AND ")} AND r.data_date <> ''
+     GROUP BY r.data_date
+     ORDER BY r.data_date DESC
+     LIMIT ?`
+  ).bind(...params, Math.max(1, Math.min(positiveInteger(ctx.url.searchParams.get("day_limit"), 30, 200), 200))).all();
+  return json({
+    ok: true,
+    generated_at: nowIso(),
+    table_name: tableName,
+    module: PRODUCTION_UPLOAD_TABLES.get(tableName),
+    stats,
+    stats_groups: tableStats,
+    recent_batches: recentBatches.results || [],
+    recent_data_days: coverage.results || [],
+  });
+}
+
+async function cloudDbTableStats(env, options = {}, behavior = {}) {
+  const where = ["b.status = 'committed'"];
+  const params = [];
+  addCloudDbFilters(where, params, options);
+  if (options.table_name) {
+    where.push("r.table_name = ?");
+    params.push(options.table_name);
+  }
+  const rows = await env.DB.prepare(
+    `SELECT r.table_name, r.module, r.edition_scope,
+            COUNT(*) AS row_count,
+            COUNT(DISTINCT CASE WHEN r.data_date <> '' THEN r.data_date ELSE NULL END) AS data_day_count,
+            MIN(CASE WHEN r.data_date <> '' THEN r.data_date ELSE NULL END) AS min_data_date,
+            MAX(CASE WHEN r.data_date <> '' THEN r.data_date ELSE NULL END) AS max_data_date,
+            MAX(r.batch_id) AS latest_batch_id,
+            MAX(r.updated_at) AS updated_at
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${where.join(" AND ")}
+     GROUP BY r.table_name, r.module, r.edition_scope
+     ORDER BY r.module ASC, r.table_name ASC, r.edition_scope ASC`
+  ).bind(...params).all();
+  const stats = rows.results || [];
+  if (!behavior.includeEmpty) {
+    return stats;
+  }
+  const present = new Set(stats.map((row) => `${row.table_name}:${row.edition_scope || ""}`));
+  const include = [];
+  for (const [tableName, module] of PRODUCTION_UPLOAD_TABLES.entries()) {
+    if (options.table_name && tableName !== options.table_name) {
+      continue;
+    }
+    if (options.module !== "all_publishable" && options.module && module !== options.module) {
+      continue;
+    }
+    const key = `${tableName}:${options.edition_scope || ""}`;
+    const hasAny = stats.some((row) => row.table_name === tableName);
+    if (!hasAny && !present.has(key)) {
+      include.push(emptyCloudDbTableStat(tableName, module, options.edition_scope || ""));
+    }
+  }
+  return [...stats, ...include].sort((left, right) => {
+    const moduleCompare = String(left.module || "").localeCompare(String(right.module || ""));
+    if (moduleCompare) return moduleCompare;
+    const tableCompare = String(left.table_name || "").localeCompare(String(right.table_name || ""));
+    if (tableCompare) return tableCompare;
+    return String(left.edition_scope || "").localeCompare(String(right.edition_scope || ""));
+  });
+}
+
+function cloudDbQueryOptions(url) {
+  return {
+    module: normalizeDataSyncModule(url.searchParams.get("module") || "all_publishable"),
+    edition_scope: safeCloudDbEditionScope(url.searchParams.get("edition_scope") || ""),
+  };
+}
+
+function addCloudDbFilters(where, params, options) {
+  if (options.module && options.module !== "all_publishable") {
+    where.push("r.module = ?");
+    params.push(options.module);
+  }
+  if (options.edition_scope) {
+    where.push("r.edition_scope = ?");
+    params.push(options.edition_scope);
+  }
+}
+
+function emptyCloudDbTableStat(tableName, module = "", editionScope = "") {
+  return {
+    table_name: tableName,
+    module: module || PRODUCTION_UPLOAD_TABLES.get(tableName) || "",
+    edition_scope: editionScope,
+    row_count: 0,
+    data_day_count: 0,
+    min_data_date: "",
+    max_data_date: "",
+    latest_batch_id: "",
+    updated_at: "",
+  };
+}
+
+function aggregateCloudDbTableStats(tableName, rows) {
+  const activeRows = rows.filter((row) => Number(row.row_count || 0) > 0);
+  if (!activeRows.length) {
+    return emptyCloudDbTableStat(tableName);
+  }
+  return {
+    table_name: tableName,
+    module: PRODUCTION_UPLOAD_TABLES.get(tableName) || "",
+    edition_scope: activeRows.length === 1 ? activeRows[0].edition_scope || "" : "mixed",
+    row_count: activeRows.reduce((total, row) => total + Number(row.row_count || 0), 0),
+    data_day_count: activeRows.reduce((total, row) => total + Number(row.data_day_count || 0), 0),
+    min_data_date: minText(activeRows.map((row) => row.min_data_date)),
+    max_data_date: maxText(activeRows.map((row) => row.max_data_date)),
+    latest_batch_id: maxText(activeRows.map((row) => row.latest_batch_id)),
+    updated_at: maxText(activeRows.map((row) => row.updated_at)),
+  };
+}
+
+function safeCloudDbEditionScope(value) {
+  const scope = safeText(value || "", 32).toLowerCase().replaceAll("-", "_");
+  return ["standard", "pro", "standard_pro", "internal"].includes(scope) ? scope : "";
+}
+
+function cloudDbWarnings(tables, latestUpload) {
+  const warnings = [];
+  const emptyTables = tables.filter((table) => Number(table.row_count || 0) === 0).map((table) => table.table_name);
+  if (emptyTables.length) {
+    warnings.push(`empty_tables:${emptyTables.slice(0, 8).join(",")}`);
+  }
+  const missingDateTables = tables
+    .filter((table) => Number(table.row_count || 0) > 0 && Number(table.data_day_count || 0) === 0)
+    .map((table) => table.table_name);
+  if (missingDateTables.length) {
+    warnings.push(`missing_data_date:${missingDateTables.slice(0, 8).join(",")}`);
+  }
+  if (latestUpload && !["committed", "aborted"].includes(String(latestUpload.status || ""))) {
+    warnings.push(`latest_upload_open:${latestUpload.batch_id || ""}`);
+  }
+  return warnings;
+}
+
+function maxText(values) {
+  return values.filter(Boolean).reduce((latest, value) => (String(value) > String(latest) ? value : latest), "");
+}
+
+function minText(values) {
+  return values.filter(Boolean).reduce((earliest, value) => (!earliest || String(value) < String(earliest) ? value : earliest), "");
+}
+
+function dataSyncRowPayload(row) {
+  return {
+    table_name: row.table_name,
+    row_key: row.row_key,
+    row_hash: row.row_hash,
+    row: parseJson(row.row_json || "{}", {}),
+    data_date: row.data_date || "",
+    edition_scope: row.edition_scope || "",
+    module: row.module || "",
+    batch_id: row.batch_id || "",
+    updated_at: row.updated_at || "",
+  };
+}
+
+function dataSyncEditionScopes(edition) {
+  const normalized = normalizeEdition(edition);
+  if (normalized === "personal_standard") {
+    return ["standard_pro", "standard"];
+  }
+  if (normalized === "personal_pro") {
+    return ["standard_pro", "standard", "pro"];
+  }
+  if (["team", "enterprise"].includes(normalized)) {
+    return ["standard_pro", "standard", "pro"];
+  }
+  return ["standard_pro"];
+}
+
+async function recordDeviceSyncLog(env, options) {
+  await env.DB.prepare(
+    `INSERT INTO device_sync_logs
+       (license_id, user_id, machine_fingerprint, package_id, edition, channel,
+        client_version, status, error_message, client_ip, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      options.license ? options.license.license_id : options.request.license_id,
+      options.user ? options.user.id : null,
+      options.request.machine_fingerprint || "",
+      options.packageId || "",
+      options.license ? options.license.edition : "",
+      options.request.channel || "stable",
+      options.request.client_version || "",
+      options.status || "unknown",
+      options.errorMessage || "",
+      options.clientIp || "",
+      nowIso()
+    )
+    .run();
+}
+
+function normalizeAdminDataPackage(body) {
+  const packageId = safeText(body.package_id || "", 128);
+  const edition = normalizePackageEdition(body.edition || "personal_pro");
+  const channel = normalizePackageChannel(body.channel || "stable");
+  const version = safeText(body.version || body.data_date || packageId, 80);
+  const sha256 = safeText(body.sha256 || body.file_hash_sha256 || "", 128).toLowerCase();
+  if (!packageId) {
+    throwHttp(400, "package_id_required");
+  }
+  if (!version) {
+    throwHttp(400, "version_required");
+  }
+  if (!sha256) {
+    throwHttp(400, "sha256_required");
+  }
+  const downloadUrl = safeText(body.download_url || "", 2048);
+  if (downloadUrl && !/^https:\/\//i.test(downloadUrl)) {
+    throwHttp(400, "download_url_https_required");
+  }
+  const now = nowIso();
+  return {
+    package_id: packageId,
+    edition,
+    channel,
+    version,
+    schema_version: Math.max(Number(body.schema_version || 1), 1),
+    data_date: safeText(body.data_date || "", 32),
+    valid_from: safeText(body.valid_from || "", 32),
+    expires_at: safeText(body.expires_at || body.valid_until || "", 32),
+    min_client_version: safeText(body.min_client_version || "", 64),
+    detail_level: normalizeDetailLevel(body.detail_level || (edition === "personal_standard" ? "standard" : "pro")),
+    r2_key: safeText(body.r2_key || "", 512),
+    download_url: downloadUrl,
+    sha256,
+    signature: safeText(body.signature || "", 512),
+    size_bytes: Math.max(Number(body.size_bytes || body.file_size_bytes || 0), 0),
+    capability_scope: JSON.stringify(safeJsonObject(body.capability_scope || body.capabilities || {})),
+    manifest_summary: JSON.stringify(safeJsonObject(body.manifest_summary || body.manifest || {})),
+    is_active: body.is_active === undefined ? 1 : boolToInt(body.is_active),
+    published_at: safeText(body.published_at || body.released_at || now, 64),
+    created_at: safeText(body.created_at || now, 64),
+    updated_at: now,
+  };
+}
+
+async function upsertDataPackage(env, record) {
+  await env.DB.prepare(
+    `INSERT INTO data_packages
+       (package_id, edition, channel, version, schema_version, data_date, valid_from,
+        expires_at, min_client_version, detail_level, r2_key, download_url, sha256,
+        signature, size_bytes, capability_scope, manifest_summary, is_active,
+        published_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(package_id) DO UPDATE SET
+       edition = excluded.edition,
+       channel = excluded.channel,
+       version = excluded.version,
+       schema_version = excluded.schema_version,
+       data_date = excluded.data_date,
+       valid_from = excluded.valid_from,
+       expires_at = excluded.expires_at,
+       min_client_version = excluded.min_client_version,
+       detail_level = excluded.detail_level,
+       r2_key = excluded.r2_key,
+       download_url = excluded.download_url,
+       sha256 = excluded.sha256,
+       signature = excluded.signature,
+       size_bytes = excluded.size_bytes,
+       capability_scope = excluded.capability_scope,
+       manifest_summary = excluded.manifest_summary,
+       is_active = excluded.is_active,
+       published_at = excluded.published_at,
+       updated_at = excluded.updated_at`
+  )
+    .bind(
+      record.package_id,
+      record.edition,
+      record.channel,
+      record.version,
+      record.schema_version,
+      record.data_date,
+      record.valid_from,
+      record.expires_at,
+      record.min_client_version,
+      record.detail_level,
+      record.r2_key,
+      record.download_url,
+      record.sha256,
+      record.signature,
+      record.size_bytes,
+      record.capability_scope,
+      record.manifest_summary,
+      record.is_active,
+      record.published_at,
+      record.created_at,
+      record.updated_at
+    )
+    .run();
+}
+
+const PRODUCTION_UPLOAD_TABLES = new Map([
+  ["score_history", "target_research"],
+  ["stock_analysis_pool", "target_research"],
+  ["stock_info", "target_research"],
+  ["industry_info", "target_research"],
+  ["stock_daily_latest", "market_context"],
+  ["stock_daily_ohlcv", "market_context"],
+  ["stock_financial_metrics", "market_context"],
+  ["stock_risk_metrics", "market_context"],
+  ["sector_rotation_daily", "market_context"],
+  ["market_fund_flow_cache", "market_context"],
+  ["industry_fund_flow_cache", "market_context"],
+  ["market_sentiment_daily", "market_context"],
+]);
+
+function normalizeProductionUploadBatch(body) {
+  const now = nowIso();
+  const batchId = safeText(body.batch_id || `pu_${Date.now()}_${timeCompact()}`, 96);
+  const module = normalizeProductionUploadModule(body.module || "all_publishable");
+  const editionScope = normalizeProductionEditionScope(body.edition_scope || "standard_pro");
+  const rowCount = Math.max(Number(body.row_count || 0), 0);
+  const tableCount = Math.max(Number(body.table_count || 0), 0);
+  return {
+    batch_id: batchId,
+    module,
+    source: safeText(body.source || "self_use_production", 64),
+    mode: safeText(body.mode || "module", 32),
+    edition_scope: editionScope,
+    status: "created",
+    table_count: tableCount,
+    row_count: rowCount,
+    received_row_count: 0,
+    received_chunk_count: 0,
+    manifest_json: JSON.stringify(safeJsonObject(body.manifest || {})),
+    manifest_hash: safeText(body.manifest_hash || "", 128),
+    error_message: "",
+    created_at: now,
+    updated_at: now,
+    committed_at: "",
+  };
+}
+
+async function insertProductionUploadBatch(env, record) {
+  await env.DB.prepare(
+    `INSERT INTO production_upload_batches
+       (batch_id, module, source, mode, edition_scope, status, table_count, row_count,
+        received_row_count, received_chunk_count, manifest_json, manifest_hash,
+        error_message, created_at, updated_at, committed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(batch_id) DO UPDATE SET
+       module = excluded.module,
+       source = excluded.source,
+       mode = excluded.mode,
+       edition_scope = excluded.edition_scope,
+       status = excluded.status,
+       table_count = excluded.table_count,
+       row_count = excluded.row_count,
+       received_row_count = excluded.received_row_count,
+       received_chunk_count = excluded.received_chunk_count,
+       manifest_json = excluded.manifest_json,
+       manifest_hash = excluded.manifest_hash,
+       error_message = excluded.error_message,
+       created_at = excluded.created_at,
+       committed_at = excluded.committed_at,
+       updated_at = excluded.updated_at`
+  ).bind(
+    record.batch_id,
+    record.module,
+    record.source,
+    record.mode,
+    record.edition_scope,
+    record.status,
+    record.table_count,
+    record.row_count,
+    record.received_row_count,
+    record.received_chunk_count,
+    record.manifest_json,
+    record.manifest_hash,
+    record.error_message,
+    record.created_at,
+    record.updated_at,
+    record.committed_at
+  ).run();
+}
+
+async function listProductionUploadChunks(env, batchId) {
+  const rows = await env.DB.prepare(
+    `SELECT table_name, chunk_index, row_count, chunk_hash, created_at
+     FROM production_upload_chunks
+     WHERE batch_id = ?
+     ORDER BY table_name ASC, chunk_index ASC`
+  ).bind(batchId).all();
+  return rows.results || [];
+}
+
+function normalizeProductionUploadChunk(body) {
+  const batchId = safeText(body.batch_id || "", 96);
+  const tableName = safeText(body.table_name || "", 96);
+  if (!batchId) {
+    throwHttp(400, "production_upload_batch_id_required");
+  }
+  if (!PRODUCTION_UPLOAD_TABLES.has(tableName)) {
+    throwHttp(400, "production_upload_table_not_allowed");
+  }
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (!rows.length) {
+    throwHttp(400, "production_upload_rows_required");
+  }
+  if (rows.length > 500) {
+    throwHttp(413, "production_upload_chunk_too_large");
+  }
+  return {
+    batch_id: batchId,
+    table_name: tableName,
+    module: normalizeProductionUploadModule(body.module || PRODUCTION_UPLOAD_TABLES.get(tableName)),
+    mode: normalizeProductionUploadMode(body.mode || "incremental_upsert"),
+    edition_scope: normalizeProductionEditionScope(body.edition_scope || "standard_pro"),
+    chunk_index: Math.max(Number(body.chunk_index || 1), 1),
+    chunk_hash: safeText(body.chunk_hash || "", 128),
+    rows: rows.map(normalizeProductionUploadRow),
+  };
+}
+
+function normalizeProductionUploadRow(row) {
+  const payload = row && typeof row === "object" ? row : {};
+  const rowKey = safeText(payload.row_key || "", 128);
+  const rowHash = safeText(payload.row_hash || "", 128);
+  const dataDate = safeText(payload.data_date || "", 32);
+  const data = payload.row && typeof payload.row === "object" && !Array.isArray(payload.row) ? payload.row : {};
+  if (!rowKey || !rowHash) {
+    throwHttp(400, "production_upload_row_key_required");
+  }
+  return {
+    row_key: rowKey,
+    row_hash: rowHash,
+    data_date: dataDate,
+    row_json: JSON.stringify(data),
+  };
+}
+
+async function storeProductionUploadChunk(env, chunk) {
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO production_upload_chunks
+       (batch_id, table_name, chunk_index, row_count, chunk_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(batch_id, table_name, chunk_index) DO UPDATE SET
+       row_count = excluded.row_count,
+       chunk_hash = excluded.chunk_hash,
+       created_at = excluded.created_at`
+  ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index, chunk.rows.length, chunk.chunk_hash, now).run();
+
+  for (const row of chunk.rows) {
+    await env.DB.prepare(
+      `INSERT INTO production_upload_staging_rows
+         (batch_id, table_name, row_key, row_hash, row_json, data_date, edition_scope, module, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(batch_id, table_name, row_key, edition_scope) DO UPDATE SET
+         row_hash = excluded.row_hash,
+         row_json = excluded.row_json,
+         data_date = excluded.data_date,
+         module = excluded.module,
+         updated_at = excluded.updated_at`
+    ).bind(
+      chunk.batch_id,
+      chunk.table_name,
+      row.row_key,
+      row.row_hash,
+      row.row_json,
+      row.data_date,
+      chunk.edition_scope,
+      chunk.module,
+      now
+    ).run();
+  }
+  await env.DB.prepare(
+    `UPDATE production_upload_batches
+     SET status = 'receiving',
+         received_row_count = received_row_count + ?,
+         received_chunk_count = received_chunk_count + 1,
+         updated_at = ?
+     WHERE batch_id = ?`
+  ).bind(chunk.rows.length, now, chunk.batch_id).run();
+}
+
+async function commitProductionUploadBatch(env, batch, batchId) {
+  const fullReplaceTables = productionUploadFullReplaceTables(batch.manifest_json);
+  for (const tableName of fullReplaceTables) {
+    await env.DB.prepare(
+      "DELETE FROM production_table_rows WHERE table_name = ? AND edition_scope = ?"
+    ).bind(tableName, batch.edition_scope).run();
+  }
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO production_table_rows
+       (table_name, row_key, row_hash, row_json, data_date, edition_scope, module, batch_id, updated_at)
+     SELECT table_name, row_key, row_hash, row_json, data_date, edition_scope, module, batch_id, updated_at
+       FROM production_upload_staging_rows
+      WHERE batch_id = ?`
+  ).bind(batchId).run();
+  await env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(batchId).run();
+}
+
+async function rollbackProductionUploadBatch(env, batchId, reason = "") {
+  const now = nowIso();
+  await env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(batchId).run();
+  await env.DB.prepare(
+    `UPDATE production_upload_batches
+     SET status = 'aborted',
+         error_message = ?,
+         updated_at = ?
+     WHERE batch_id = ? AND status <> 'committed'`
+  ).bind(safeText(reason || "rollback_requested", 500), now, batchId).run();
+}
+
+function productionUploadFullReplaceTables(manifestJson) {
+  const manifest = safeJsonObject(manifestJson);
+  const tables = Array.isArray(manifest.tables) ? manifest.tables : [];
+  return tables
+    .filter((table) => safeText(table && table.mode, 32) === "full_replace")
+    .map((table) => safeText(table && table.table_name, 96))
+    .filter((tableName) => PRODUCTION_UPLOAD_TABLES.has(tableName));
+}
+
+function normalizeProductionUploadModule(value) {
+  const module = safeText(value || "all_publishable", 64).toLowerCase().replaceAll("-", "_");
+  return ["target_research", "market_context", "strategy_research", "all_publishable"].includes(module)
+    ? module
+    : "all_publishable";
+}
+
+function normalizeDataSyncModule(value) {
+  const module = safeText(value || "target_research", 64).toLowerCase().replaceAll("-", "_");
+  return ["target_research", "market_context", "all_publishable"].includes(module) ? module : "target_research";
+}
+
+function normalizeProductionUploadMode(value) {
+  const mode = safeText(value || "incremental_upsert", 32).toLowerCase().replaceAll("-", "_");
+  return ["incremental_upsert", "full_replace"].includes(mode) ? mode : "incremental_upsert";
+}
+
+function normalizeProductionEditionScope(value) {
+  const scope = safeText(value || "standard_pro", 32).toLowerCase().replaceAll("-", "_");
+  return ["standard", "pro", "standard_pro", "internal"].includes(scope) ? scope : "standard_pro";
+}
+
+function normalizePackageChannel(value) {
+  const channel = safeText(value || "stable", 32).toLowerCase().replaceAll("_", "-");
+  return ["stable", "beta", "canary", "internal"].includes(channel) ? channel : "stable";
+}
+
+function normalizePackageEdition(value) {
+  const edition = safeText(value || "personal_pro", 64).toLowerCase().replaceAll("-", "_");
+  if (edition === "all") {
+    return "all";
+  }
+  if (["personal_standard", "personal_pro", "team", "enterprise"].includes(edition)) {
+    return edition;
+  }
+  throwHttp(400, "data_package_edition_invalid");
+}
+
+function normalizeDetailLevel(value) {
+  const detail = safeText(value || "", 32).toLowerCase().replaceAll("-", "_");
+  return ["standard", "pro", "team", "enterprise"].includes(detail) ? detail : "";
+}
+
+function normalizeSyncStatus(value) {
+  const status = safeText(value || "client_reported", 48).toLowerCase().replaceAll("-", "_");
+  return [
+    "catalog_checked",
+    "detail_checked",
+    "download_started",
+    "downloaded",
+    "hash_verified",
+    "signature_verified",
+    "imported",
+    "failed",
+    "not_found",
+    "client_reported",
+  ].includes(status) ? status : "client_reported";
+}
+
+function safeJsonObject(value) {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === "string") {
+    const parsed = parseJson(value, {});
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  }
+  return typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 async function latestRelease(env, edition, channel) {
