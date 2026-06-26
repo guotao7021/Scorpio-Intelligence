@@ -159,6 +159,33 @@ The compute service returns display-safe analysis payloads only. Do not expose
 raw factors, strategy weights, thresholds, dataframe dumps, internal DAGs, or
 private decision objects through this boundary.
 
+Analysis API hardening status:
+
+- Client authentication is required for all non-health Analysis endpoints.
+- A valid `license_id` is verified when supplied. Set
+  `ANALYSIS_REQUIRE_LICENSE_ID=1` after the commercial client always sends its
+  license context.
+- Requests are rate-limited per authenticated user with
+  `ANALYSIS_RATE_LIMIT_PER_MINUTE`.
+- Newer desktop clients sign authenticated Analysis requests with
+  `X-Scorpio-Timestamp`, `X-Scorpio-Nonce`, and `X-Scorpio-Signature`.
+- Signature verification is optional while old clients are still in circulation.
+  Set `ANALYSIS_REQUIRE_REQUEST_SIGNATURE=1` after the signed client is the
+  minimum supported commercial build.
+- Nonces are persisted in D1 for `ANALYSIS_REPLAY_WINDOW_SECONDS` to block replay
+  of signed requests.
+
+Current migration status for the SaaS path:
+
+- Implemented server gateway endpoints: stock bundle, price/technical, reason,
+  fundamental, financial, news, market overview, industry overview, capital
+  flow, fund bundle, bond bundle, and portfolio enrichment.
+- Implemented desktop API client methods for those endpoints.
+- Commercial clients should route supported real-time analysis through the cloud
+  `AnalysisFacade`; self-use clients can continue to use local services.
+- Remaining work is primarily UI coverage verification and deciding when to turn
+  mandatory license/signature switches on for production.
+
 ## ECS Retirement Gate
 
 Only stop ECS after all of these pass against `https://api.scorpio-intelligence.tech`:

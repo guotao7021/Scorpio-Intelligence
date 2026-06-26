@@ -482,13 +482,15 @@
   }
 
   function renderReleases() {
-    renderTable(els.releasesTable, ["版本", "通道", "版本类型", "下载地址", "SHA256", "强制", "发布时间"], state.releases.map((row) => [
+    renderTable(els.releasesTable, ["版本", "通道", "版本类型", "来源", "文件", "大小", "下载", "状态", "发布时间"], state.releases.map((row) => [
       `v${String(row.version || "").replace(/^v/i, "")}`,
-      row.channel,
-      row.edition,
-      shortText(row.download_url || "-", 46),
-      row.file_hash_sha256 ? shortText(row.file_hash_sha256, 18) : "-",
-      row.is_required ? "是" : "否",
+      row.channel || "-",
+      row.edition || "-",
+      shortText(row.r2_key || row.download_url || "-", 46),
+      shortText(row.file_name || "-", 28),
+      formatBytes(row.file_size_bytes),
+      row.download_count || 0,
+      Number(row.is_active ?? 1) ? (row.is_required ? "强制" : "可用") : "停用",
       formatDate(row.released_at),
     ]));
   }
@@ -980,6 +982,14 @@
   function shortText(value, length) {
     const text = String(value || "");
     return text.length > length ? `${text.slice(0, length - 1)}...` : text;
+  }
+  function formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (!bytes) return "-";
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
   }
 
   async function copyText(text) {

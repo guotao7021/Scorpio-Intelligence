@@ -227,7 +227,10 @@
                 <option value="all">all</option>
               </select>
             </label>
-            <label class="wide">下载地址<input name="download_url" type="url" placeholder="https://..." required></label>
+            <label class="wide">R2 对象 Key<input name="r2_key" type="text" placeholder="releases/personal_pro/stable/1.0.0/Scorpio-Setup.exe"></label>
+            <label>文件名<input name="file_name" type="text" placeholder="Scorpio-Setup.exe"></label>
+            <label>Content-Type<input name="content_type" type="text" value="application/octet-stream"></label>
+            <label class="wide">备用 HTTPS 下载地址<input name="download_url" type="url" placeholder="可选，R2 未配置时使用"></label>
             <label>SHA256<input name="file_hash_sha256" type="text" placeholder="可选"></label>
             <label>文件大小 bytes<input name="file_size_bytes" type="number" min="0" value="0"></label>
             <label class="check-field"><input name="is_required" type="checkbox"> 强制更新</label>

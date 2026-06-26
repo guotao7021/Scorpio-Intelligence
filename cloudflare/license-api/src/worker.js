@@ -28,6 +28,10 @@ export default {
           const licenseId = decodeURIComponent(path.slice("/v1/license/download/".length)).trim();
           return withCors(await downloadLicenseFile({ request, env, licenseId }), corsHeaders);
         }
+        if (request.method === "GET" && path.startsWith("/v1/releases/download/")) {
+          const releaseId = Number(decodeURIComponent(path.slice("/v1/releases/download/".length)).trim());
+          return withCors(await downloadReleaseFile({ request, env, releaseId }), corsHeaders);
+        }
         if (request.method === "GET" && path.startsWith("/v1/data-packages/")) {
           const packageId = decodeURIComponent(path.slice("/v1/data-packages/".length)).trim();
           return withCors(await getDataPackageDetail({ request, env, url, packageId }), corsHeaders);
@@ -82,6 +86,13 @@ export default {
             return withCors(await updateAdminDataPackage({ request, env, packageId }), corsHeaders);
           }
           return withCors(await deactivateAdminDataPackage({ request, env, packageId }), corsHeaders);
+        }
+        if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/releases/")) {
+          const releaseId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/releases/".length)).trim());
+          if (request.method === "PUT") {
+            return withCors(await updateAdminRelease({ request, env, releaseId }), corsHeaders);
+          }
+          return withCors(await deactivateAdminRelease({ request, env, releaseId }), corsHeaders);
         }
         if (request.method === "GET" && path === "/health") {
           return json({ ok: true, service: "scorpio-license-api" }, 200, corsHeaders);
@@ -718,16 +729,19 @@ route("GET", "/v1/scorpio_v1_admin/feedback", async (ctx) => {
 });
 
 route("GET", "/v1/releases/latest", async (ctx) => {
+  const user = await requireUser(ctx);
   const edition = ctx.url.searchParams.get("edition") || "personal_pro";
   const channel = ctx.url.searchParams.get("channel") || "stable";
   const latest = await latestRelease(ctx.env, edition, channel);
   if (!latest) {
     return json({ error: "release_not_found" }, 404);
   }
+  await requireReleaseEntitlement(ctx.env, user, latest.edition);
   return json(releasePayload(latest));
 });
 
 route("GET", "/v1/releases/check", async (ctx) => {
+  const user = await requireUser(ctx);
   const current = ctx.url.searchParams.get("version") || "";
   const edition = ctx.url.searchParams.get("edition") || "personal_pro";
   const channel = ctx.url.searchParams.get("channel") || "stable";
@@ -735,6 +749,7 @@ route("GET", "/v1/releases/check", async (ctx) => {
   if (!latest) {
     return json({ has_update: false, message: "release_not_found" });
   }
+  await requireReleaseEntitlement(ctx.env, user, latest.edition);
   return json({
     has_update: versionGreater(latest.version, current),
     ...releasePayload(latest),
@@ -841,6 +856,7 @@ route("POST", "/v1/analysis/stock/bundle", async (ctx) => {
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/bundle" });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -877,6 +893,7 @@ route("POST", "/v1/analysis/stock/price-technical", async (ctx) => {
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/price-technical" });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -914,6 +931,7 @@ route("POST", "/v1/analysis/stock/reason", async (ctx) => {
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/reason" });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -1012,6 +1030,7 @@ route("POST", "/v1/analysis/portfolio/enrich", async (ctx) => {
   const body = await readJson(ctx.request);
   const request = normalizePortfolioRequest(body);
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/portfolio/enrich" });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -1711,7 +1730,7 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
   const where = [];
   const params = [];
-  addListTextSearch(where, params, ["version", "release_notes", "download_url"], options.q);
+  addListTextSearch(where, params, ["version", "release_notes", "download_url", "r2_key", "file_name"], options.q);
   if (options.edition) {
     where.push("edition = ?");
     params.push(options.edition);
@@ -1723,8 +1742,9 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM release_versions ${filter}`).bind(...params).first();
   const rows = await ctx.env.DB.prepare(
-    `SELECT version, channel, edition, release_notes, download_url, file_hash_sha256,
-            file_size_bytes, is_required, released_at
+    `SELECT id, version, channel, edition, release_notes, download_url, r2_key, file_name,
+            content_type, file_hash_sha256, file_size_bytes, is_required, released_at,
+            uploaded_at, download_count, is_active
      FROM release_versions
      ${filter}
      ORDER BY released_at DESC, id DESC
@@ -1863,51 +1883,18 @@ route("GET", "/v1/scorpio_v1_admin/analysis-requests", async (ctx) => {
 
 route("POST", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   requireAdmin(ctx);
-  const body = await readJson(ctx.request);
-  const version = String(body.version || "").trim().replace(/^v/i, "");
-  const channel = String(body.channel || "stable").trim().toLowerCase() || "stable";
-  const edition = normalizeEdition(body.edition || "personal_pro");
-  const downloadUrl = String(body.download_url || "").trim();
-  const notes = String(body.release_notes || "").trim();
-  const sha256 = String(body.file_hash_sha256 || body.sha256 || "").trim();
-  const sizeBytes = Math.max(Number(body.file_size_bytes || 0), 0);
-  const isRequired = body.is_required ? 1 : 0;
-  const releasedAt = String(body.released_at || "").trim() || nowIso();
+  const record = normalizeAdminRelease(await readJson(ctx.request));
+  await upsertRelease(ctx.env, record);
 
-  if (!version) {
-    return json({ error: "version_required" }, 400);
-  }
-  if (downloadUrl && !/^https:\/\//i.test(downloadUrl)) {
-    return json({ error: "download_url_https_required" }, 400);
-  }
-
-  await ctx.env.DB.prepare(
-    `INSERT INTO release_versions
-       (version, channel, edition, release_notes, download_url, file_hash_sha256,
-        file_size_bytes, is_required, released_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(version, channel, edition) DO UPDATE SET
-       release_notes = excluded.release_notes,
-       download_url = excluded.download_url,
-       file_hash_sha256 = excluded.file_hash_sha256,
-       file_size_bytes = excluded.file_size_bytes,
-       is_required = excluded.is_required,
-       released_at = excluded.released_at`
-  )
-    .bind(version, channel, edition, notes, downloadUrl, sha256, sizeBytes, isRequired, releasedAt)
-    .run();
-
-  await audit(ctx.env, "upsert_release", "admin_api", { version, channel, edition });
+  await audit(ctx.env, "upsert_release", "admin_api", {
+    version: record.version,
+    channel: record.channel,
+    edition: record.edition,
+    r2_key: record.r2_key,
+  });
   return json({
-    version,
-    channel,
-    edition,
-    release_notes: notes,
-    download_url: downloadUrl,
-    file_hash_sha256: sha256,
-    file_size_bytes: sizeBytes,
-    is_required: Boolean(isRequired),
-    released_at: releasedAt,
+    ...record,
+    is_required: Boolean(record.is_required),
   }, 201);
 });
 
@@ -2143,7 +2130,7 @@ function cors(request, env) {
   return {
     "access-control-allow-origin": allowOrigin,
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,x-admin-token",
+    "access-control-allow-headers": "authorization,content-type,x-admin-token,x-scorpio-timestamp,x-scorpio-nonce,x-scorpio-signature",
     "access-control-max-age": "86400",
     vary: "Origin",
   };
@@ -2388,6 +2375,144 @@ async function verifyAnalysisLicense(env, user, licenseId) {
   return license;
 }
 
+async function applyAnalysisSecurity(ctx, options) {
+  if (boolEnv(ctx.env.ANALYSIS_REQUIRE_LICENSE_ID, false) && !options.license) {
+    throwHttp(403, "analysis_license_required");
+  }
+  await enforceAnalysisRateLimit(ctx.env, options.user);
+  await verifyAnalysisRequestSignature(ctx, options);
+}
+
+async function enforceAnalysisRateLimit(env, user) {
+  if (!env.DB || !user) {
+    return;
+  }
+  const limit = intEnv(env.ANALYSIS_RATE_LIMIT_PER_MINUTE, 120);
+  if (!limit || limit < 1) {
+    return;
+  }
+  const now = Date.now();
+  const bucketStart = Math.floor(now / 60000) * 60000;
+  const key = `analysis:${user.id}:${bucketStart}`;
+  const updatedAt = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO analysis_rate_limits (key, bucket_start, count, updated_at)
+     VALUES (?, ?, 1, ?)
+     ON CONFLICT(key) DO UPDATE SET count = count + 1, updated_at = excluded.updated_at`
+  )
+    .bind(key, bucketStart, updatedAt)
+    .run();
+  const row = await env.DB.prepare("SELECT count FROM analysis_rate_limits WHERE key = ?")
+    .bind(key)
+    .first();
+  if (Number(row && row.count) > limit) {
+    throwHttp(429, "analysis_rate_limited");
+  }
+  if (Math.random() < 0.02) {
+    await env.DB.prepare("DELETE FROM analysis_rate_limits WHERE updated_at < ?")
+      .bind(new Date(now - 24 * 60 * 60 * 1000).toISOString())
+      .run();
+  }
+}
+
+async function verifyAnalysisRequestSignature(ctx, options) {
+  const requireSignature = boolEnv(ctx.env.ANALYSIS_REQUIRE_REQUEST_SIGNATURE, false);
+  const timestamp = String(ctx.request.headers.get("X-Scorpio-Timestamp") || "").trim();
+  const nonce = String(ctx.request.headers.get("X-Scorpio-Nonce") || "").trim();
+  const signature = normalizeSignature(ctx.request.headers.get("X-Scorpio-Signature") || "");
+  const hasAny = Boolean(timestamp || nonce || signature);
+  if (!hasAny && !requireSignature) {
+    return;
+  }
+  if (!timestamp || !nonce || !signature) {
+    throwHttp(400, "analysis_signature_incomplete");
+  }
+  const timestampMs = parseSignatureTimestamp(timestamp);
+  const windowSeconds = intEnv(ctx.env.ANALYSIS_REPLAY_WINDOW_SECONDS, 300);
+  if (!timestampMs || Math.abs(Date.now() - timestampMs) > windowSeconds * 1000) {
+    throwHttp(401, "analysis_signature_expired");
+  }
+  if (!/^[A-Za-z0-9._:-]{12,128}$/.test(nonce)) {
+    throwHttp(400, "analysis_nonce_invalid");
+  }
+  const bearer = bearerToken(ctx.request);
+  if (!bearer) {
+    throwHttp(401, "authentication_required");
+  }
+  const method = ctx.request.method.toUpperCase();
+  const path = normalizePath(new URL(ctx.request.url).pathname);
+  const bodyHash = await sha256Hex(stableJson(options.requestBody || {}));
+  const base = `${method}\n${path}\n${timestamp}\n${nonce}\n${bodyHash}`;
+  const expected = await hmacSha256Hex(bearer, base);
+  if (!timingSafeEqual(signature, expected)) {
+    throwHttp(401, "analysis_signature_invalid");
+  }
+  await recordAnalysisNonce(ctx.env, {
+    nonce,
+    userId: options.user.id,
+    requestHash: bodyHash,
+    expiresAt: new Date(timestampMs + windowSeconds * 1000).toISOString(),
+  });
+}
+
+async function recordAnalysisNonce(env, options) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO analysis_replay_nonces (nonce, user_id, request_hash, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+      .bind(options.nonce, options.userId, options.requestHash, options.expiresAt, nowIso())
+      .run();
+  } catch {
+    throwHttp(409, "analysis_replay_detected");
+  }
+  if (Math.random() < 0.02) {
+    await env.DB.prepare("DELETE FROM analysis_replay_nonces WHERE expires_at < ?")
+      .bind(nowIso())
+      .run();
+  }
+}
+
+function bearerToken(request) {
+  const header = request.headers.get("Authorization") || "";
+  return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+}
+
+function parseSignatureTimestamp(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return parsed > 1000000000000 ? parsed : parsed * 1000;
+}
+
+function normalizeSignature(value) {
+  const signature = String(value || "").trim().toLowerCase();
+  return signature.startsWith("sha256=") ? signature.slice("sha256=".length) : signature;
+}
+
+function stableJson(value) {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+}
+
+async function hmacSha256Hex(secretValue, value) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(secretValue || "")),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(value || "")));
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function proxyAnalysisCompute(ctx, options) {
   const baseUrl = String(ctx.env.ANALYSIS_COMPUTE_URL || "").replace(/\/+$/, "");
   const token = String(ctx.env.ANALYSIS_COMPUTE_TOKEN || "");
@@ -2498,6 +2623,7 @@ async function handleStockAnalysisPost(ctx, options) {
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -2540,6 +2666,7 @@ async function handleSharedAnalysisGet(ctx, options) {
     license_id: safeText(ctx.url.searchParams.get("license_id") || "", 96),
   };
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: request, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -2587,6 +2714,7 @@ async function handleAssetAnalysisGet(ctx, options) {
     license_id: safeText(ctx.url.searchParams.get("license_id") || "", 96),
   };
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: request, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
@@ -3167,6 +3295,72 @@ async function deactivateAdminDataPackage(ctx) {
     .run();
   await audit(ctx.env, "deactivate_data_package", "admin_api", { package_id: packageId });
   return json({ deactivated: true, package_id: packageId });
+}
+
+async function updateAdminRelease(ctx) {
+  requireAdmin(ctx);
+  const releaseId = Number(ctx.releaseId || 0);
+  if (!releaseId) {
+    return json({ error: "release_id_required" }, 400);
+  }
+  const existing = await ctx.env.DB.prepare("SELECT * FROM release_versions WHERE id = ?").bind(releaseId).first();
+  if (!existing) {
+    return json({ error: "release_not_found" }, 404);
+  }
+  const record = normalizeAdminRelease({
+    ...existing,
+    ...(await readJson(ctx.request)),
+    version: existing.version,
+    channel: existing.channel,
+    edition: existing.edition,
+  });
+  await ctx.env.DB.prepare(
+    `UPDATE release_versions
+     SET release_notes = ?,
+         download_url = ?,
+         r2_key = ?,
+         file_name = ?,
+         content_type = ?,
+         file_hash_sha256 = ?,
+         file_size_bytes = ?,
+         is_required = ?,
+         released_at = ?,
+         uploaded_at = ?
+     WHERE id = ?`
+  )
+    .bind(
+      record.release_notes,
+      record.download_url,
+      record.r2_key,
+      record.file_name,
+      record.content_type,
+      record.file_hash_sha256,
+      record.file_size_bytes,
+      record.is_required,
+      record.released_at,
+      record.uploaded_at,
+      releaseId
+    )
+    .run();
+  await audit(ctx.env, "update_release", "admin_api", { id: releaseId, r2_key: record.r2_key });
+  return json({ ok: true, id: releaseId, ...record });
+}
+
+async function deactivateAdminRelease(ctx) {
+  requireAdmin(ctx);
+  const releaseId = Number(ctx.releaseId || 0);
+  if (!releaseId) {
+    return json({ error: "release_id_required" }, 400);
+  }
+  const existing = await ctx.env.DB.prepare("SELECT * FROM release_versions WHERE id = ?").bind(releaseId).first();
+  if (!existing) {
+    return json({ error: "release_not_found" }, 404);
+  }
+  await ctx.env.DB.prepare("UPDATE release_versions SET is_active = 0 WHERE id = ?")
+    .bind(releaseId)
+    .run();
+  await audit(ctx.env, "disable_release", "admin_api", { id: releaseId, version: existing.version });
+  return json({ ok: true, id: releaseId });
 }
 
 function normalizeDataPackageRequest(params) {
@@ -4107,10 +4301,139 @@ function safeJsonObject(value) {
   return typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+async function downloadReleaseFile(ctx) {
+  const user = await requireUser(ctx);
+  const releaseId = Number(ctx.releaseId || 0);
+  if (!releaseId) return json({ error: "release_id_required" }, 400);
+  const row = await ctx.env.DB.prepare("SELECT * FROM release_versions WHERE id = ? AND COALESCE(is_active, 1) = 1")
+    .bind(releaseId)
+    .first();
+  if (!row) return json({ error: "release_not_found" }, 404);
+  await requireReleaseEntitlement(ctx.env, user, row.edition);
+
+  const r2Key = safeText(row.r2_key || "", 512);
+  if (r2Key) {
+    if (!ctx.env.RELEASE_BUCKET) return json({ error: "release_bucket_not_configured" }, 500);
+    const object = await ctx.env.RELEASE_BUCKET.get(r2Key);
+    if (!object) return json({ error: "release_object_not_found" }, 404);
+    const fileName = safeDownloadFileName(row.file_name || fileNameFromKey(r2Key) || `scorpio-${row.edition}-${row.version}.bin`);
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set("content-type", row.content_type || headers.get("content-type") || "application/octet-stream");
+    headers.set("content-disposition", `attachment; filename="${fileName}"`);
+    headers.set("cache-control", "private, no-store");
+    headers.set("x-scorpio-release-version", row.version);
+    headers.set("x-scorpio-release-edition", row.edition);
+    if (row.file_hash_sha256) headers.set("x-scorpio-sha256", row.file_hash_sha256);
+    ctx.env.DB.prepare("UPDATE release_versions SET download_count = COALESCE(download_count, 0) + 1 WHERE id = ?")
+      .bind(releaseId)
+      .run()
+      .catch(() => {});
+    return new Response(object.body, { headers });
+  }
+
+  const downloadUrl = safeText(row.download_url || "", 2048);
+  if (/^https:\/\//i.test(downloadUrl)) return Response.redirect(downloadUrl, 302);
+  return json({ error: "release_download_not_configured" }, 404);
+}
+
+async function requireReleaseEntitlement(env, user, edition) {
+  const normalized = normalizeEdition(edition || "personal_pro");
+  if (normalized === "all") return true;
+  const license = await env.DB.prepare(
+    `SELECT id FROM licenses
+     WHERE user_id = ? AND edition = ? AND is_active = 1 AND revoked = 0
+       AND datetime(expires_at) >= datetime('now')
+     LIMIT 1`
+  )
+    .bind(user.id, normalized)
+    .first();
+  if (license) return true;
+  const code = await env.DB.prepare(
+    `SELECT id FROM activation_codes
+     WHERE assigned_to_user_id = ? AND edition = ? AND status IN ('active', 'assigned', 'used')
+     LIMIT 1`
+  )
+    .bind(user.id, normalized)
+    .first();
+  if (code) return true;
+  throwHttp(403, "release_entitlement_required");
+}
+
+function normalizeAdminRelease(body) {
+  const version = safeText(body.version || "", 80).replace(/^v/i, "");
+  const channel = normalizePackageChannel(body.channel || "stable");
+  const edition = normalizeEdition(body.edition || "personal_pro");
+  const downloadUrl = safeText(body.download_url || "", 2048);
+  const r2Key = normalizeR2Key(body.r2_key || "");
+  const fileName = safeDownloadFileName(body.file_name || fileNameFromKey(r2Key || downloadUrl));
+  const contentType = safeText(body.content_type || "application/octet-stream", 120) || "application/octet-stream";
+  const sha256 = safeText(body.file_hash_sha256 || body.sha256 || "", 128).toLowerCase();
+  if (!version) throwHttp(400, "version_required");
+  if (!r2Key && !/^https:\/\//i.test(downloadUrl)) throwHttp(400, "release_download_source_required");
+  if (downloadUrl && !/^https:\/\//i.test(downloadUrl)) throwHttp(400, "download_url_https_required");
+  if (sha256 && !/^[a-f0-9]{64}$/i.test(sha256)) throwHttp(400, "sha256_invalid");
+  return {
+    version,
+    channel,
+    edition,
+    release_notes: safeText(body.release_notes || "", 4000),
+    download_url: downloadUrl,
+    r2_key: r2Key,
+    file_name: fileName,
+    content_type: contentType,
+    file_hash_sha256: sha256,
+    file_size_bytes: Math.max(Number(body.file_size_bytes || 0), 0),
+    is_required: body.is_required ? 1 : 0,
+    is_active: body.is_active === undefined ? 1 : (body.is_active ? 1 : 0),
+    released_at: safeText(body.released_at || "", 64) || nowIso(),
+    uploaded_at: safeText(body.uploaded_at || "", 64) || (r2Key ? nowIso() : ""),
+  };
+}
+
+async function upsertRelease(env, record) {
+  await env.DB.prepare(
+    `INSERT INTO release_versions
+       (version, channel, edition, release_notes, download_url, r2_key, file_name,
+        content_type, file_hash_sha256, file_size_bytes, is_required, is_active,
+        released_at, uploaded_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(version, channel, edition) DO UPDATE SET
+       release_notes = excluded.release_notes,
+       download_url = excluded.download_url,
+       r2_key = excluded.r2_key,
+       file_name = excluded.file_name,
+       content_type = excluded.content_type,
+       file_hash_sha256 = excluded.file_hash_sha256,
+       file_size_bytes = excluded.file_size_bytes,
+       is_required = excluded.is_required,
+       is_active = excluded.is_active,
+       released_at = excluded.released_at,
+       uploaded_at = excluded.uploaded_at`
+  )
+    .bind(
+      record.version,
+      record.channel,
+      record.edition,
+      record.release_notes,
+      record.download_url,
+      record.r2_key,
+      record.file_name,
+      record.content_type,
+      record.file_hash_sha256,
+      record.file_size_bytes,
+      record.is_required,
+      record.is_active,
+      record.released_at,
+      record.uploaded_at
+    )
+    .run();
+}
+
 async function latestRelease(env, edition, channel) {
   return env.DB.prepare(
     `SELECT * FROM release_versions
-     WHERE channel = ? AND (edition = ? OR edition = 'all')
+     WHERE channel = ? AND (edition = ? OR edition = 'all') AND COALESCE(is_active, 1) = 1
      ORDER BY released_at DESC
      LIMIT 1`
   )
@@ -4118,14 +4441,38 @@ async function latestRelease(env, edition, channel) {
     .first();
 }
 
+function normalizeR2Key(value) {
+  const key = safeText(value || "", 512).replace(/^r2:\/\//i, "").replace(/^\/+/, "");
+  if (key.includes("..") || key.includes("\\") || key.startsWith(".")) {
+    throwHttp(400, "r2_key_invalid");
+  }
+  return key;
+}
+
+function fileNameFromKey(value) {
+  const text = String(value || "").split("?")[0].replace(/\\/g, "/");
+  return text.split("/").filter(Boolean).pop() || "";
+}
+
+function safeDownloadFileName(value) {
+  const name = safeText(value || "", 180).replace(/[\\/:*?"<>|]/g, "_").trim();
+  return name || "scorpio-release.bin";
+}
+
 function releasePayload(row) {
+  const downloadEndpoint = row.id ? `/v1/releases/download/${row.id}` : "";
   return {
+    id: row.id || null,
     latest_version: row.version,
     version: row.version,
     channel: row.channel,
+    edition: row.edition,
     release_date: row.released_at,
     release_notes: row.release_notes || "",
-    download_url: row.download_url || "",
+    download_url: row.r2_key ? "" : (row.download_url || ""),
+    download_endpoint: downloadEndpoint,
+    download_available: Boolean(row.r2_key || row.download_url),
+    file_name: row.file_name || fileNameFromKey(row.r2_key || row.download_url || ""),
     file_size_bytes: row.file_size_bytes || 0,
     sha256: row.file_hash_sha256 || "",
     is_required: Boolean(Number(row.is_required)),
@@ -4385,6 +4732,14 @@ function listEnv(value, fallback) {
 function intEnv(value, fallback) {
   const parsed = Number.parseInt(String(value || ""), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function boolEnv(value, fallback = false) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(normalized);
 }
 
 function secret(env, name) {

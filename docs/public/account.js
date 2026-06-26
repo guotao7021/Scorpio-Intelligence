@@ -58,6 +58,7 @@
     els.activateForm.addEventListener("submit", guard(onActivate, els.licenseMessage));
     els.statusForm.addEventListener("submit", guard(onCheckLicense, els.licenseMessage));
     els.refreshRelease.addEventListener("click", refreshRelease);
+    els.downloadLink.addEventListener("click", guard(downloadRelease, els.authMessage));
     els.logoutButton.addEventListener("click", logout);
     renderSession();
     refreshRelease();
@@ -235,13 +236,25 @@
     els.releaseState.textContent = "读取中";
     els.releaseVersion.textContent = "正在读取...";
     els.releaseMeta.textContent = "连接 Cloudflare API 获取最新发行信息。";
+    if (!state.access_token) {
+      state.current_release = null;
+      els.releaseState.textContent = "待登录";
+      els.releaseVersion.textContent = "登录后加载";
+      els.releaseMeta.textContent = "请先登录用户中心，系统会按账号授权开放对应安装包。";
+      els.downloadLink.href = "#";
+      els.downloadLink.classList.add("disabled");
+      els.downloadLink.setAttribute("aria-disabled", "true");
+      els.releaseBox.classList.remove("loading");
+      return;
+    }
     try {
-      const data = await request("/releases/latest?edition=personal_pro&channel=stable", { method: "GET", auth: false });
+      const data = await request("/releases/latest?edition=personal_pro&channel=stable", { method: "GET", auth: true });
+      state.current_release = data;
       els.releaseVersion.textContent = data.version || data.latest_version || "--";
       els.releaseMeta.textContent = data.release_notes || `发布时间：${data.release_date || "未提供"}`;
-      if (data.download_url) {
+      if (data.download_available && data.download_endpoint) {
         els.releaseState.textContent = "可下载";
-        els.downloadLink.href = data.download_url;
+        els.downloadLink.href = "#";
         els.downloadLink.classList.remove("disabled");
         els.downloadLink.removeAttribute("aria-disabled");
       } else {
@@ -256,6 +269,56 @@
       els.releaseMeta.textContent = error.message || "发行信息读取失败。";
     } finally {
       els.releaseBox.classList.remove("loading");
+    }
+  }
+
+  async function downloadRelease(event) {
+    if (event && typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+    requireLogin();
+    const release = state.current_release || {};
+    if (!release.download_available || !release.download_endpoint) {
+      throw new Error("当前账号暂无可下载的客户端安装包。");
+    }
+    els.downloadLink.classList.add("loading");
+    try {
+      const response = await fetch(`${API_BASE}${release.download_endpoint}`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${state.access_token}`,
+        },
+      });
+      if (response.status === 401 && state.refresh_token) {
+        const refreshed = await refreshToken();
+        if (refreshed) {
+          return downloadRelease(event);
+        }
+      }
+      if (!response.ok) {
+        const text = await response.text();
+        let message = `下载失败：HTTP ${response.status}`;
+        try {
+          const data = text ? JSON.parse(text) : {};
+          message = data.error || data.message || message;
+        } catch {
+          if (text) message = text;
+        }
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const fileName = release.file_name || fileNameFromDisposition(response.headers.get("content-disposition")) || "Scorpio-Intelligence-Setup.bin";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setMessage(els.authMessage, "安装包下载已开始。", "success");
+    } finally {
+      els.downloadLink.classList.remove("loading");
     }
   }
 
@@ -331,6 +394,7 @@
     state.refresh_token = "";
     state.email = "";
     state.user_id = "";
+    state.current_release = null;
     saveAuth();
     clearLicenseState();
     clearLicenseFields();
@@ -477,6 +541,17 @@
   function setMessage(el, text, type) {
     el.textContent = text;
     el.className = `account-message ${type || ""}`.trim();
+  }
+
+  function fileNameFromDisposition(value) {
+    const text = String(value || "");
+    const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(text);
+    if (!match) return "";
+    try {
+      return decodeURIComponent(match[1].replace(/^"|"$/g, ""));
+    } catch {
+      return match[1].replace(/^"|"$/g, "");
+    }
   }
 
   function byId(id) {
