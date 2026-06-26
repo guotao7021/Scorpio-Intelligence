@@ -14,6 +14,7 @@ from typing import Any
 
 
 def sql_quote(value: Any) -> str:
+    """Public entrypoint for cloudflare.license-api.scripts.export_ecs_sqlite_to_d1_sql."""
     if value is None:
         return "NULL"
     if isinstance(value, bool):
@@ -23,13 +24,22 @@ def sql_quote(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def sql_identifier(value: str) -> str:
+    """Return a quoted SQLite/D1 identifier for generated migration SQL."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("empty SQL identifier")
+    return '"' + value.replace('"', '""') + '"'
+
+
 def emit_insert(table: str, row: dict[str, Any]) -> str:
-    columns = ", ".join(row.keys())
+    """Public entrypoint for cloudflare.license-api.scripts.export_ecs_sqlite_to_d1_sql."""
+    columns = ", ".join(sql_identifier(column) for column in row.keys())
     values = ", ".join(sql_quote(value) for value in row.values())
-    return f"INSERT OR IGNORE INTO {table} ({columns}) VALUES ({values});"
+    return "INSERT OR IGNORE INTO " + sql_identifier(table) + " (" + columns + ") VALUES (" + values + ");"
 
 
 def table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    """Public entrypoint for cloudflare.license-api.scripts.export_ecs_sqlite_to_d1_sql."""
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
         (name,),
@@ -38,10 +48,12 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
 
 
 def rows(conn: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
+    """Public entrypoint for cloudflare.license-api.scripts.export_ecs_sqlite_to_d1_sql."""
     return list(conn.execute(query).fetchall())
 
 
 def export(db_path: Path, include_users: bool, include_logs: bool) -> str:
+    """Public entrypoint for cloudflare.license-api.scripts.export_ecs_sqlite_to_d1_sql."""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     lines = [
@@ -168,6 +180,7 @@ def export(db_path: Path, include_users: bool, include_logs: bool) -> str:
 
 
 def main() -> None:
+    """Run data for cloudflare.license-api.scripts.export_ecs_sqlite_to_d1_sql."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=Path("server/db.sqlite3"))
     parser.add_argument("--out", type=Path, default=Path("cloudflare/license-api/migrations/9000_import_from_ecs.sql"))
