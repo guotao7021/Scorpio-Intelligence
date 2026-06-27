@@ -2,6 +2,8 @@
   const API_BASE = "https://api.scorpio-intelligence.tech/v1";
   const TOKEN_KEY = "scorpio_user_auth";
   const LICENSE_KEY = "scorpio_user_license";
+  const RELEASE_CHANNEL = "stable";
+  const RELEASE_EDITION_PRIORITY = ["personal_pro", "personal_standard"];
 
   const state = loadAuth();
   const licenseState = loadLicenseState();
@@ -61,8 +63,7 @@
     els.downloadLink.addEventListener("click", guard(downloadRelease, els.authMessage));
     els.logoutButton.addEventListener("click", logout);
     renderSession();
-    refreshRelease();
-    refreshSavedLicenseStatus();
+    refreshAccountData();
     if (window.lucide) {
       window.lucide.createIcons();
     }
@@ -108,6 +109,7 @@
     state.user_id = data.user_id;
     saveAuth();
     renderSession();
+    await refreshAccountData();
     setMessage(els.authMessage, "登录成功。现在可以激活授权，或回到桌面端同步数据。", "success");
   }
 
@@ -189,6 +191,7 @@
       updated_at: new Date().toISOString(),
     });
     renderLicenseState();
+    await refreshRelease();
     setMessage(
       els.licenseMessage,
       data.idempotent
@@ -224,6 +227,7 @@
       updated_at: new Date().toISOString(),
     });
     renderLicenseState();
+    await refreshRelease();
     setMessage(
       els.licenseMessage,
       data.valid ? "授权有效，可以回到桌面端同步数据。" : `授权不可用：${data.message || data.reason || "unknown"}`,
@@ -248,10 +252,14 @@
       return;
     }
     try {
-      const data = await request("/releases/latest?edition=personal_pro&channel=stable", { method: "GET", auth: true });
+      await ensureCurrentLicenseLoaded();
+      const data = await fetchLatestReleaseForAccount();
       state.current_release = data;
       els.releaseVersion.textContent = data.version || data.latest_version || "--";
-      els.releaseMeta.textContent = data.release_notes || `发布时间：${data.release_date || "未提供"}`;
+      const editionText = releaseEditionLabel(data.edition || data.requested_edition);
+      els.releaseMeta.textContent = data.release_notes
+        ? `${editionText} · ${data.release_notes}`
+        : `${editionText} · 发布时间：${data.release_date || "未提供"}`;
       if (data.download_available && data.download_endpoint) {
         els.releaseState.textContent = "可下载";
         els.downloadLink.href = "#";
@@ -266,10 +274,89 @@
     } catch (error) {
       els.releaseState.textContent = "暂不可用";
       els.releaseVersion.textContent = "暂不可用";
-      els.releaseMeta.textContent = error.message || "发行信息读取失败。";
+      els.releaseMeta.textContent = userFacingReleaseError(error);
     } finally {
       els.releaseBox.classList.remove("loading");
     }
+  }
+
+  async function refreshAccountData() {
+    await refreshSavedLicenseStatus();
+    await refreshRelease();
+  }
+
+  async function ensureCurrentLicenseLoaded() {
+    if (!state.access_token) {
+      return;
+    }
+    if (!isLicenseStateForCurrentUser() || !normalizeReleaseEdition(licenseState.edition)) {
+      await loadCurrentLicense();
+    }
+  }
+
+  async function fetchLatestReleaseForAccount() {
+    const candidates = releaseEditionCandidates();
+    const errors = [];
+    for (const edition of candidates) {
+      try {
+        const data = await request(`/releases/latest?edition=${encodeURIComponent(edition)}&channel=${RELEASE_CHANNEL}`, {
+          method: "GET",
+          auth: true,
+        });
+        data.requested_edition = edition;
+        return data;
+      } catch (error) {
+        errors.push({ edition, error });
+        if (!isFallbackReleaseError(error)) {
+          throw error;
+        }
+      }
+    }
+    const detail = errors
+      .map((item) => `${releaseEditionLabel(item.edition)}: ${item.error.message || item.error.status || "不可用"}`)
+      .join("；");
+    throw new Error(detail || "当前账号暂无可下载的客户端安装包。");
+  }
+
+  function releaseEditionCandidates() {
+    const licensedEdition = isLicenseStateForCurrentUser() ? normalizeReleaseEdition(licenseState.edition) : "";
+    if (licensedEdition) {
+      return [licensedEdition];
+    }
+    return RELEASE_EDITION_PRIORITY.slice();
+  }
+
+  function normalizeReleaseEdition(value) {
+    const edition = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+    const aliases = {
+      pro: "personal_pro",
+      standard: "personal_standard",
+      personal: "personal_standard",
+    };
+    const normalized = aliases[edition] || edition;
+    return RELEASE_EDITION_PRIORITY.includes(normalized) ? normalized : "";
+  }
+
+  function releaseEditionLabel(value) {
+    const edition = normalizeReleaseEdition(value);
+    if (edition === "personal_pro") return "Personal Pro";
+    if (edition === "personal_standard") return "Personal Standard";
+    return "当前版本";
+  }
+
+  function isFallbackReleaseError(error) {
+    return [403, 404].includes(Number(error && error.status));
+  }
+
+  function userFacingReleaseError(error) {
+    const message = error && error.message ? error.message : "";
+    if (message.includes("release_entitlement_required")) {
+      return "当前账号没有对应版本的下载权益，请先激活或绑定授权。";
+    }
+    if (message.includes("release_not_found")) {
+      return "当前授权版本暂未发布可下载安装包。";
+    }
+    return message || "发行信息读取失败。";
   }
 
   async function downloadRelease(event) {
@@ -342,7 +429,10 @@
       }
     }
     if (!response.ok) {
-      throw new Error(data.error || data.message || `HTTP ${response.status}`);
+      const error = new Error(data.error || data.message || `HTTP ${response.status}`);
+      error.status = response.status;
+      error.data = data;
+      throw error;
     }
     return data;
   }
@@ -399,6 +489,7 @@
     clearLicenseState();
     clearLicenseFields();
     renderSession();
+    refreshRelease();
     setLicenseStatus("待激活", "待激活");
     setMessage(els.authMessage, "已退出登录。", "success");
   }
