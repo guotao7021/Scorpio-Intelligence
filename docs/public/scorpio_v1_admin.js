@@ -306,37 +306,37 @@
 
   async function loadCustomers() {
     const data = await apiGet(`${ADMIN_PATH}/customers?limit=500`);
-    state.customers = data.items || data.customers || [];
+    state.customers = listPayload(data, "customers");
   }
 
   async function loadCodes() {
     const data = await apiGet(`${ADMIN_PATH}/activation-codes?limit=500`);
-    state.codes = data.items || data.codes || [];
+    state.codes = listPayload(data, "codes");
   }
 
   async function loadLicenses() {
     const data = await apiGet(`${ADMIN_PATH}/licenses?limit=500`);
-    state.licenses = data.items || data.licenses || [];
+    state.licenses = listPayload(data, "licenses");
   }
 
   async function loadReleases() {
     const data = await apiGet(`${ADMIN_PATH}/releases?limit=100`);
-    state.releases = data.items || data.releases || [];
+    state.releases = listPayload(data, "releases");
   }
 
   async function loadAuditEvents() {
     const data = await apiGet(`${ADMIN_PATH}/audit-events?limit=100`);
-    state.auditEvents = data.items || data.events || [];
+    state.auditEvents = listPayload(data, "events");
   }
 
   async function loadUsageReports() {
     const data = await apiGet(`${ADMIN_PATH}/usage-reports?limit=100`);
-    state.usageReports = data.items || data.reports || [];
+    state.usageReports = listPayload(data, "reports");
   }
 
   async function loadAnalysisRequests() {
     const data = await apiGet(`${ADMIN_PATH}/analysis-requests?limit=100`);
-    state.analysisRequests = data.items || data.requests || [];
+    state.analysisRequests = listPayload(data, "requests");
   }
 
   function renderAllTables() {
@@ -850,6 +850,13 @@
       return;
     }
     target.innerHTML = tableHtml(headers, rows.map((row) => row.map((cell) => escapeHtml(cell))));
+  }
+
+  function listPayload(data, legacyKey) {
+    if (Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data.results)) return data.results;
+    if (Array.isArray(data[legacyKey])) return data[legacyKey];
+    return [];
   }
 
   function visibleRows(rows) {

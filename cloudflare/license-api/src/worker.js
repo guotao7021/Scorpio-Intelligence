@@ -846,6 +846,7 @@ route("GET", "/v1/analysis/health", async (ctx) => {
     ready: !compute.configured || compute.ok,
     gateway: { ok: true },
     compute,
+    security: analysisSecurityStatus(ctx.env),
     generated_at: nowIso(),
   });
 });
@@ -2168,6 +2169,7 @@ function addListTextSearch(where, params, columns, query) {
 function pageResponse(results, totalRow, options) {
   const total = numberField(totalRow, "total");
   return {
+    items: results,
     results,
     page: {
       limit: options.limit,
@@ -2259,6 +2261,8 @@ async function analysisComputeHealth(env) {
       latency_ms: Date.now() - startedAt,
       service: safeText(data.service || "", 80),
       version: safeText(data.version || "", 80),
+      cache: sanitizeComputeHealthObject(data.cache),
+      diagnostics: sanitizeComputeHealthObject(data.diagnostics),
       message: response.ok ? "" : safeText(data.message || data.error || text, 240),
     };
   } catch (error) {
@@ -2271,6 +2275,22 @@ async function analysisComputeHealth(env) {
       error: safeText(error && error.message ? error.message : String(error), 240),
     };
   }
+}
+
+function sanitizeComputeHealthObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return JSON.parse(JSON.stringify(value));
+}
+
+function analysisSecurityStatus(env) {
+  return {
+    require_request_signature: boolEnv(env.ANALYSIS_REQUIRE_REQUEST_SIGNATURE, false),
+    require_license_id: boolEnv(env.ANALYSIS_REQUIRE_LICENSE_ID, false),
+    rate_limit_per_minute: intEnv(env.ANALYSIS_RATE_LIMIT_PER_MINUTE, 120),
+    replay_window_seconds: intEnv(env.ANALYSIS_REPLAY_WINDOW_SECONDS, 300),
+  };
 }
 
 function normalizeAnalysisRequest(body, assetType) {
