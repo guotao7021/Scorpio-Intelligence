@@ -204,6 +204,16 @@
               <a class="button primary disabled" id="downloadLink" href="#" aria-disabled="true">下载客户端</a>
               <button class="button secondary" id="logoutButton" type="button">退出登录</button>
             </div>
+            <div class="download-progress hidden" id="downloadProgress" aria-live="polite">
+              <div class="download-progress-head">
+                <span id="downloadProgressText">准备下载</span>
+                <strong id="downloadProgressPercent">0%</strong>
+              </div>
+              <div class="download-progress-track">
+                <div class="download-progress-bar" id="downloadProgressBar"></div>
+              </div>
+              <small id="downloadProgressMeta">等待连接下载服务。</small>
+            </div>
           </article>
         </section>
       </div>

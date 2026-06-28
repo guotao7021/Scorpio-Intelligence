@@ -42,6 +42,11 @@
     releaseMeta: byId("releaseMeta"),
     releaseBox: byId("releaseBox"),
     downloadLink: byId("downloadLink"),
+    downloadProgress: byId("downloadProgress"),
+    downloadProgressText: byId("downloadProgressText"),
+    downloadProgressPercent: byId("downloadProgressPercent"),
+    downloadProgressBar: byId("downloadProgressBar"),
+    downloadProgressMeta: byId("downloadProgressMeta"),
     refreshRelease: byId("refreshRelease"),
     logoutButton: byId("logoutButton"),
   };
@@ -369,6 +374,14 @@
       throw new Error("当前账号暂无可下载的客户端安装包。");
     }
     els.downloadLink.classList.add("loading");
+    els.downloadLink.setAttribute("aria-disabled", "true");
+    setDownloadProgress({
+      visible: true,
+      percent: 0,
+      text: "正在连接下载服务",
+      meta: release.file_size_bytes ? `安装包大小 ${formatBytes(release.file_size_bytes)}` : "正在获取安装包大小。",
+    });
+    setMessage(els.authMessage, "正在下载客户端安装包，请保持页面打开。", "loading");
     try {
       const response = await fetch(`${API_BASE}${release.download_endpoint}`, {
         method: "GET",
@@ -393,8 +406,15 @@
         }
         throw new Error(message);
       }
-      const blob = await response.blob();
+      const total = Number(response.headers.get("content-length")) || Number(release.file_size_bytes) || 0;
       const fileName = release.file_name || fileNameFromDisposition(response.headers.get("content-disposition")) || "Scorpio-Intelligence-Setup.bin";
+      const blob = await readDownloadBlob(response, total);
+      setDownloadProgress({
+        visible: true,
+        percent: 100,
+        text: "下载完成",
+        meta: `${fileName} · ${formatBytes(blob.size)}`,
+      });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -403,10 +423,41 @@
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setMessage(els.authMessage, "安装包下载已开始。", "success");
+      setMessage(els.authMessage, "安装包已下载完成，浏览器正在保存文件。", "success");
     } finally {
       els.downloadLink.classList.remove("loading");
+      els.downloadLink.removeAttribute("aria-disabled");
     }
+  }
+
+  async function readDownloadBlob(response, total) {
+    if (!response.body || !response.body.getReader) {
+      const blob = await response.blob();
+      setDownloadProgress({
+        visible: true,
+        percent: total ? 100 : 0,
+        text: "下载完成",
+        meta: formatBytes(blob.size),
+      });
+      return blob;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      const percent = total ? Math.min(99, Math.floor((loaded / total) * 100)) : 0;
+      setDownloadProgress({
+        visible: true,
+        percent,
+        text: total ? `正在下载 ${percent}%` : "正在下载",
+        meta: total ? `${formatBytes(loaded)} / ${formatBytes(total)}` : `已下载 ${formatBytes(loaded)}`,
+      });
+    }
+    return new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
   }
 
   async function request(path, options) {
@@ -632,6 +683,26 @@
   function setMessage(el, text, type) {
     el.textContent = text;
     el.className = `account-message ${type || ""}`.trim();
+  }
+
+  function setDownloadProgress({ visible, percent, text, meta }) {
+    if (!els.downloadProgress) return;
+    els.downloadProgress.classList.toggle("hidden", !visible);
+    if (typeof percent === "number") {
+      const safePercent = Math.max(0, Math.min(100, percent));
+      els.downloadProgressPercent.textContent = `${safePercent}%`;
+      els.downloadProgressBar.style.width = `${safePercent}%`;
+    }
+    if (text) els.downloadProgressText.textContent = text;
+    if (meta) els.downloadProgressMeta.textContent = meta;
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value) || 0;
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
   }
 
   function fileNameFromDisposition(value) {
