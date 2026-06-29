@@ -8,6 +8,7 @@
 - 发布元数据存放在 D1：`release_versions`。
 - 用户中心登录后调用 `/v1/releases/latest` 读取可下载版本。
 - 下载入口统一走 Worker：`/v1/releases/download/:id`。
+- 官网访问、真实注册用户、绑定 License 用户、安装包下载次数统一写入 D1 统计表。
 - Worker 会校验用户登录状态和版本权益，然后从 R2 读取对象并流式返回文件。
 
 这条链路不向用户暴露 R2 原始地址，也不要求官网仓库存放 200MB 级安装包。
@@ -35,6 +36,34 @@
    npm.cmd run d1:migrate:remote
    npm.cmd run deploy
    ```
+
+## 运营统计
+
+公开页面会加载 `docs/public/site-analytics.js`，匿名上报访问事件到：
+
+```text
+POST /v1/site/visit
+```
+
+Worker 会按天聚合：
+
+- `site_page_daily`：页面访问次数、估算独立访客数。
+- `release_download_daily`：每个安装包每天下载次数。
+- `release_versions.download_count`：发行包累计下载次数。
+
+管理员后台 `/scorpio_v1_admin.html` 的概览区展示：
+
+- 官网今日访问次数与独立访客。
+- 真实注册用户数，默认排除 `@example.com`、`cf-test`、`+cf...@` 测试账号。
+- 已绑定 License 的真实用户数。
+- 发行包数量和累计下载次数。
+
+后台也可以直接调用：
+
+```text
+GET /v1/scorpio_v1_admin/overview
+GET /v1/scorpio_v1_admin/site-analytics?days=30
+```
 
 ## 上传并登记安装包
 
@@ -88,4 +117,3 @@ npm.cmd run release:upload -- `
 - `release_entitlement_required`: 当前用户没有该版本下载权益，需要先签发或绑定授权。
 - `release_download_source_required`: 发布记录既没有 `r2_key`，也没有备用 HTTPS 下载地址。
 - D1 查询字段报错：先执行 `npm.cmd run d1:migrate:remote`，再重新部署 Worker。
-

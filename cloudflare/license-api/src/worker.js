@@ -8,6 +8,13 @@ const TEXT_HEADERS = {
   "content-type": "text/plain; charset=utf-8",
 };
 
+const REAL_USER_SQL_FILTER = `
+  LOWER(COALESCE(u.email, '')) NOT LIKE '%@example.com'
+  AND LOWER(COALESCE(u.email, '')) NOT LIKE '%+cf%@%'
+  AND LOWER(COALESCE(u.email, '')) NOT LIKE '%cf-test%'
+  AND LOWER(COALESCE(u.username, '')) NOT LIKE '%cf-test%'
+`;
+
 const ROUTES = new Map();
 
 export default {
@@ -1025,6 +1032,12 @@ route("GET", "/v1/analysis/bond/bundle", async (ctx) => {
   });
 });
 
+route("POST", "/v1/site/visit", async (ctx) => {
+  const body = await readJson(ctx.request);
+  const result = await recordSiteVisit(ctx.env, ctx.request, body);
+  return json(result);
+});
+
 route("POST", "/v1/analysis/portfolio/enrich", async (ctx) => {
   const startedAt = Date.now();
   const user = await requireUser(ctx);
@@ -1147,8 +1160,24 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
   const expiringBefore = addDays(today, 30);
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const [customers, codes, licenses, releases, analysis, recentAudits, recentLicenses, expiringLicenses] =
+  const [users, licensedUsers, customers, codes, licenses, releases, downloads, visits, analysis, recentAudits, recentLicenses, expiringLicenses] =
     await Promise.all([
+      ctx.env.DB.prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN email_verified = 1 THEN 1 ELSE 0 END) AS verified,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS registered_24h
+         FROM users u
+         WHERE ${REAL_USER_SQL_FILTER}`
+      ).bind(since24h).first(),
+      ctx.env.DB.prepare(
+        `SELECT COUNT(DISTINCT l.user_id) AS total,
+                COUNT(DISTINCT CASE WHEN l.is_active = 1 AND l.revoked = 0 THEN l.user_id END) AS active,
+                COUNT(DISTINCT CASE WHEN l.is_active = 1 AND l.revoked = 0 AND datetime(l.expires_at) >= datetime('now') THEN l.user_id END) AS valid,
+                COUNT(DISTINCT CASE WHEN l.created_at >= ? THEN l.user_id END) AS bound_24h
+         FROM licenses l
+         JOIN users u ON u.id = l.user_id
+         WHERE ${REAL_USER_SQL_FILTER}`
+      ).bind(since24h).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status IN ('active', 'issued') THEN 1 ELSE 0 END) AS active,
@@ -1174,9 +1203,21 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
       ).bind(today, expiringBefore).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
-                MAX(released_at) AS latest_released_at
+                MAX(released_at) AS latest_released_at,
+                SUM(COALESCE(download_count, 0)) AS download_count
          FROM release_versions`
       ).first(),
+      ctx.env.DB.prepare(
+        `SELECT COALESCE(SUM(download_count), 0) AS total_24h
+         FROM release_download_daily
+         WHERE event_date >= ?`
+      ).bind(today).first(),
+      ctx.env.DB.prepare(
+        `SELECT COALESCE(SUM(visit_count), 0) AS visits_24h,
+                COALESCE(SUM(unique_visitor_count), 0) AS unique_visitors_24h
+         FROM site_page_daily
+         WHERE event_date >= ?`
+      ).bind(today).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total_24h,
                 SUM(CASE WHEN status IN ('ok', 'contract_ready', 'compute_proxy') THEN 0 ELSE 1 END) AS exceptions_24h,
@@ -1225,11 +1266,20 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
 
   return json({
     generated_at: nowIso(),
+    users: compactCounts(users, ["total", "verified", "registered_24h"]),
+    licensed_users: compactCounts(licensedUsers, ["total", "active", "valid", "bound_24h"]),
     customers: compactCounts(customers, ["total", "active", "draft", "suspended"]),
     activation_codes: compactCounts(codes, ["total", "active", "assigned", "used", "revoked"]),
     licenses: compactCounts(licenses, ["total", "active", "pending", "revoked", "expiring_soon"]),
-    releases: compactCounts(releases, ["total"]),
+    releases: {
+      ...compactCounts(releases, ["total", "download_count"]),
+      downloads_24h: numberField(downloads, "total_24h"),
+    },
     release_latest_released_at: (releases && releases.latest_released_at) || "",
+    site: {
+      visits_24h: numberField(visits, "visits_24h"),
+      unique_visitors_24h: numberField(visits, "unique_visitors_24h"),
+    },
     analysis: {
       total_24h: numberField(analysis, "total_24h"),
       exceptions_24h: numberField(analysis, "exceptions_24h"),
@@ -1239,6 +1289,67 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
     recent_licenses: recentLicenses.results || [],
     expiring_licenses: expiringLicenses.results || [],
     next_actions: nextActions,
+  });
+});
+
+route("GET", "/v1/scorpio_v1_admin/site-analytics", async (ctx) => {
+  requireAdmin(ctx);
+  const options = adminListOptions(ctx.url, { defaultLimit: 30, maxLimit: 180 });
+  const days = Math.min(Math.max(Number(ctx.url.searchParams.get("days") || 30), 1), 180);
+  const since = addDays(todayIso(), -(days - 1));
+  const [summary, registrations, licensedUsers, pages, downloads] = await Promise.all([
+    ctx.env.DB.prepare(
+      `SELECT COALESCE(SUM(visit_count), 0) AS visits,
+              COALESCE(SUM(unique_visitor_count), 0) AS unique_visitors
+       FROM site_page_daily
+       WHERE event_date >= ?`
+    ).bind(since).first(),
+    ctx.env.DB.prepare(
+      `SELECT COUNT(*) AS total
+       FROM users u
+       WHERE created_at >= ? AND ${REAL_USER_SQL_FILTER}`
+    ).bind(since).first(),
+    ctx.env.DB.prepare(
+      `SELECT COUNT(DISTINCT l.user_id) AS total,
+              COUNT(DISTINCT CASE WHEN l.is_active = 1 AND l.revoked = 0 AND datetime(l.expires_at) >= datetime('now') THEN l.user_id END) AS valid
+       FROM licenses l
+       JOIN users u ON u.id = l.user_id
+       WHERE l.created_at >= ? AND ${REAL_USER_SQL_FILTER}`
+    ).bind(since).first(),
+    ctx.env.DB.prepare(
+      `SELECT event_date, page_path, page_title, language, visit_count, unique_visitor_count, updated_at
+       FROM site_page_daily
+       WHERE event_date >= ?
+       ORDER BY event_date DESC, visit_count DESC
+       LIMIT ? OFFSET ?`
+    ).bind(since, options.limit, options.offset).all(),
+    ctx.env.DB.prepare(
+      `SELECT d.event_date, d.release_id, d.version, d.channel, d.edition, d.file_name,
+              d.download_count, rv.download_count AS total_download_count, d.updated_at
+       FROM release_download_daily d
+       LEFT JOIN release_versions rv ON rv.id = d.release_id
+       WHERE d.event_date >= ?
+       ORDER BY d.event_date DESC, d.download_count DESC
+       LIMIT ? OFFSET ?`
+    ).bind(since, options.limit, options.offset).all(),
+  ]);
+  return json({
+    generated_at: nowIso(),
+    days,
+    since,
+    visits: {
+      total: numberField(summary, "visits"),
+      unique_visitors: numberField(summary, "unique_visitors"),
+    },
+    registrations: {
+      total: numberField(registrations, "total"),
+    },
+    licensed_users: {
+      total: numberField(licensedUsers, "total"),
+      valid: numberField(licensedUsers, "valid"),
+    },
+    pages: pages.results || [],
+    downloads: downloads.results || [],
   });
 });
 
@@ -4329,7 +4440,7 @@ async function downloadReleaseFile(ctx) {
     .bind(releaseId)
     .first();
   if (!row) return json({ error: "release_not_found" }, 404);
-  await requireReleaseEntitlement(ctx.env, user, row.edition);
+  const entitlement = await requireReleaseEntitlement(ctx.env, user, row.edition);
 
   const r2Key = safeText(row.r2_key || "", 512);
   if (r2Key) {
@@ -4345,30 +4456,153 @@ async function downloadReleaseFile(ctx) {
     headers.set("x-scorpio-release-version", row.version);
     headers.set("x-scorpio-release-edition", row.edition);
     if (row.file_hash_sha256) headers.set("x-scorpio-sha256", row.file_hash_sha256);
-    ctx.env.DB.prepare("UPDATE release_versions SET download_count = COALESCE(download_count, 0) + 1 WHERE id = ?")
-      .bind(releaseId)
-      .run()
-      .catch(() => {});
+    recordReleaseDownload(ctx.env, ctx.request, { row, user, entitlement }).catch(() => {});
     return new Response(object.body, { headers });
   }
 
   const downloadUrl = safeText(row.download_url || "", 2048);
-  if (/^https:\/\//i.test(downloadUrl)) return Response.redirect(downloadUrl, 302);
+  if (/^https:\/\//i.test(downloadUrl)) {
+    recordReleaseDownload(ctx.env, ctx.request, { row, user, entitlement, source: "release_redirect" }).catch(() => {});
+    return Response.redirect(downloadUrl, 302);
+  }
   return json({ error: "release_download_not_configured" }, 404);
+}
+
+async function recordReleaseDownload(env, request, options) {
+  const row = options.row || {};
+  const user = options.user || null;
+  const entitlement = options.entitlement || {};
+  const now = nowIso();
+  const date = now.slice(0, 10);
+  const releaseId = Number(row.id || 0);
+  if (!releaseId) return;
+  const uaHash = await sha256Hex(request.headers.get("user-agent") || "");
+  const ipHash = await sha256Hex(`${clientIp(request)}:${secret(env, "JWT_SECRET")}`);
+  const eventId = `dl_${Date.now().toString(36)}_${randomToken(8)}`;
+  const fileName = safeDownloadFileName(row.file_name || fileNameFromKey(row.r2_key || row.download_url || ""));
+  await env.DB.batch([
+    env.DB.prepare("UPDATE release_versions SET download_count = COALESCE(download_count, 0) + 1 WHERE id = ?")
+      .bind(releaseId),
+    env.DB.prepare(
+      `INSERT INTO release_download_events
+       (event_id, event_date, release_id, version, channel, edition, file_name,
+        user_id, license_id, client_ip_hash, user_agent_hash, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      eventId,
+      date,
+      releaseId,
+      safeText(row.version || "", 80),
+      safeText(row.channel || "", 32),
+      safeText(row.edition || "", 64),
+      fileName,
+      user ? user.id : null,
+      safeText(entitlement.license_id || "", 128),
+      ipHash,
+      uaHash,
+      safeText(options.source || "release_download", 64),
+      now
+    ),
+    env.DB.prepare(
+      `INSERT INTO release_download_daily
+       (event_date, release_id, version, channel, edition, file_name, download_count, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+       ON CONFLICT(event_date, release_id) DO UPDATE SET
+         version = excluded.version,
+         channel = excluded.channel,
+         edition = excluded.edition,
+         file_name = excluded.file_name,
+         download_count = download_count + 1,
+         updated_at = excluded.updated_at`
+    ).bind(
+      date,
+      releaseId,
+      safeText(row.version || "", 80),
+      safeText(row.channel || "", 32),
+      safeText(row.edition || "", 64),
+      fileName,
+      now
+    ),
+  ]);
+}
+
+async function recordSiteVisit(env, request, body) {
+  const now = nowIso();
+  const date = now.slice(0, 10);
+  const pagePath = normalizeAnalyticsPath(body.page_path || body.path || "/");
+  const pageTitle = safeText(body.page_title || body.title || "", 180);
+  const language = safeText(body.language || body.lang || "", 32);
+  const referrerHost = safeReferrerHost(body.referrer || "");
+  const ua = request.headers.get("user-agent") || "";
+  const visitorSource = [
+    clientIp(request),
+    ua,
+    safeText(body.screen || "", 64),
+    safeText(body.timezone || "", 64),
+  ].join("|");
+  const visitorHash = await sha256Hex(`${visitorSource}:${secret(env, "JWT_SECRET")}`);
+  const uaHash = await sha256Hex(ua);
+  const eventId = safeText(body.event_id || "", 80) || `visit_${Date.now().toString(36)}_${randomToken(8)}`;
+
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO site_visit_events
+     (event_id, event_date, page_path, page_title, language, referrer_host,
+      visitor_hash, user_agent_hash, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(eventId, date, pagePath, pageTitle, language, referrerHost, visitorHash, uaHash, now).run();
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO site_unique_visitors
+     (event_date, page_path, visitor_hash, first_seen_at)
+     VALUES (?, ?, ?, ?)`
+  ).bind(date, pagePath, visitorHash, now).run();
+  const unique = await env.DB.prepare(
+    `SELECT COUNT(*) AS total
+     FROM site_unique_visitors
+     WHERE event_date = ? AND page_path = ?`
+  ).bind(date, pagePath).first();
+  await env.DB.prepare(
+    `INSERT INTO site_page_daily
+     (event_date, page_path, language, page_title, referrer_host, visit_count, unique_visitor_count, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+     ON CONFLICT(event_date, page_path) DO UPDATE SET
+       language = excluded.language,
+       page_title = excluded.page_title,
+       referrer_host = excluded.referrer_host,
+       visit_count = visit_count + 1,
+       unique_visitor_count = excluded.unique_visitor_count,
+       updated_at = excluded.updated_at`
+  ).bind(date, pagePath, language, pageTitle, referrerHost, numberField(unique, "total"), now).run();
+  return { ok: true };
+}
+
+function normalizeAnalyticsPath(value) {
+  const path = safeText(value || "/", 240).split("?")[0].split("#")[0] || "/";
+  if (!path.startsWith("/")) return `/${path}`;
+  return path;
+}
+
+function safeReferrerHost(value) {
+  const text = safeText(value || "", 512);
+  if (!text) return "";
+  try {
+    return safeText(new URL(text).host, 120);
+  } catch {
+    return "";
+  }
 }
 
 async function requireReleaseEntitlement(env, user, edition) {
   const normalized = normalizeEdition(edition || "personal_pro");
   if (normalized === "all") return true;
   const license = await env.DB.prepare(
-    `SELECT id FROM licenses
+    `SELECT id, license_id FROM licenses
      WHERE user_id = ? AND edition = ? AND is_active = 1 AND revoked = 0
        AND datetime(expires_at) >= datetime('now')
      LIMIT 1`
   )
     .bind(user.id, normalized)
     .first();
-  if (license) return true;
+  if (license) return license;
   const code = await env.DB.prepare(
     `SELECT id FROM activation_codes
      WHERE assigned_to_user_id = ? AND edition = ? AND status IN ('active', 'assigned', 'used')
@@ -4376,7 +4610,7 @@ async function requireReleaseEntitlement(env, user, edition) {
   )
     .bind(user.id, normalized)
     .first();
-  if (code) return true;
+  if (code) return { activation_code_id: code.id };
   throwHttp(403, "release_entitlement_required");
 }
 

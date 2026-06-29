@@ -58,6 +58,12 @@
     analysisTable: byId("analysisTable"),
     metricCustomers: byId("metricCustomers"),
     metricCustomersMeta: byId("metricCustomersMeta"),
+    metricUsers: byId("metricUsers"),
+    metricUsersMeta: byId("metricUsersMeta"),
+    metricLicensedUsers: byId("metricLicensedUsers"),
+    metricLicensedUsersMeta: byId("metricLicensedUsersMeta"),
+    metricVisits: byId("metricVisits"),
+    metricVisitsMeta: byId("metricVisitsMeta"),
     metricCodes: byId("metricCodes"),
     metricCodesMeta: byId("metricCodesMeta"),
     metricLicenses: byId("metricLicenses"),
@@ -753,6 +759,18 @@
     const releases = state.releases;
     els.metricCustomers.textContent = String(customers.length);
     els.metricCustomersMeta.textContent = `${countBy(customers, "active")} 活跃 / ${countBy(customers, "cancelled")} 归档`;
+    if (state.overview && state.overview.users) {
+      els.metricUsers.textContent = String(state.overview.users.total || 0);
+      els.metricUsersMeta.textContent = `今日 +${state.overview.users.registered_24h || 0}`;
+    }
+    if (state.overview && state.overview.licensed_users) {
+      els.metricLicensedUsers.textContent = String(state.overview.licensed_users.valid || 0);
+      els.metricLicensedUsersMeta.textContent = `累计绑定 ${state.overview.licensed_users.total || 0}`;
+    }
+    if (state.overview && state.overview.site) {
+      els.metricVisits.textContent = String(state.overview.site.visits_24h || 0);
+      els.metricVisitsMeta.textContent = `独立访客 ${state.overview.site.unique_visitors_24h || 0}`;
+    }
     els.metricCodes.textContent = String(codes.length);
     els.metricCodesMeta.textContent = `${countBy(codes, "active")} 可用 / ${countBy(codes, "used")} 已用`;
     els.metricLicenses.textContent = String(licenses.length);
