@@ -384,7 +384,7 @@
     });
     setMessage(els.authMessage, "正在下载客户端安装包，请保持页面打开。", "loading");
     try {
-      const response = await fetch(`${API_BASE}${release.download_endpoint}`, {
+      const response = await fetch(apiUrl(release.download_endpoint), {
         method: "GET",
         headers: {
           authorization: `Bearer ${state.access_token}`,
@@ -461,13 +461,22 @@
     return new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
   }
 
+  function apiUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    if (normalizedPath.startsWith("/v1/")) {
+      return `${API_BASE.replace(/\/v1\/?$/, "")}${normalizedPath}`;
+    }
+    return `${API_BASE}${normalizedPath}`;
+  }
+
   async function request(path, options) {
     const headers = { "content-type": "application/json" };
     if (options.auth) {
       requireLogin();
       headers.authorization = `Bearer ${state.access_token}`;
     }
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await fetch(apiUrl(path), {
       method: options.method || "GET",
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
