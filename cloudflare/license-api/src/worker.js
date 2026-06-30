@@ -184,7 +184,9 @@ route("POST", "/v1/auth/login", async (ctx) => {
     return json({ error: "email_not_verified" }, 403);
   }
 
-  return json(await tokenResponse(ctx.env, user));
+  const response = await tokenResponse(ctx.env, user);
+  const activationCode = await currentAssignedActivationCode(ctx.env, user.id);
+  return json(withActivationCode(response, activationCode));
 });
 
 route("POST", "/v1/auth/refresh", async (ctx) => {
@@ -516,7 +518,16 @@ route("GET", "/v1/license/current", async (ctx) => {
     .bind(user.id)
     .first();
   if (!lic) {
-    return json({ active: false, message: "active_license_not_found" });
+    const activationCode = await currentAssignedActivationCode(ctx.env, user.id);
+    return json(
+      withActivationCode(
+        {
+          active: false,
+          message: activationCode ? "activation_code_assigned" : "active_license_not_found",
+        },
+        activationCode
+      )
+    );
   }
   const valid = lic.expires_at >= todayIso() && !["pending", "rejected"].includes(String(lic.approval_status || ""));
   return json({
@@ -619,6 +630,35 @@ function licenseActivationResponse(license, extras = {}) {
     features: payload.features || {},
     license_file: payload,
     ...extras,
+  };
+}
+
+async function currentAssignedActivationCode(env, userId) {
+  return env.DB.prepare(
+    `SELECT code, edition, license_days, status, created_at
+     FROM activation_codes
+     WHERE assigned_to_user_id = ?
+       AND status IN ('assigned', 'active', 'used')
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`
+  )
+    .bind(userId)
+    .first();
+}
+
+function withActivationCode(payload, activationCode) {
+  if (!activationCode) {
+    return payload;
+  }
+  return {
+    ...payload,
+    activation_code: activationCode.code,
+    activation_code_status: activationCode.status || "",
+    activation_edition: activationCode.edition || "",
+    activation_license_days: Number(activationCode.license_days || 0),
+    trial_activation_code: activationCode.code,
+    trial_edition: activationCode.edition || "",
+    trial_license_days: Number(activationCode.license_days || 0),
   };
 }
 

@@ -114,6 +114,7 @@
     state.user_id = data.user_id;
     saveAuth();
     renderSession();
+    applyActivationCodePayload(data);
     await refreshAccountData();
     setMessage(els.authMessage, "登录成功。现在可以激活授权，或回到桌面端同步数据。", "success");
   }
@@ -550,6 +551,27 @@
     els.licenseChip.textContent = chipText;
   }
 
+  function applyActivationCodePayload(data) {
+    const activationCode = String(data.activation_code || data.trial_activation_code || "").trim();
+    if (!activationCode) {
+      return false;
+    }
+    saveLicenseState({
+      email: state.email,
+      user_id: state.user_id,
+      activation_code: activationCode,
+      machine_fingerprint: licenseState.machine_fingerprint || "",
+      license_id: licenseState.license_id || "",
+      edition: data.activation_edition || data.trial_edition || data.edition || licenseState.edition || "",
+      expires_at: licenseState.expires_at || "",
+      valid: Boolean(licenseState.valid),
+      updated_at: new Date().toISOString(),
+    });
+    els.activationCode.value = activationCode;
+    renderLicenseState();
+    return true;
+  }
+
   function renderLicenseState() {
     const loggedIn = Boolean(state.access_token);
     if (!loggedIn || !isLicenseStateForCurrentUser()) {
@@ -615,6 +637,7 @@
         auth: true,
       });
       if (!data.active || !data.license_id) {
+        applyActivationCodePayload(data);
         return;
       }
       saveLicenseState({
@@ -636,7 +659,7 @@
 
   function isLicenseStateForCurrentUser() {
     return Boolean(
-      licenseState.license_id &&
+      (licenseState.license_id || licenseState.activation_code) &&
       state.email &&
       licenseState.email &&
       String(licenseState.email).toLowerCase() === String(state.email).toLowerCase()
