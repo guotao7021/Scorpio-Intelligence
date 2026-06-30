@@ -4281,7 +4281,8 @@ function normalizeProductionUploadRow(row) {
 
 async function storeProductionUploadChunk(env, chunk) {
   const now = nowIso();
-  await env.DB.prepare(
+  const statements = [
+    env.DB.prepare(
     `INSERT INTO production_upload_chunks
        (batch_id, table_name, chunk_index, row_count, chunk_hash, created_at)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -4289,10 +4290,11 @@ async function storeProductionUploadChunk(env, chunk) {
        row_count = excluded.row_count,
        chunk_hash = excluded.chunk_hash,
        created_at = excluded.created_at`
-  ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index, chunk.rows.length, chunk.chunk_hash, now).run();
+    ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index, chunk.rows.length, chunk.chunk_hash, now),
+  ];
 
   for (const row of chunk.rows) {
-    await env.DB.prepare(
+    statements.push(env.DB.prepare(
       `INSERT INTO production_upload_staging_rows
          (batch_id, table_name, row_key, row_hash, row_json, data_date, edition_scope, module, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4300,8 +4302,8 @@ async function storeProductionUploadChunk(env, chunk) {
          row_hash = excluded.row_hash,
          row_json = excluded.row_json,
          data_date = excluded.data_date,
-         module = excluded.module,
-         updated_at = excluded.updated_at`
+       module = excluded.module,
+       updated_at = excluded.updated_at`
     ).bind(
       chunk.batch_id,
       chunk.table_name,
@@ -4312,16 +4314,17 @@ async function storeProductionUploadChunk(env, chunk) {
       chunk.edition_scope,
       chunk.module,
       now
-    ).run();
+    ));
   }
-  await env.DB.prepare(
+  statements.push(env.DB.prepare(
     `UPDATE production_upload_batches
      SET status = 'receiving',
          received_row_count = received_row_count + ?,
          received_chunk_count = received_chunk_count + 1,
          updated_at = ?
      WHERE batch_id = ?`
-  ).bind(chunk.rows.length, now, chunk.batch_id).run();
+  ).bind(chunk.rows.length, now, chunk.batch_id));
+  await env.DB.batch(statements);
 }
 
 async function commitProductionUploadBatch(env, batch, batchId) {
