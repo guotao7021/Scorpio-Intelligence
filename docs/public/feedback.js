@@ -13,6 +13,11 @@
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const turnstileToken = String(form.elements.turnstile_token?.value || "").trim();
+    if (!turnstileToken) {
+      setMessage("Turnstile verification is required.", "error");
+      return;
+    }
     setMessage("正在提交反馈...", "loading");
     const submitButton = form.querySelector('button[type="submit"]');
     if (submitButton) submitButton.disabled = true;
@@ -30,8 +35,10 @@
       }
       form.reset();
       if (pageUrl) pageUrl.value = window.location.href;
+      window.turnstile?.reset();
       setMessage(`已收到，反馈编号：${data.public_id || "已生成"}。感谢你把问题说清楚。`, "success");
     } catch (error) {
+      window.turnstile?.reset();
       setMessage(error.message || "提交失败，请稍后重试。", "error");
     } finally {
       if (submitButton) submitButton.disabled = false;
@@ -51,6 +58,7 @@
       client_version: data.get("client_version") || "",
       environment: data.get("environment") || "",
       rating: Number(data.get("rating") || 0),
+      turnstile_token: data.get("turnstile_token") || "",
       survey_answers: {
         role: data.get("role") || "",
         biggest_blocker: data.get("biggest_blocker") || "",

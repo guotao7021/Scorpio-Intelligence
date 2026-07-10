@@ -7,7 +7,8 @@
   <meta name="description" content="提交 Scorpio Intelligence 的 bug、体验反馈、问题咨询和用户问卷。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="site.css?v=20260621-feedback-system">
-  <script src="feedback.js?v=20260621-feedback-system" defer></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script src="feedback.js?v=20260710-turnstile" defer></script>
 </head>
 <body class="feedback-page">
   <header class="site-header">
@@ -137,6 +138,13 @@
         </div>
 
         <input name="page_url" type="hidden">
+        <div class="feedback-turnstile">
+          <div
+            class="cf-turnstile"
+            data-sitekey="0x4AAAAAADzKKGiOMI-xdBUr"
+            data-response-field-name="turnstile_token"
+          ></div>
+        </div>
         <div class="feedback-actions">
           <button class="button primary" type="submit">提交反馈</button>
           <button class="button secondary" type="reset">清空内容</button>

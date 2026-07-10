@@ -1,9 +1,10 @@
 (function () {
   const API_BASE = "https://api.scorpio-intelligence.tech/v1";
   const TOKEN_KEY = "scorpio_admin_token";
+  localStorage.removeItem(TOKEN_KEY);
 
   const state = {
-    token: localStorage.getItem(TOKEN_KEY) || "",
+    token: sessionStorage.getItem(TOKEN_KEY) || "",
     rows: [],
     selectedId: null,
     q: "",
@@ -38,13 +39,13 @@
       setMessage("请先输入 Admin Token。", "warn");
       return;
     }
-    localStorage.setItem(TOKEN_KEY, state.token);
+    sessionStorage.setItem(TOKEN_KEY, state.token);
     await loadFeedback();
   });
 
   els.clearToken.addEventListener("click", () => {
     state.token = "";
-    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
     els.tokenInput.value = "";
     state.rows = [];
     state.selectedId = null;

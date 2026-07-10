@@ -2,9 +2,10 @@
   const API_BASE = "https://api.scorpio-intelligence.tech/v1";
   const ADMIN_PATH = "/scorpio_v1_admin";
   const TOKEN_KEY = "scorpio_admin_token";
+  localStorage.removeItem(TOKEN_KEY);
 
   const state = {
-    token: localStorage.getItem(TOKEN_KEY) || "",
+    token: sessionStorage.getItem(TOKEN_KEY) || "",
     overview: null,
     signingHealth: null,
     customers: [],
@@ -87,7 +88,7 @@
         return;
       }
       state.token = token;
-      localStorage.setItem(TOKEN_KEY, token);
+      sessionStorage.setItem(TOKEN_KEY, token);
       els.adminToken.value = token;
       setLoginMessage("正在验证管理员身份...", "loading");
       const ok = await refreshAll();
@@ -107,7 +108,7 @@
         renderStatus(false);
         return;
       }
-      localStorage.setItem(TOKEN_KEY, state.token);
+      sessionStorage.setItem(TOKEN_KEY, state.token);
       els.adminLoginToken.value = state.token;
       const ok = await refreshAll();
       if (ok) showConsole();
@@ -932,7 +933,7 @@
   }
 
   function clearStoredToken() {
-    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
     state.token = "";
     els.adminToken.value = "";
     els.adminLoginToken.value = "";
