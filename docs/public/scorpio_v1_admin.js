@@ -754,6 +754,36 @@
   }
 
   function renderMetrics() {
+    const overview = state.overview;
+    if (overview) {
+      const customers = overview.customers || {};
+      const users = overview.users || {};
+      const licensedUsers = overview.licensed_users || {};
+      const site = overview.site || {};
+      const codes = overview.activation_codes || {};
+      const licenses = overview.licenses || {};
+      const releases = overview.releases || {};
+
+      els.metricCustomers.textContent = String(customers.total || 0);
+      els.metricCustomersMeta.textContent = `今日 +${customers.created_today || 0} / ${customers.active || 0} 活跃`;
+      els.metricUsers.textContent = String(users.total || 0);
+      els.metricUsersMeta.textContent = `今日 +${users.registered_today || 0} 注册`;
+      els.metricLicensedUsers.textContent = String(licensedUsers.total || 0);
+      els.metricLicensedUsersMeta.textContent = `今日 +${licensedUsers.bound_today || 0} / ${licensedUsers.valid || 0} 有效`;
+      els.metricVisits.textContent = String(site.visits_total || 0);
+      els.metricVisitsMeta.textContent = `今日 +${site.visits_today || 0} / UV ${site.unique_visitors_today || 0}`;
+      els.metricCodes.textContent = String(codes.total || 0);
+      els.metricCodesMeta.textContent = `今日 +${codes.created_today || 0} / ${codes.active || 0} 可用`;
+      els.metricLicenses.textContent = String(licenses.total || 0);
+      els.metricLicensesMeta.textContent = `今日 +${licenses.issued_today || 0} / ${licenses.active || 0} 有效`;
+      els.metricReleases.textContent = String(releases.total || 0);
+      els.metricReleasesMeta.textContent = `今日 +${releases.released_today || 0} 发布`;
+      if (state.signingHealth) {
+        els.metricApi.textContent = state.signingHealth.ok ? "签名正常" : "签名异常";
+      }
+      return;
+    }
+
     const customers = visibleRows(state.customers);
     const codes = visibleRows(state.codes);
     const licenses = visibleRows(state.licenses);
