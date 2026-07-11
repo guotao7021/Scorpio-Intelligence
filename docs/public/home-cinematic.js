@@ -290,7 +290,7 @@
       const pointer = { x: 0, y: 0 };
 
       const resize = () => {
-        const bounds = host.getBoundingClientRect();
+        const bounds = canvas.getBoundingClientRect();
         width = Math.max(1, Math.round(bounds.width));
         height = Math.max(1, Math.round(bounds.height));
         renderer.setSize(width, height, false);
@@ -321,8 +321,8 @@
         renderer.render(scene, camera);
         if (!canvas.dataset.pixelCheck) {
           const gl = renderer.getContext();
-          const sampleWidth = Math.min(128, gl.drawingBufferWidth);
-          const sampleHeight = Math.min(128, gl.drawingBufferHeight);
+          const sampleWidth = Math.min(256, gl.drawingBufferWidth);
+          const sampleHeight = Math.min(256, gl.drawingBufferHeight);
           const pixels = new Uint8Array(sampleWidth * sampleHeight * 4);
           gl.readPixels(
             Math.max(0, Math.floor((gl.drawingBufferWidth - sampleWidth) / 2)),
