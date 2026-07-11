@@ -6,9 +6,9 @@
   <title>用户中心 | Scorpio Intelligence</title>
   <meta name="description" content="Scorpio Intelligence 用户中心：账号登录、授权激活、客户端下载与桌面端数据同步入口。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260621-account-license-state">
+  <link rel="stylesheet" href="site.css?v=20260712-multi-license">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-  <script src="account.js?v=20260630-login-activation-code" defer></script>
+  <script src="account.js?v=20260712-multi-license" defer></script>
 </head>
 <body class="account-page">
   <header class="site-header">
@@ -151,6 +151,14 @@
             <span class="status-chip" id="licenseChip">待激活</span>
           </div>
           <p>桌面端会生成本机机器码。复制机器码和激活码到这里完成绑定，随后桌面端即可使用同一账号同步 Cloudflare 数据。</p>
+          <div class="activation-code-picker">
+            <label>我的激活码
+              <select id="activationCodeSelect" aria-describedby="activationCodeMeta">
+                <option value="">登录后读取激活码</option>
+              </select>
+            </label>
+            <p id="activationCodeMeta">选择激活码后，将显示对应版本、授权状态和设备信息。</p>
+          </div>
           <form class="auth-form license-form" id="activateForm">
             <label>激活码
               <input id="activationCode" type="text" autocomplete="off" placeholder="例如 LIC-..." required>

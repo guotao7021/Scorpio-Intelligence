@@ -185,8 +185,8 @@ route("POST", "/v1/auth/login", async (ctx) => {
   }
 
   const response = await tokenResponse(ctx.env, user);
-  const activationCode = await currentAssignedActivationCode(ctx.env, user.id);
-  return json(withActivationCode(response, activationCode));
+  const activationCodes = await assignedActivationCodes(ctx.env, user.id);
+  return json(withActivationCodes(response, activationCodes));
 });
 
 route("POST", "/v1/auth/refresh", async (ctx) => {
@@ -518,24 +518,30 @@ route("GET", "/v1/license/current", async (ctx) => {
     .bind(user.id)
     .first();
   if (!lic) {
-    const activationCode = await currentAssignedActivationCode(ctx.env, user.id);
+    const activationCodes = await assignedActivationCodes(ctx.env, user.id);
     return json(
-      withActivationCode(
+      withActivationCodes(
         {
           active: false,
-          message: activationCode ? "activation_code_assigned" : "active_license_not_found",
+          message: activationCodes.length ? "activation_code_assigned" : "active_license_not_found",
         },
-        activationCode
+        activationCodes
       )
     );
   }
   const valid = lic.expires_at >= todayIso() && !["pending", "rejected"].includes(String(lic.approval_status || ""));
-  return json({
-    active: valid,
-    valid,
-    message: valid ? "ok" : "license_inactive",
-    ...licenseActivationResponse(lic),
-  });
+  const activationCodes = await assignedActivationCodes(ctx.env, user.id);
+  return json(
+    withActivationCodes(
+      {
+        active: valid,
+        valid,
+        message: valid ? "ok" : "license_inactive",
+        ...licenseActivationResponse(lic),
+      },
+      activationCodes
+    )
+  );
 });
 
 route("POST", "/v1/license/rebind", async (ctx) => {
@@ -633,32 +639,75 @@ function licenseActivationResponse(license, extras = {}) {
   };
 }
 
-async function currentAssignedActivationCode(env, userId) {
-  return env.DB.prepare(
-    `SELECT code, edition, license_days, status, created_at
-     FROM activation_codes
-     WHERE assigned_to_user_id = ?
-       AND status IN ('assigned', 'active', 'used')
-     ORDER BY created_at DESC, id DESC
-     LIMIT 1`
+async function assignedActivationCodes(env, userId) {
+  const rows = await env.DB.prepare(
+    `SELECT ac.code, ac.edition, ac.license_days, ac.status, ac.created_at,
+            linked_license.license_id, linked_license.expires_at,
+            linked_license.is_active AS license_active,
+            linked_license.revoked AS license_revoked,
+            linked_license.approval_status,
+            linked_license.machine_fingerprint
+     FROM activation_codes AS ac
+     LEFT JOIN licenses AS linked_license
+       ON linked_license.id = (
+         SELECT latest_license.id
+         FROM licenses AS latest_license
+         WHERE latest_license.activation_code_id = ac.id
+           AND latest_license.user_id = ?
+         ORDER BY latest_license.created_at DESC, latest_license.id DESC
+         LIMIT 1
+       )
+     WHERE (
+       ac.assigned_to_user_id = ?
+       OR ac.used_by_user_id = ?
+       OR EXISTS (
+         SELECT 1
+         FROM licenses AS linked_license
+         WHERE linked_license.activation_code_id = ac.id
+           AND linked_license.user_id = ?
+       )
+     )
+       AND ac.status IN ('assigned', 'active', 'used')
+     ORDER BY
+       CASE
+         WHEN linked_license.is_active = 1 AND linked_license.revoked = 0 THEN 0
+         WHEN ac.status IN ('assigned', 'active') THEN 1
+         WHEN ac.status = 'used' THEN 2
+         ELSE 3
+       END,
+       ac.created_at DESC,
+       ac.id DESC`
   )
-    .bind(userId)
-    .first();
+    .bind(userId, userId, userId, userId)
+    .all();
+  return rows.results || [];
 }
 
-function withActivationCode(payload, activationCode) {
-  if (!activationCode) {
-    return payload;
-  }
+function withActivationCodes(payload, activationCodes) {
+  const codes = (activationCodes || []).map((item) => ({
+    code: item.code,
+    status: item.status || "",
+    edition: item.edition || "",
+    license_days: Number(item.license_days || 0),
+    created_at: item.created_at || "",
+    license_id: item.license_id || "",
+    expires_at: item.expires_at || "",
+    license_active: Boolean(Number(item.license_active || 0)),
+    license_revoked: Boolean(Number(item.license_revoked || 0)),
+    approval_status: item.approval_status || "",
+    machine_fingerprint: item.machine_fingerprint || "",
+  }));
+  const activationCode = codes[0] || null;
   return {
     ...payload,
-    activation_code: activationCode.code,
-    activation_code_status: activationCode.status || "",
-    activation_edition: activationCode.edition || "",
-    activation_license_days: Number(activationCode.license_days || 0),
-    trial_activation_code: activationCode.code,
-    trial_edition: activationCode.edition || "",
-    trial_license_days: Number(activationCode.license_days || 0),
+    activation_codes: codes,
+    activation_code: activationCode ? activationCode.code : "",
+    activation_code_status: activationCode ? activationCode.status : "",
+    activation_edition: activationCode ? activationCode.edition : "",
+    activation_license_days: activationCode ? activationCode.license_days : 0,
+    trial_activation_code: activationCode ? activationCode.code : "",
+    trial_edition: activationCode ? activationCode.edition : "",
+    trial_license_days: activationCode ? activationCode.license_days : 0,
   };
 }
 

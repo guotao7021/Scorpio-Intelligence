@@ -36,6 +36,8 @@
     activateForm: byId("activateForm"),
     statusForm: byId("statusForm"),
     activationCode: byId("activationCode"),
+    activationCodeSelect: byId("activationCodeSelect"),
+    activationCodeMeta: byId("activationCodeMeta"),
     machineFingerprint: byId("machineFingerprint"),
     licenseId: byId("licenseId"),
     releaseVersion: byId("releaseVersion"),
@@ -64,6 +66,7 @@
     els.sendResetCode.addEventListener("click", guard(() => sendCode(els.resetEmail.value, "reset_password", els.authMessage), els.authMessage));
     els.activateForm.addEventListener("submit", guard(onActivate, els.licenseMessage));
     els.statusForm.addEventListener("submit", guard(onCheckLicense, els.licenseMessage));
+    els.activationCodeSelect.addEventListener("change", () => selectActivationCode(els.activationCodeSelect.value));
     els.refreshRelease.addEventListener("click", refreshRelease);
     els.downloadLink.addEventListener("click", guard(downloadRelease, els.authMessage));
     els.logoutButton.addEventListener("click", logout);
@@ -186,6 +189,7 @@
       auth: true,
     });
     saveLicenseState({
+      ...licenseState,
       email: state.email,
       user_id: state.user_id,
       activation_code: activationCode,
@@ -197,6 +201,7 @@
       updated_at: new Date().toISOString(),
     });
     renderLicenseState();
+    await loadCurrentLicense();
     await refreshRelease();
     setMessage(
       els.licenseMessage,
@@ -250,6 +255,7 @@
     });
     const type = data.valid ? "success" : "warn";
     saveLicenseState({
+      ...licenseState,
       email: state.email,
       user_id: state.user_id,
       activation_code: els.activationCode.value.trim() || licenseState.activation_code || "",
@@ -606,29 +612,148 @@
     els.licenseChip.textContent = chipText;
   }
 
-  function applyActivationCodePayload(data) {
-    const activationCode = String(data.activation_code || data.trial_activation_code || "").trim();
-    if (!activationCode) {
-      return false;
+  function normalizeActivationCodes(data) {
+    const items = Array.isArray(data.activation_codes) ? data.activation_codes : [];
+    const normalized = items
+      .map((item) => ({
+        code: String(item.code || "").trim(),
+        status: String(item.status || "").trim(),
+        edition: String(item.edition || "").trim(),
+        license_days: Number(item.license_days || 0),
+        created_at: String(item.created_at || "").trim(),
+        license_id: String(item.license_id || "").trim(),
+        expires_at: String(item.expires_at || "").trim(),
+        license_active: Boolean(item.license_active),
+        license_revoked: Boolean(item.license_revoked),
+        approval_status: String(item.approval_status || "").trim(),
+        machine_fingerprint: String(item.machine_fingerprint || "").trim(),
+      }))
+      .filter((item) => item.code);
+    if (normalized.length) return normalized;
+
+    const fallbackCode = String(data.activation_code || data.trial_activation_code || "").trim();
+    if (!fallbackCode) return [];
+    return [{
+      code: fallbackCode,
+      status: String(data.activation_code_status || "").trim(),
+      edition: String(data.activation_edition || data.trial_edition || data.edition || "").trim(),
+      license_days: Number(data.activation_license_days || data.trial_license_days || 0),
+      created_at: "",
+      license_id: String(data.license_id || "").trim(),
+      expires_at: String(data.expires_at || "").trim(),
+      license_active: Boolean(data.valid || data.active),
+      license_revoked: false,
+      approval_status: "",
+      machine_fingerprint: String(data.machine_fingerprint || "").trim(),
+    }];
+  }
+
+  function activationCodeStatus(item) {
+    if (item.license_revoked || item.status === "revoked") return "已撤销";
+    if (item.approval_status === "pending") return "待审核";
+    if (item.approval_status === "rejected") return "已拒绝";
+    if (item.license_active) return "授权有效";
+    if (item.status === "assigned" || item.status === "active") return "待激活";
+    if (item.status === "used") return "已使用";
+    return item.status || "状态未知";
+  }
+
+  function renderActivationCodePicker() {
+    const belongsToCurrentUser = Boolean(
+      state.access_token &&
+      state.email &&
+      licenseState.email &&
+      String(licenseState.email).toLowerCase() === String(state.email).toLowerCase()
+    );
+    const codes = belongsToCurrentUser && Array.isArray(licenseState.activation_codes)
+      ? licenseState.activation_codes
+      : [];
+    const selectedCode = codes.some((item) => item.code === licenseState.activation_code)
+      ? licenseState.activation_code
+      : (codes[0] && codes[0].code) || "";
+    els.activationCodeSelect.replaceChildren();
+
+    if (!codes.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = state.access_token ? "当前账号暂无激活码" : "登录后读取激活码";
+      els.activationCodeSelect.appendChild(option);
+      els.activationCodeSelect.disabled = true;
+      els.activationCodeMeta.textContent = state.access_token
+        ? "当前账号暂未分配激活码。"
+        : "选择激活码后，将显示对应版本、授权状态和设备信息。";
+      return;
     }
+
+    codes.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.code;
+      option.textContent = `${item.code} · ${releaseEditionLabel(item.edition)} · ${activationCodeStatus(item)}`;
+      els.activationCodeSelect.appendChild(option);
+    });
+    els.activationCodeSelect.disabled = false;
+    els.activationCodeSelect.value = selectedCode;
+    const selected = codes.find((item) => item.code === selectedCode) || codes[0];
+    const expiresText = selected.expires_at ? ` · 有效期至 ${selected.expires_at}` : "";
+    const deviceText = selected.machine_fingerprint ? " · 已绑定设备" : " · 未绑定设备";
+    els.activationCodeMeta.textContent = `${releaseEditionLabel(selected.edition)} · ${activationCodeStatus(selected)}${expiresText}${deviceText}`;
+  }
+
+  function selectActivationCode(code) {
+    const codes = Array.isArray(licenseState.activation_codes) ? licenseState.activation_codes : [];
+    const selected = codes.find((item) => item.code === code);
+    if (!selected) return;
     saveLicenseState({
-      email: state.email,
-      user_id: state.user_id,
-      activation_code: activationCode,
-      machine_fingerprint: licenseState.machine_fingerprint || "",
-      license_id: licenseState.license_id || "",
-      edition: data.activation_edition || data.trial_edition || data.edition || licenseState.edition || "",
-      expires_at: licenseState.expires_at || "",
-      valid: Boolean(licenseState.valid),
+      ...licenseState,
+      activation_code: selected.code,
+      machine_fingerprint: selected.machine_fingerprint || "",
+      license_id: selected.license_id || "",
+      edition: selected.edition || "",
+      expires_at: selected.expires_at || "",
+      valid: Boolean(selected.license_active && !selected.license_revoked),
       updated_at: new Date().toISOString(),
     });
-    els.activationCode.value = activationCode;
+    els.activationCode.value = selected.code;
+    els.machineFingerprint.value = selected.machine_fingerprint || "";
+    els.licenseId.value = selected.license_id || "";
+    renderLicenseState();
+  }
+
+  function applyActivationCodePayload(data) {
+    const activationCodes = normalizeActivationCodes(data);
+    if (!activationCodes.length) {
+      saveLicenseState({ ...licenseState, activation_codes: [] });
+      renderActivationCodePicker();
+      return false;
+    }
+    const payloadCode = String(data.activation_code || data.trial_activation_code || "").trim();
+    const selectedCode = activationCodes.some((item) => item.code === licenseState.activation_code)
+      ? licenseState.activation_code
+      : (activationCodes.some((item) => item.code === payloadCode) ? payloadCode : activationCodes[0].code);
+    const selected = activationCodes.find((item) => item.code === selectedCode) || activationCodes[0];
+    saveLicenseState({
+      ...licenseState,
+      email: state.email,
+      user_id: state.user_id,
+      activation_codes: activationCodes,
+      activation_code: selected.code,
+      machine_fingerprint: selected.machine_fingerprint || "",
+      license_id: selected.license_id || "",
+      edition: selected.edition || "",
+      expires_at: selected.expires_at || "",
+      valid: Boolean(selected.license_active && !selected.license_revoked),
+      updated_at: new Date().toISOString(),
+    });
+    els.activationCode.value = selected.code;
+    els.machineFingerprint.value = selected.machine_fingerprint || "";
+    els.licenseId.value = selected.license_id || "";
     renderLicenseState();
     return true;
   }
 
   function renderLicenseState() {
     const loggedIn = Boolean(state.access_token);
+    renderActivationCodePicker();
     if (!loggedIn || !isLicenseStateForCurrentUser()) {
       setLicenseStatus("待激活", "待激活");
       return;
@@ -662,6 +787,10 @@
 
   async function refreshSavedLicenseStatus() {
     if (!state.access_token) {
+      return;
+    }
+    if (!licenseState.activation_code || !Array.isArray(licenseState.activation_codes)) {
+      await loadCurrentLicense();
       return;
     }
     if (!isLicenseStateForCurrentUser() || !licenseState.license_id || !licenseState.machine_fingerprint) {
@@ -701,10 +830,14 @@
         applyActivationCodePayload(data);
         return;
       }
+      if (applyActivationCodePayload(data)) {
+        return;
+      }
       saveLicenseState({
+        ...licenseState,
         email: state.email,
         user_id: state.user_id,
-        activation_code: licenseState.activation_code || "",
+        activation_code: data.activation_code || data.trial_activation_code || licenseState.activation_code || "",
         machine_fingerprint: data.machine_fingerprint || "",
         license_id: data.license_id || "",
         edition: data.edition || "",
