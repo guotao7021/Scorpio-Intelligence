@@ -10,7 +10,7 @@
     />
     <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="site.css?v=20260711-base" />
-    <link rel="stylesheet" href="home-cinematic.css?v=20260711-04" />
+    <link rel="stylesheet" href="home-cinematic.css?v=20260712-05" />
     <script
       src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"
       defer
@@ -111,6 +111,7 @@
           role="group"
           aria-label="Scorpio Intelligence 认知系统图"
         >
+          <canvas class="section-3d" data-scene="pipeline" aria-hidden="true"></canvas>
           <span class="system-orbit system-orbit-a" aria-hidden="true"></span
           ><span class="system-orbit system-orbit-b" aria-hidden="true"></span>
           <div class="system-core">
@@ -240,6 +241,7 @@
           role="group"
           aria-label="Scorpio Intelligence 认知推演闭环"
         >
+          <canvas class="section-3d" data-scene="reasoning" aria-hidden="true"></canvas>
           <span class="loop-ring loop-ring-a" aria-hidden="true"></span
           ><span class="loop-ring loop-ring-b" aria-hidden="true"></span>
           <div class="loop-core">
@@ -301,39 +303,24 @@
           class="product-gallery"
           role="region"
           aria-label="Scorpio Intelligence 脱敏产品展示"
+          data-carousel
         >
-          <figure class="gallery-frame gallery-lead">
-            <img
-              src="assets/scorpio-showcase-holdings.png"
-              alt="Scorpio Intelligence 基金持仓穿透界面脱敏演示"
-            />
-            <figcaption>
-              <span>01</span><strong>持仓与穿透</strong
-              ><em>从标的权重追溯风险来源</em>
-            </figcaption>
-          </figure>
-          <figure class="gallery-frame">
-            <img
-              src="assets/scorpio-showcase-bond.png"
-              alt="Scorpio Intelligence 债券研究界面脱敏演示"
-              loading="lazy"
-            />
-            <figcaption>
-              <span>02</span><strong>债券研究</strong
-              ><em>价格、信用与条款统一阅读</em>
-            </figcaption>
-          </figure>
-          <figure class="gallery-frame">
-            <img
-              src="assets/scorpio-showcase-capital.png"
-              alt="Scorpio Intelligence 主力资金界面脱敏演示"
-              loading="lazy"
-            />
-            <figcaption>
-              <span>03</span><strong>主力资金</strong
-              ><em>从市场广度观察资金方向</em>
-            </figcaption>
-          </figure>
+          <div class="product-viewport">
+            <div class="product-track">
+              <figure class="gallery-frame is-active"><img src="assets/scorpio-showcase-fund-overview.png" alt="Scorpio Intelligence 基金概览界面脱敏演示" /><figcaption><span>01</span><strong>基金研究概览</strong><em>净值轨迹、回撤与研究结论统一阅读</em></figcaption></figure>
+              <figure class="gallery-frame"><img src="assets/scorpio-showcase-fund-risk.png" alt="Scorpio Intelligence 基金收益风险界面脱敏演示" loading="lazy" /><figcaption><span>02</span><strong>收益与风险</strong><em>比较区间回报、波动与最大回撤</em></figcaption></figure>
+              <figure class="gallery-frame"><img src="assets/scorpio-showcase-holdings.png" alt="Scorpio Intelligence 基金持仓穿透界面脱敏演示" loading="lazy" /><figcaption><span>03</span><strong>持仓与穿透</strong><em>从标的权重追溯风险来源</em></figcaption></figure>
+              <figure class="gallery-frame"><img src="assets/scorpio-showcase-bond.png" alt="Scorpio Intelligence 债券研究界面脱敏演示" loading="lazy" /><figcaption><span>04</span><strong>债券研究</strong><em>价格、信用与条款统一阅读</em></figcaption></figure>
+              <figure class="gallery-frame"><img src="assets/scorpio-showcase-bond-score.png" alt="Scorpio Intelligence 债券评分拆解界面脱敏演示" loading="lazy" /><figcaption><span>05</span><strong>评分拆解</strong><em>把价格安全、信用与转股价值分项验证</em></figcaption></figure>
+              <figure class="gallery-frame"><img src="assets/scorpio-showcase-capital.png" alt="Scorpio Intelligence 主力资金界面脱敏演示" loading="lazy" /><figcaption><span>06</span><strong>主力资金</strong><em>从市场广度观察资金方向</em></figcaption></figure>
+            </div>
+          </div>
+          <div class="product-carousel-controls">
+            <button type="button" class="carousel-arrow" data-carousel-prev aria-label="上一张产品截图"><i data-lucide="chevron-left"></i></button>
+            <div class="carousel-dots" role="tablist" aria-label="选择产品截图"></div>
+            <span class="carousel-count" aria-live="polite">01 / 06</span>
+            <button type="button" class="carousel-arrow" data-carousel-next aria-label="下一张产品截图"><i data-lucide="chevron-right"></i></button>
+          </div>
         </div>
         <p class="demo-boundary">
           <i data-lucide="shield-check"></i> PUBLIC DEMO /
@@ -431,7 +418,7 @@
       src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"
       defer
     ></script>
-    <script src="home-cinematic.js?v=20260711-04" defer></script>
+    <script src="home-cinematic.js?v=20260712-05" defer></script>
     <script src="site-analytics.js?v=20260630-analytics" defer></script>
   </body>
 </html>
