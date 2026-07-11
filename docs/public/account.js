@@ -198,6 +198,10 @@
     });
     renderLicenseState();
     await refreshRelease();
+    if (!data.valid) {
+      data.message = userFacingLicenseError(data.message || data.reason || "unknown");
+      data.reason = "";
+    }
     setMessage(
       els.licenseMessage,
       data.idempotent
@@ -211,11 +215,27 @@
     event.preventDefault();
     requireLogin();
     setMessage(els.licenseMessage, "正在检查授权状态...", "loading");
+    await ensureCurrentLicenseLoaded();
+    const licenseId = (els.licenseId.value.trim() || licenseState.license_id || "").trim();
+    const machineFingerprint = (els.machineFingerprint.value.trim() || licenseState.machine_fingerprint || "").trim();
+    if (!licenseId || !machineFingerprint) {
+      els.licenseId.value = licenseId;
+      els.machineFingerprint.value = machineFingerprint;
+      setLicenseStatus("待绑定设备", "待绑定");
+      setMessage(
+        els.licenseMessage,
+        licenseId
+          ? "已读取到 License ID，请从桌面端授权页面复制机器码后再检查。"
+          : "当前账号还没有可用的 License ID。请先激活授权，或刷新当前授权状态。",
+        "warn"
+      );
+      return;
+    }
     const data = await request("/license/status", {
       method: "POST",
       body: {
-        license_id: els.licenseId.value.trim(),
-        machine_fingerprint: els.machineFingerprint.value.trim(),
+        license_id: licenseId,
+        machine_fingerprint: machineFingerprint,
         client_version: "web-account",
       },
       auth: true,
@@ -225,8 +245,8 @@
       email: state.email,
       user_id: state.user_id,
       activation_code: els.activationCode.value.trim() || licenseState.activation_code || "",
-      machine_fingerprint: els.machineFingerprint.value.trim(),
-      license_id: data.license_id || els.licenseId.value.trim(),
+      machine_fingerprint: machineFingerprint,
+      license_id: data.license_id || licenseId,
       edition: data.edition || licenseState.edition || "",
       expires_at: data.expires_at || licenseState.expires_at || "",
       valid: Boolean(data.valid),
