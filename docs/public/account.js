@@ -198,10 +198,6 @@
     });
     renderLicenseState();
     await refreshRelease();
-    if (!data.valid) {
-      data.message = userFacingLicenseError(data.message || data.reason || "unknown");
-      data.reason = "";
-    }
     setMessage(
       els.licenseMessage,
       data.idempotent
@@ -216,8 +212,20 @@
     requireLogin();
     setMessage(els.licenseMessage, "正在检查授权状态...", "loading");
     await ensureCurrentLicenseLoaded();
-    const licenseId = (els.licenseId.value.trim() || licenseState.license_id || "").trim();
+    const licenseId = (licenseState.license_id || els.licenseId.value.trim() || "").trim();
+    const activationCode = (els.activationCode.value.trim() || licenseState.activation_code || "").trim();
     const machineFingerprint = (els.machineFingerprint.value.trim() || licenseState.machine_fingerprint || "").trim();
+    if (!licenseId && activationCode) {
+      els.activationCode.value = activationCode;
+      els.machineFingerprint.value = machineFingerprint;
+      setLicenseStatus("待绑定设备", "待绑定");
+      setMessage(
+        els.licenseMessage,
+        "当前账号已读取到激活码，但尚未生成 License ID。请从桌面端复制机器码后点击激活授权。",
+        "warn"
+      );
+      return;
+    }
     if (!licenseId || !machineFingerprint) {
       els.licenseId.value = licenseId;
       els.machineFingerprint.value = machineFingerprint;
@@ -254,11 +262,29 @@
     });
     renderLicenseState();
     await refreshRelease();
+    if (!data.valid) {
+      data.message = userFacingLicenseError(data.message || data.reason || "unknown");
+      data.reason = "";
+    }
     setMessage(
       els.licenseMessage,
       data.valid ? "授权有效，可以回到桌面端同步数据。" : `授权不可用：${data.message || data.reason || "unknown"}`,
       type
     );
+  }
+
+  function userFacingLicenseError(value) {
+    const text = String(value || "");
+    if (text.includes("license_id_and_machine_fingerprint_required")) {
+      return "请先完成授权绑定：License ID 会自动读取，机器码请从桌面端授权页面复制。";
+    }
+    if (text.includes("license_not_found")) {
+      return "当前账号暂无可用 License ID，请先激活授权或刷新授权状态。";
+    }
+    if (text.includes("machine_mismatch") || text.includes("not match")) {
+      return "当前机器码与授权记录不一致，请在桌面端复制本机机器码后重新绑定。";
+    }
+    return text || "授权状态暂不可用，请稍后重试。";
   }
 
   async function refreshRelease() {
@@ -623,8 +649,14 @@
       setLicenseStatus("需要处理", "异常");
       els.nextStepText.textContent = "检查授权信息";
       els.syncState.textContent = "等待授权";
+    } else if (licenseState.activation_code) {
+      setLicenseStatus("待绑定设备", "待绑定");
+      els.nextStepText.textContent = "从桌面端复制机器码后激活授权";
+      els.syncState.textContent = "待绑定";
     } else {
       setLicenseStatus("待激活", "待激活");
+      els.nextStepText.textContent = "登录后激活授权";
+      els.syncState.textContent = "待激活";
     }
   }
 
