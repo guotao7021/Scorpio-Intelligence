@@ -1,123 +1,437 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scorpio Intelligence | 市场智能平台</title>
-  <meta name="description" content="Scorpio Intelligence 面向投资研究、资产观察和组合复盘，帮助用户把市场信号组织为可复核的判断。">
-  <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260711-observatory">
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-</head>
-<body class="observatory-page">
-  <header class="site-header observatory-header">
-    <a class="brand" href="#top" aria-label="Scorpio Intelligence 首页"><img src="assets/scorpio-logo-horizontal.svg" alt="Scorpio Intelligence"></a>
-    <nav aria-label="主导航">
-      <a href="#platform">平台</a><a href="#brand-story">品牌叙事</a><a href="#method">方法</a><a href="#experience">产品体验</a><a href="#editions">版本</a><a href="#trust">边界</a>
-      <a href="account.html">用户中心</a><a href="feedback-cn.html">反馈</a><a href="faq-cn.html">FAQ</a>
-    </nav>
-    <div class="lang-switch" aria-label="语言切换"><a class="active" href="index-cn.html">中文</a><a href="index-en.html">EN</a></div>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scorpio Intelligence | 市场智能平台</title>
+    <meta
+      name="description"
+      content="Scorpio Intelligence 面向投资研究、资产观察和组合复盘，帮助用户把市场信号组织为可复核的判断。"
+    />
+    <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="site.css?v=20260711-base" />
+    <link rel="stylesheet" href="home-cinematic.css?v=20260711-04" />
+    <script
+      src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"
+      defer
+    ></script>
+  </head>
+  <body class="observatory-page">
+    <header class="site-header observatory-header">
+      <a class="brand" href="#top" aria-label="Scorpio Intelligence 首页"
+        ><img
+          src="assets/scorpio-logo-horizontal.svg"
+          alt="Scorpio Intelligence"
+      /></a>
+      <nav aria-label="主导航">
+        <a href="#platform">平台</a><a href="#brand-story">品牌叙事</a
+        ><a href="#method">方法</a><a href="#experience">产品体验</a
+        ><a href="#editions">版本</a><a href="#trust">边界</a>
+        <a href="account.html">用户中心</a><a href="feedback-cn.html">反馈</a
+        ><a href="faq-cn.html">FAQ</a>
+      </nav>
+      <div class="lang-switch" role="navigation" aria-label="语言切换">
+        <a class="active" href="index-cn.html">中文</a
+        ><a href="index-en.html">EN</a>
+      </div>
+    </header>
 
-  <main id="top">
-    <section class="hero hero-observatory" aria-labelledby="hero-title">
-      <div class="hero-grid" aria-hidden="true"></div>
-      <img class="hero-workbench" src="assets/scorpio-workbench-preview.png" alt="Scorpio Intelligence 工作台预览" fetchpriority="high">
-      <div class="hero-signal" aria-hidden="true"><span></span><span></span><span></span></div>
-      <div class="hero-content">
-        <p class="eyebrow"><span class="status-dot"></span> MARKET INTELLIGENCE / 2026</p>
-        <h1 id="hero-title">Scorpio Intelligence</h1>
-        <p class="hero-statement">先理解市场，再做交易。</p>
-        <p class="lead">一个将资产、风险、市场上下文与复盘线索收拢到同一张研究工作台的市场智能平台。</p>
-        <div class="hero-actions">
-          <a class="button primary" href="account.html"><i data-lucide="arrow-up-right"></i> 进入用户中心</a>
-          <a class="button secondary" href="#experience"><i data-lucide="play"></i> 观看工作台</a>
+    <main id="top">
+      <section class="hero hero-observatory" aria-labelledby="hero-title">
+        <canvas
+          id="stellar-field"
+          class="stellar-field"
+          aria-hidden="true"
+        ></canvas>
+        <div class="hero-grid" aria-hidden="true"></div>
+        <img
+          class="hero-workbench"
+          src="assets/scorpio-showcase-fund-risk.png"
+          alt="Scorpio Intelligence 基金收益与风险研究界面脱敏预览"
+          fetchpriority="high"
+        />
+        <div class="hero-signal" aria-hidden="true">
+          <span></span><span></span><span></span>
         </div>
-        <p class="hero-note">研究辅助与决策支持工具，不构成投资建议、收益承诺或交易指令。</p>
-      </div>
-      <a class="hero-scroll" href="#platform" aria-label="查看平台能力"><span>SCROLL TO OBSERVE</span><i data-lucide="arrow-down"></i></a>
-    </section>
+        <div class="hero-content">
+          <p class="eyebrow">
+            <span class="status-dot"></span> MARKET INTELLIGENCE / 2026
+          </p>
+          <h1 id="hero-title">Scorpio Intelligence</h1>
+          <p class="hero-statement">先理解市场，再做交易。</p>
+          <p class="lead">
+            一个将资产、风险、市场上下文与复盘线索收拢到同一张研究工作台的市场智能平台。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="account.html"
+              ><i data-lucide="arrow-up-right"></i> 进入用户中心</a
+            >
+            <a class="button secondary" href="#experience"
+              ><i data-lucide="play"></i> 观看工作台</a
+            >
+          </div>
+          <p class="hero-note">
+            研究辅助与决策支持工具，不构成投资建议、收益承诺或交易指令。
+          </p>
+        </div>
+        <a class="hero-scroll" href="#platform" aria-label="查看平台能力"
+          ><span>SCROLL TO OBSERVE</span><i data-lucide="arrow-down"></i
+        ></a>
+      </section>
 
-    <section class="market-ticker" aria-label="平台信号">
-      <div class="ticker-track"><span>资产研究 <b>01</b></span><span>风险透视 <b>02</b></span><span>市场上下文 <b>03</b></span><span>组合复盘 <b>04</b></span><span>研究档案 <b>05</b></span><span>资产研究 <b>01</b></span><span>风险透视 <b>02</b></span><span>市场上下文 <b>03</b></span></div>
-    </section>
+      <section class="market-ticker" aria-label="平台信号">
+        <div class="ticker-track">
+          <span>资产研究 <b>01</b></span
+          ><span>风险透视 <b>02</b></span
+          ><span>市场上下文 <b>03</b></span
+          ><span>组合复盘 <b>04</b></span
+          ><span>研究档案 <b>05</b></span
+          ><span>资产研究 <b>01</b></span
+          ><span>风险透视 <b>02</b></span
+          ><span>市场上下文 <b>03</b></span>
+        </div>
+      </section>
 
-    <section id="platform" class="section observatory-section platform-section" data-reveal>
-      <div class="section-head"><div><p class="section-kicker">THE RESEARCH CONSTELLATION</p><h2>不是又一组行情组件，<br>而是一套研究坐标系。</h2></div><p>把离散的市场信息放回可解释的语境中，让每次观察都能留下依据、边界与下一步。</p></div>
-      <div class="signal-rail">
-        <article><span class="signal-index">01</span><i data-lucide="radar"></i><h3>市场智能</h3><p>识别环境、节奏与风险状态，先判断身处何处，再讨论行动。</p></article>
-        <article><span class="signal-index">02</span><i data-lucide="scan-search"></i><h3>资产研究</h3><p>将基本信息、行业脉络、资讯与研究结论聚合为资产阅读面。</p></article>
-        <article><span class="signal-index">03</span><i data-lucide="network"></i><h3>组合认知</h3><p>从单一标的走向暴露、集中度与相关性，看到组合真正承受的东西。</p></article>
-        <article><span class="signal-index">04</span><i data-lucide="book-open-check"></i><h3>复盘档案</h3><p>让判断保留时间线和证据链，沉淀可回看、可讨论的研究资产。</p></article>
-      </div>
-    </section>
+      <section
+        id="platform"
+        class="section observatory-section platform-section"
+        data-reveal
+      >
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">THE RESEARCH CONSTELLATION</p>
+            <h2>不是又一组行情组件，<br />而是一套研究坐标系。</h2>
+          </div>
+          <p>
+            把离散的市场信息放回可解释的语境中，让每次观察都能留下依据、边界与下一步。
+          </p>
+        </div>
+        <div
+          class="system-map"
+          role="group"
+          aria-label="Scorpio Intelligence 认知系统图"
+        >
+          <span class="system-orbit system-orbit-a" aria-hidden="true"></span
+          ><span class="system-orbit system-orbit-b" aria-hidden="true"></span>
+          <div class="system-core">
+            <img src="assets/scorpio-logo-mark.svg" alt="" /><strong
+              >认知引擎</strong
+            ><small>SCORPIO CORE</small>
+          </div>
+          <article class="system-node system-node-1">
+            <i data-lucide="radar"></i><span>01</span>
+            <h3>市场智能</h3>
+            <small>ENVIRONMENT</small>
+            <p>识别市场环境、广度与风险状态</p>
+          </article>
+          <article class="system-node system-node-2">
+            <i data-lucide="scan-search"></i><span>02</span>
+            <h3>资产研究</h3>
+            <small>ASSET EVIDENCE</small>
+            <p>汇集资产证据并校验多维数据</p>
+          </article>
+          <article class="system-node system-node-3">
+            <i data-lucide="network"></i><span>03</span>
+            <h3>组合认知</h3>
+            <small>EXPOSURE MAP</small>
+            <p>穿透持仓暴露、集中度与关联风险</p>
+          </article>
+          <article class="system-node system-node-4">
+            <i data-lucide="book-open-check"></i><span>04</span>
+            <h3>复盘档案</h3>
+            <small>RESEARCH MEMORY</small>
+            <p>记录结果、偏差与下一轮假设</p>
+          </article>
+          <div class="data-stream" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+      </section>
 
-    <section id="brand-story" class="section constellation-story" data-reveal>
-      <div class="constellation-intro">
+      <section id="brand-story" class="section constellation-story" data-reveal>
+        <div class="constellation-intro">
+          <div>
+            <p class="section-kicker">BRAND ORIGIN / COGNITIVE CONSTELLATION</p>
+            <h2>从信息洪流，<br />到认知星图。</h2>
+          </div>
+          <div class="constellation-prologue">
+            <p>
+              AI 正在改变我们获取信息、理解市场和做出决策的方式。Scorpio
+              Intelligence
+              因此而生：不是增加一种噪音，而是帮助专业观察者在复杂市场中找到可验证的方向。
+            </p>
+            <span>2018 → FUTURE</span>
+          </div>
+        </div>
+
+        <div
+          class="constellation-map"
+          role="group"
+          aria-label="Scorpio Intelligence 品牌叙事路径"
+        >
+          <span class="orbit orbit-one" aria-hidden="true"></span
+          ><span class="orbit orbit-two" aria-hidden="true"></span
+          ><span class="orbit orbit-three" aria-hidden="true"></span>
+          <div class="constellation-core" aria-hidden="true">
+            <img src="assets/scorpio-logo-mark.svg" alt="" /><small
+              >SCORPIO</small
+            >
+          </div>
+          <article class="story-step story-step-1">
+            <span>01 / 2018 及之前</span>
+            <h3>信息爆发</h3>
+            <p>信息触手可得，但有效筛选变得更困难。</p>
+          </article>
+          <article class="story-step story-step-2">
+            <span>02 / 2019-2022</span>
+            <h3>工具普及</h3>
+            <p>工具提升效率，市场理解仍常受经验与碎片信息限制。</p>
+          </article>
+          <article class="story-step story-step-3">
+            <span>03 / 2023-2025</span>
+            <h3>AI 浪潮</h3>
+            <p>语言理解、知识推理和模式识别，打开新的研究可能。</p>
+          </article>
+          <article class="story-step story-step-4">
+            <span>04 / 2026.01</span>
+            <h3>认知挑战</h3>
+            <p>真正稀缺的，不是更多信息，而是可靠判断。</p>
+          </article>
+          <article class="story-step story-step-5 is-current">
+            <span>05 / 2026.03</span>
+            <h3>产品孵化</h3>
+            <p>Scorpio Intelligence 启动，以 AI 增强市场认知。</p>
+          </article>
+          <article class="story-step story-step-6">
+            <span>06 / FUTURE</span>
+            <h3>辅助认知决策</h3>
+            <p>穿透信息迷雾，理解市场本质，做出更明智的决定。</p>
+          </article>
+        </div>
+
+        <div class="story-manifesto">
+          <blockquote>
+            “未来的竞争优势，不再来自信息的多少，而来自理解的深度与决策的质量。”
+          </blockquote>
+          <div class="story-beliefs">
+            <span><i data-lucide="eye"></i> 理解 &gt; 信息</span
+            ><span><i data-lucide="crosshair"></i> 认知增强</span
+            ><span><i data-lucide="shield-check"></i> 长期主义</span
+            ><span><i data-lucide="users"></i> 开放共建</span>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="method"
+        class="section observatory-section method-section"
+        data-reveal
+      >
+        <div class="method-copy">
+          <p class="section-kicker">THE COGNITIVE LOOP</p>
+          <h2>从追问开始，<br />以复盘闭环。</h2>
+          <p>
+            Scorpio
+            不替用户做决定。系统持续组织问题、假设、证据与结果，把人的独立判断留在闭环中心。
+          </p>
+        </div>
+        <div
+          class="logic-loop"
+          role="group"
+          aria-label="Scorpio Intelligence 认知推演闭环"
+        >
+          <span class="loop-ring loop-ring-a" aria-hidden="true"></span
+          ><span class="loop-ring loop-ring-b" aria-hidden="true"></span>
+          <div class="loop-core">
+            <i data-lucide="brain-circuit"></i><strong>独立判断</strong
+            ><small>HUMAN IN LOOP</small>
+          </div>
+          <ol class="method-orbit">
+            <li>
+              <i data-lucide="telescope"></i><span>01 / QUESTION</span
+              ><strong>哲学追问</strong>
+              <p>市场正在发生什么，真正重要的变量是什么？</p>
+            </li>
+            <li>
+              <i data-lucide="git-fork"></i><span>02 / HYPOTHESIS</span
+              ><strong>逻辑假设</strong>
+              <p>建立可解释、可证伪、带有边界的判断。</p>
+            </li>
+            <li>
+              <i data-lucide="database-zap"></i><span>03 / VALIDATION</span
+              ><strong>数据验证</strong>
+              <p>用多维数据、时间与相关证据交叉校验。</p>
+            </li>
+            <li>
+              <i data-lucide="rotate-ccw"></i><span>04 / REVIEW</span
+              ><strong>结果闭环</strong>
+              <p>记录结果、复盘偏差，并修正下一轮认知。</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="experience" class="section experience-section" data-reveal>
+        <div class="experience-intro">
+          <div>
+            <p class="section-kicker">THE RESEARCH ARCHIVE</p>
+            <h2>想象力负责打开边界，<br />逻辑与数据负责抵达答案。</h2>
+            <a class="text-link" href="account.html"
+              >获取完整版本 <i data-lucide="arrow-right"></i
+            ></a>
+          </div>
+          <p>
+            Scorpio
+            将多资产研究、推理校验与数据阅读放进连续工作流。公开页面只呈现经脱敏的产品切面，保留研究的密度，不暴露用户账户、授权、私有策略或内部链路。
+          </p>
+        </div>
+        <div class="research-principles" role="group" aria-label="产品研究原则">
+          <span
+            ><i data-lucide="sparkles"></i><b>想象力</b
+            ><small>连接市场中尚未被命名的关系</small></span
+          ><span
+            ><i data-lucide="git-branch"></i><b>推理逻辑</b
+            ><small>让每一步判断都有可追溯的来处</small></span
+          ><span
+            ><i data-lucide="database-zap"></i><b>数据支持</b
+            ><small>以多维信息校验观点的边界</small></span
+          >
+        </div>
+        <div
+          class="product-gallery"
+          role="region"
+          aria-label="Scorpio Intelligence 脱敏产品展示"
+        >
+          <figure class="gallery-frame gallery-lead">
+            <img
+              src="assets/scorpio-showcase-holdings.png"
+              alt="Scorpio Intelligence 基金持仓穿透界面脱敏演示"
+            />
+            <figcaption>
+              <span>01</span><strong>持仓与穿透</strong
+              ><em>从标的权重追溯风险来源</em>
+            </figcaption>
+          </figure>
+          <figure class="gallery-frame">
+            <img
+              src="assets/scorpio-showcase-bond.png"
+              alt="Scorpio Intelligence 债券研究界面脱敏演示"
+              loading="lazy"
+            />
+            <figcaption>
+              <span>02</span><strong>债券研究</strong
+              ><em>价格、信用与条款统一阅读</em>
+            </figcaption>
+          </figure>
+          <figure class="gallery-frame">
+            <img
+              src="assets/scorpio-showcase-capital.png"
+              alt="Scorpio Intelligence 主力资金界面脱敏演示"
+              loading="lazy"
+            />
+            <figcaption>
+              <span>03</span><strong>主力资金</strong
+              ><em>从市场广度观察资金方向</em>
+            </figcaption>
+          </figure>
+        </div>
+        <p class="demo-boundary">
+          <i data-lucide="shield-check"></i> PUBLIC DEMO /
+          所有展示为演示样本与脱敏数据；不呈现客户账户、授权状态、私有策略或内部生产信息。
+        </p>
+      </section>
+
+      <section
+        id="editions"
+        class="section observatory-section editions-section"
+        data-reveal
+      >
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">DELIVERY PATH</p>
+            <h2>从看见产品，到形成自己的研究节奏。</h2>
+          </div>
+          <p>清晰的交付路径，不把用户留在模糊的“下载以后”。</p>
+        </div>
+        <div class="edition-ledger">
+          <article>
+            <span>01</span>
+            <div>
+              <h3>公开了解</h3>
+              <p>浏览产品、版本更新与研究边界，建立对平台的真实预期。</p>
+            </div>
+            <a href="faq-cn.html" aria-label="查看常见问题"
+              ><i data-lucide="arrow-up-right"></i
+            ></a>
+          </article>
+          <article>
+            <span>02</span>
+            <div>
+              <h3>账号与交付</h3>
+              <p>在用户中心查看授权、下载包与本地部署信息。</p>
+            </div>
+            <a href="account.html" aria-label="进入用户中心"
+              ><i data-lucide="arrow-up-right"></i
+            ></a>
+          </article>
+          <article>
+            <span>03</span>
+            <div>
+              <h3>反馈共建</h3>
+              <p>把真实研究过程中的摩擦交给我们，推动版本持续校准。</p>
+            </div>
+            <a href="feedback-cn.html" aria-label="提交反馈"
+              ><i data-lucide="arrow-up-right"></i
+            ></a>
+          </article>
+        </div>
+      </section>
+
+      <section id="trust" class="section trust-band" data-reveal>
         <div>
-          <p class="section-kicker">BRAND ORIGIN / COGNITIVE CONSTELLATION</p>
-          <h2>从信息洪流，<br>到认知星图。</h2>
+          <p class="section-kicker">PUBLIC BOUNDARY</p>
+          <h2>把价值讲清楚，<br />把核心留在该在的地方。</h2>
         </div>
-        <div class="constellation-prologue"><p>AI 正在改变我们获取信息、理解市场和做出决策的方式。Scorpio Intelligence 因此而生：不是增加一种噪音，而是帮助专业观察者在复杂市场中找到可验证的方向。</p><span>2018 → FUTURE</span></div>
+        <div>
+          <p>
+            对外展示研究体验、产品能力与交付方式；不公开私有方法、内部链路或个性化策略思路。Scorpio
+            的作用是增强研究认知，而不是替代独立判断。
+          </p>
+          <a class="text-link" href="changelog-cn.html"
+            >查看更新记录 <i data-lucide="arrow-right"></i
+          ></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer observatory-footer">
+      <div class="footer-brand">
+        <img src="assets/scorpio-logo-mark.svg" alt="" />
+        <div>
+          <strong>Scorpio Intelligence</strong
+          ><span>Market Intelligence Platform</span>
+        </div>
       </div>
-
-      <div class="constellation-map" aria-label="Scorpio Intelligence 品牌叙事路径">
-        <span class="orbit orbit-one" aria-hidden="true"></span><span class="orbit orbit-two" aria-hidden="true"></span><span class="orbit orbit-three" aria-hidden="true"></span>
-        <div class="constellation-core" aria-hidden="true"><img src="assets/scorpio-logo-mark.svg" alt=""><small>SCORPIO</small></div>
-        <article class="story-step story-step-1"><span>01 / 2018 及之前</span><h3>信息爆发</h3><p>信息触手可得，但有效筛选变得更困难。</p></article>
-        <article class="story-step story-step-2"><span>02 / 2019-2022</span><h3>工具普及</h3><p>工具提升效率，市场理解仍常受经验与碎片信息限制。</p></article>
-        <article class="story-step story-step-3"><span>03 / 2023-2025</span><h3>AI 浪潮</h3><p>语言理解、知识推理和模式识别，打开新的研究可能。</p></article>
-        <article class="story-step story-step-4"><span>04 / 2026.01</span><h3>认知挑战</h3><p>真正稀缺的，不是更多信息，而是可靠判断。</p></article>
-        <article class="story-step story-step-5 is-current"><span>05 / 2026.03</span><h3>产品孵化</h3><p>Scorpio Intelligence 启动，以 AI 增强市场认知。</p></article>
-        <article class="story-step story-step-6"><span>06 / FUTURE</span><h3>辅助认知决策</h3><p>穿透信息迷雾，理解市场本质，做出更明智的决定。</p></article>
+      <div class="footer-legal">
+        <span>© 2026 Scorpio Intelligence. 保留所有权利。</span
+        ><span
+          >软件版权及商业联系：<a
+            class="footer-contact"
+            href="mailto:guotao7021@gmail.com"
+            >guotao7021@gmail.com</a
+          ></span
+        >
       </div>
-
-      <div class="story-manifesto">
-        <blockquote>“未来的竞争优势，不再来自信息的多少，而来自理解的深度与决策的质量。”</blockquote>
-        <div class="story-beliefs"><span><i data-lucide="eye"></i> 理解 &gt; 信息</span><span><i data-lucide="crosshair"></i> 认知增强</span><span><i data-lucide="shield-check"></i> 长期主义</span><span><i data-lucide="users"></i> 开放共建</span></div>
-      </div>
-    </section>
-
-    <section id="method" class="section observatory-section method-section" data-reveal>
-      <div class="method-copy"><p class="section-kicker">FROM SIGNAL TO JUDGMENT</p><h2>市场从来不缺声音。<br>稀缺的是有边界的判断。</h2><p>Scorpio 不替用户做决策，而是把“看见什么、为什么重要、还缺什么证据”放进清晰的研究路径。</p></div>
-      <ol class="method-orbit">
-        <li><span>捕捉</span><strong>市场信号</strong><p>行情、估值、事件和价格行为。</p></li>
-        <li><span>定位</span><strong>资产语境</strong><p>行业、产品、风险与可比对象。</p></li>
-        <li><span>校验</span><strong>证据关系</strong><p>让假设经得起数据与时间检查。</p></li>
-        <li><span>沉淀</span><strong>研究记忆</strong><p>复盘每次判断留下的线索。</p></li>
-      </ol>
-    </section>
-
-    <section id="experience" class="section experience-section" data-reveal>
-      <div class="experience-intro"><p class="section-kicker">THE RESEARCH ARCHIVE</p><h2>想象力负责打开边界，<br>逻辑与数据负责抵达答案。</h2><p>Scorpio 将多资产研究、推理校验与数据阅读放进连续工作流。公开页面只呈现经脱敏的产品切面，保留研究的密度，不暴露用户账户、授权、私有策略或内部链路。</p><a class="text-link" href="account.html">获取完整版本 <i data-lucide="arrow-right"></i></a></div>
-      <div class="research-principles" aria-label="产品研究原则"><span><i data-lucide="sparkles"></i><b>想象力</b><small>连接市场中尚未被命名的关系</small></span><span><i data-lucide="git-branch"></i><b>推理逻辑</b><small>让每一步判断都有可追溯的来处</small></span><span><i data-lucide="database-zap"></i><b>数据支持</b><small>以多维信息校验观点的边界</small></span></div>
-      <div class="product-gallery" aria-label="Scorpio Intelligence 脱敏产品展示">
-        <figure class="gallery-frame gallery-lead"><img src="assets/scorpio-workbench-preview.png" alt="Scorpio Intelligence 多资产研究工作台脱敏演示"><figcaption><span>01</span><strong>研究工作台</strong><em>跨资产的观察入口</em></figcaption></figure>
-        <figure class="gallery-frame"><img src="assets/scorpio-fund-research-preview.png" alt="Scorpio Intelligence 基金研究视图脱敏演示" loading="lazy"><figcaption><span>02</span><strong>收益与风险</strong><em>以结构阅读表现</em></figcaption></figure>
-        <figure class="gallery-frame"><img src="assets/scorpio-research-pool-preview.png" alt="Scorpio Intelligence 样本池与研究路径脱敏演示" loading="lazy"><figcaption><span>03</span><strong>样本池路径</strong><em>从集合进入细节</em></figcaption></figure>
-      </div>
-      <p class="demo-boundary"><i data-lucide="shield-check"></i> PUBLIC DEMO / 所有展示为演示样本与脱敏数据；不呈现客户账户、授权状态、私有策略或内部生产信息。</p>
-    </section>
-
-    <section id="editions" class="section observatory-section editions-section" data-reveal>
-      <div class="section-head"><div><p class="section-kicker">DELIVERY PATH</p><h2>从看见产品，到形成自己的研究节奏。</h2></div><p>清晰的交付路径，不把用户留在模糊的“下载以后”。</p></div>
-      <div class="edition-ledger">
-        <article><span>01</span><div><h3>公开了解</h3><p>浏览产品、版本更新与研究边界，建立对平台的真实预期。</p></div><a href="faq-cn.html" aria-label="查看常见问题"><i data-lucide="arrow-up-right"></i></a></article>
-        <article><span>02</span><div><h3>账号与交付</h3><p>在用户中心查看授权、下载包与本地部署信息。</p></div><a href="account.html" aria-label="进入用户中心"><i data-lucide="arrow-up-right"></i></a></article>
-        <article><span>03</span><div><h3>反馈共建</h3><p>把真实研究过程中的摩擦交给我们，推动版本持续校准。</p></div><a href="feedback-cn.html" aria-label="提交反馈"><i data-lucide="arrow-up-right"></i></a></article>
-      </div>
-    </section>
-
-    <section id="trust" class="section trust-band" data-reveal>
-      <div><p class="section-kicker">PUBLIC BOUNDARY</p><h2>把价值讲清楚，<br>把核心留在该在的地方。</h2></div>
-      <div><p>对外展示研究体验、产品能力与交付方式；不公开私有方法、内部链路或个性化策略思路。Scorpio 的作用是增强研究认知，而不是替代独立判断。</p><a class="text-link" href="changelog-cn.html">查看更新记录 <i data-lucide="arrow-right"></i></a></div>
-    </section>
-  </main>
-
-  <footer class="site-footer observatory-footer"><div class="footer-brand"><img src="assets/scorpio-logo-mark.svg" alt=""><div><strong>Scorpio Intelligence</strong><span>Market Intelligence Platform</span></div></div><div class="footer-legal"><span>© 2026 Scorpio Intelligence. 保留所有权利。</span><span>软件版权及商业联系：<a class="footer-contact" href="mailto:guotao7021@gmail.com">guotao7021@gmail.com</a></span></div></footer>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js" defer></script>
-  <script src="site-motion.js?v=20260711-constellation" defer></script>
-  <script src="site-analytics.js?v=20260630-analytics" defer></script>
-</body>
+    </footer>
+    <script
+      src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"
+      defer
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"
+      defer
+    ></script>
+    <script src="home-cinematic.js?v=20260711-04" defer></script>
+    <script src="site-analytics.js?v=20260630-analytics" defer></script>
+  </body>
 </html>
