@@ -10,7 +10,7 @@
     />
     <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="site.css?v=20260711-base" />
-    <link rel="stylesheet" href="home-cinematic.css?v=20260712-05" />
+    <link rel="stylesheet" href="home-cinematic.css?v=20260712-3d-refined" />
     <script
       src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"
       defer
@@ -44,14 +44,28 @@
           aria-hidden="true"
         ></canvas>
         <div class="hero-grid" aria-hidden="true"></div>
-        <img
-          class="hero-workbench"
-          src="assets/scorpio-showcase-fund-risk.png"
-          alt="Scorpio Intelligence 基金收益与风险研究界面脱敏预览"
-          fetchpriority="high"
-        />
-        <div class="hero-signal" aria-hidden="true">
-          <span></span><span></span><span></span>
+        <div
+          class="hero-data-forge"
+          role="img"
+          aria-label="市场数据经过清洗、验证和 AI 推演后形成可追溯研究结论的三维架构"
+        >
+          <canvas class="hero-forge-canvas" aria-hidden="true"></canvas>
+          <div class="forge-heading" aria-hidden="true">
+            <span><b></b> COGNITIVE PRODUCTION SYSTEM</span>
+            <em>LIVE / 04 PIPELINES</em>
+          </div>
+          <ol class="forge-stages" aria-hidden="true">
+            <li><span>01</span><strong>多源数据</strong><small>INGEST</small></li>
+            <li><span>02</span><strong>清洗验证</strong><small>VERIFY</small></li>
+            <li><span>03</span><strong>认知推演</strong><small>REASON</small></li>
+            <li><span>04</span><strong>闭环输出</strong><small>TRACE</small></li>
+          </ol>
+          <div class="forge-core-tag" aria-hidden="true">
+            <span>AI CORE</span><strong>认知引擎</strong>
+          </div>
+          <div class="forge-output-tag" aria-hidden="true">
+            <span>VERIFIED</span><strong>可复核结论</strong>
+          </div>
         </div>
         <div class="hero-content">
           <p class="eyebrow">
@@ -166,10 +180,11 @@
         </div>
 
         <div
-          class="constellation-map"
+          class="constellation-map constellation-map-3d"
           role="group"
           aria-label="Scorpio Intelligence 品牌叙事路径"
         >
+          <canvas class="section-3d constellation-3d" data-scene="orbit" aria-hidden="true"></canvas>
           <span class="orbit orbit-one" aria-hidden="true"></span
           ><span class="orbit orbit-two" aria-hidden="true"></span
           ><span class="orbit orbit-three" aria-hidden="true"></span>
@@ -230,7 +245,7 @@
       >
         <div class="method-copy">
           <p class="section-kicker">THE COGNITIVE LOOP</p>
-          <h2>从追问开始，<br />以复盘闭环。</h2>
+          <h2>从理解市场开始，<br />以复盘闭环。</h2>
           <p>
             Scorpio
             不替用户做决定。系统持续组织问题、假设、证据与结果，把人的独立判断留在闭环中心。
@@ -241,7 +256,7 @@
           role="group"
           aria-label="Scorpio Intelligence 认知推演闭环"
         >
-          <canvas class="section-3d" data-scene="reasoning" aria-hidden="true"></canvas>
+          <canvas class="section-3d" data-scene="mobius" aria-hidden="true"></canvas>
           <span class="loop-ring loop-ring-a" aria-hidden="true"></span
           ><span class="loop-ring loop-ring-b" aria-hidden="true"></span>
           <div class="loop-core">
@@ -250,8 +265,8 @@
           </div>
           <ol class="method-orbit">
             <li>
-              <i data-lucide="telescope"></i><span>01 / QUESTION</span
-              ><strong>哲学追问</strong>
+              <i data-lucide="telescope"></i><span>01 / OBSERVE</span
+              ><strong>市场观察</strong>
               <p>市场正在发生什么，真正重要的变量是什么？</p>
             </li>
             <li>
@@ -336,10 +351,34 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">DELIVERY PATH</p>
-            <h2>从看见产品，到形成自己的研究节奏。</h2>
+            <h2>为不同的研究深度，<br />提供更合适的产品版本。</h2>
           </div>
-          <p>清晰的交付路径，不把用户留在模糊的“下载以后”。</p>
+          <p>从个人研究到团队交付，让能力、数据范围与服务边界清晰对应。</p>
         </div>
+        <div class="edition-comparison" aria-label="Scorpio Intelligence 产品版本对比">
+          <article>
+            <header><i data-lucide="user"></i><span>PERSONAL</span></header>
+            <h3>Personal Standard</h3>
+            <p>面向建立稳定研究流程的个人用户。</p>
+            <ul><li>核心市场与资产研究工作台</li><li>Standard 数据范围与稳定通道</li><li>账号授权、设备绑定与版本更新</li></ul>
+            <a href="account.html#license-console">查看授权 <i data-lucide="arrow-right"></i></a>
+          </article>
+          <article class="is-featured">
+            <header><i data-lucide="brain-circuit"></i><span>ADVANCED</span></header>
+            <h3>Personal Pro</h3>
+            <p>面向需要完整数据穿透和复盘能力的深度研究者。</p>
+            <ul><li>完整基金、债券与组合研究能力</li><li>Standard + Pro 数据范围</li><li>云端数据同步与优先版本交付</li></ul>
+            <a href="account.html#software-download">下载 Pro 客户端 <i data-lucide="arrow-right"></i></a>
+          </article>
+          <article>
+            <header><i data-lucide="building-2"></i><span>DIRECTED</span></header>
+            <h3>Team / Enterprise</h3>
+            <p>面向需要集中授权、分发与交付边界的组织。</p>
+            <ul><li>基于 Pro 范围的定向交付</li><li>集中授权码与设备管理</li><li>数据范围、发布通道按项目确认</li></ul>
+            <a href="mailto:guotao7021@gmail.com">联系评估 <i data-lucide="arrow-right"></i></a>
+          </article>
+        </div>
+        <p class="edition-boundary">所有版本均为研究辅助与决策支持工具，不提供收益承诺、代客理财或自动交易指令。</p>
         <div class="edition-ledger">
           <article>
             <span>01</span>
@@ -388,6 +427,40 @@
             >查看更新记录 <i data-lucide="arrow-right"></i
           ></a>
         </div>
+        <div class="delivery-flow" aria-label="Scorpio 数据生产与云端交付流程">
+          <div class="delivery-flow-head">
+            <span>COGNITIVE DELIVERY PIPELINE</span><strong>从计算内核到用户决策现场</strong>
+          </div>
+          <canvas class="section-3d delivery-3d" data-scene="delivery" aria-hidden="true"></canvas>
+          <div class="delivery-rail" aria-hidden="true">
+            <span class="delivery-packet packet-a"></span><span class="delivery-packet packet-b"></span
+            ><span class="delivery-packet packet-c"></span><span class="delivery-packet packet-d"></span>
+          </div>
+          <div class="delivery-stage stage-machine">
+            <span class="stage-index">01 / PRODUCE</span>
+            <div class="machine-shell">
+              <div class="machine-core"><i data-lucide="cpu"></i><small>分析内核</small></div>
+              <div class="machine-logic"><i data-lucide="git-branch"></i><small>加工逻辑</small></div>
+              <span class="machine-pulse pulse-a"></span><span class="machine-pulse pulse-b"></span>
+            </div>
+            <h3>生产机计算</h3><p>内核调度加工逻辑，生成经过校验的结果数据。</p>
+          </div>
+          <div class="delivery-stage stage-result">
+            <span class="stage-index">02 / PACKAGE</span>
+            <div class="result-stack"><i data-lucide="database"></i><span></span><span></span><span></span></div>
+            <h3>结果数据</h3><p>按版本、日期与研究范围形成可追溯的数据包。</p>
+          </div>
+          <div class="delivery-stage stage-cloud">
+            <span class="stage-index">03 / SYNC</span>
+            <div class="cloud-sync"><i data-lucide="cloud"></i><i data-lucide="refresh-cw"></i></div>
+            <h3>同步云端</h3><p>通过授权边界安全同步，保持多端结果一致。</p>
+          </div>
+          <div class="delivery-stage stage-user">
+            <span class="stage-index">04 / APPLY</span>
+            <div class="user-terminal"><i data-lucide="monitor-check"></i><span class="terminal-line"></span></div>
+            <h3>用户拉取</h3><p>桌面端拉取结果，纳入研究流程并辅助独立决策。</p>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -418,7 +491,7 @@
       src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"
       defer
     ></script>
-    <script src="home-cinematic.js?v=20260712-06" defer></script>
+    <script src="home-cinematic.js?v=20260712-3d-refined" defer></script>
     <script src="site-analytics.js?v=20260630-analytics" defer></script>
   </body>
 </html>

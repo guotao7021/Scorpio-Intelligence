@@ -6,9 +6,9 @@
   <title>用户中心 | Scorpio Intelligence</title>
   <meta name="description" content="Scorpio Intelligence 用户中心：账号登录、授权激活、客户端下载与桌面端数据同步入口。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260712-multi-license">
+  <link rel="stylesheet" href="site.css?v=20260712-split-releases">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-  <script src="account.js?v=20260712-multi-license" defer></script>
+  <script src="account.js?v=20260712-split-releases" defer></script>
 </head>
 <body class="account-page">
   <header class="site-header">
@@ -41,6 +41,47 @@
         <span>下一步</span>
         <strong id="nextStepText">登录后激活授权</strong>
         <p id="sessionHint">登录后可激活授权、检查发行包，并让桌面端使用同一账号同步云端数据。</p>
+      </div>
+    </section>
+
+    <section class="account-download-command" id="software-download" aria-labelledby="downloadTitle">
+      <div class="download-command-intro">
+        <span class="download-command-icon"><i data-lucide="download" aria-hidden="true"></i></span>
+        <div>
+          <p class="section-kicker">Desktop Release</p>
+          <h2 id="downloadTitle">下载 Scorpio Intelligence</h2>
+          <p>获取与你当前授权版本匹配的稳定版客户端。</p>
+        </div>
+      </div>
+      <div class="release-edition-grid">
+        <article class="release-edition-card" id="standardReleaseBox">
+          <header><span>PERSONAL STANDARD</span><i data-lucide="box"></i></header>
+          <strong id="standardReleaseVersion">正在读取...</strong>
+          <small id="standardReleaseMeta">Standard 数据范围与稳定通道。</small>
+          <a class="button secondary disabled" id="standardDownloadLink" href="#" aria-disabled="true"><i data-lucide="download"></i> 下载 Standard</a>
+        </article>
+        <article class="release-edition-card is-pro" id="proReleaseBox">
+          <header><span>PERSONAL PRO</span><i data-lucide="brain-circuit"></i></header>
+          <strong id="proReleaseVersion">正在读取...</strong>
+          <small id="proReleaseMeta">Pro 数据范围与完整研究能力。</small>
+          <a class="button primary disabled" id="proDownloadLink" href="#" aria-disabled="true"><i data-lucide="download"></i> 下载 Pro</a>
+        </article>
+      </div>
+      <div class="download-command-actions">
+        <button class="icon-button" id="refreshRelease" type="button" aria-label="刷新发行信息">
+          <i data-lucide="rotate-cw" aria-hidden="true"></i>
+        </button>
+        <button class="button secondary" id="logoutButton" type="button">退出登录</button>
+      </div>
+      <div class="download-progress hidden" id="downloadProgress" aria-live="polite">
+        <div class="download-progress-head">
+          <span id="downloadProgressText">准备下载</span>
+          <strong id="downloadProgressPercent">0%</strong>
+        </div>
+        <div class="download-progress-track">
+          <div class="download-progress-bar" id="downloadProgressBar"></div>
+        </div>
+        <small id="downloadProgressMeta">等待连接下载服务。</small>
       </div>
     </section>
 
@@ -142,7 +183,7 @@
       </aside>
 
       <div class="account-main">
-        <article class="account-panel account-license-panel">
+        <article class="account-panel account-license-panel" id="license-console">
           <div class="panel-heading">
             <div>
               <p class="section-kicker">License</p>
@@ -193,36 +234,6 @@
             </ul>
           </article>
 
-          <article class="account-panel">
-            <div class="panel-heading">
-              <div>
-                <p class="section-kicker">Release</p>
-                <h2>客户端下载</h2>
-              </div>
-              <button class="icon-button" id="refreshRelease" type="button" aria-label="刷新发行信息">
-                <i data-lucide="rotate-cw" aria-hidden="true"></i>
-              </button>
-            </div>
-            <div class="release-box" id="releaseBox">
-              <span>最新版本</span>
-              <strong id="releaseVersion">正在读取...</strong>
-              <small id="releaseMeta">连接 Cloudflare API 获取最新发行信息。</small>
-            </div>
-            <div class="download-actions">
-              <a class="button primary disabled" id="downloadLink" href="#" aria-disabled="true">下载客户端</a>
-              <button class="button secondary" id="logoutButton" type="button">退出登录</button>
-            </div>
-            <div class="download-progress hidden" id="downloadProgress" aria-live="polite">
-              <div class="download-progress-head">
-                <span id="downloadProgressText">准备下载</span>
-                <strong id="downloadProgressPercent">0%</strong>
-              </div>
-              <div class="download-progress-track">
-                <div class="download-progress-bar" id="downloadProgressBar"></div>
-              </div>
-              <small id="downloadProgressMeta">等待连接下载服务。</small>
-            </div>
-          </article>
         </section>
       </div>
     </section>

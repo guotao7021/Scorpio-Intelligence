@@ -2629,15 +2629,13 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
 .account-console-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 18px;
+  gap: 32px;
   align-items: stretch;
   margin-bottom: 16px;
-  padding: 30px;
+  padding: 34px 36px;
   border: 1px solid rgba(125, 211, 252, 0.18);
   border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(31, 182, 255, 0.13), transparent 38%),
-    linear-gradient(180deg, rgba(18, 26, 46, 0.94), rgba(8, 13, 25, 0.98));
+  background: #0b1728;
 }
 
 .account-title-block {
@@ -2669,7 +2667,7 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   gap: 8px;
   align-content: center;
   min-width: 0;
-  padding: 20px;
+  padding: 22px;
   border: 1px solid rgba(24, 198, 163, 0.24);
   border-radius: 8px;
   background: rgba(24, 198, 163, 0.08);
@@ -2696,11 +2694,92 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   overflow-wrap: anywhere;
 }
 
+#software-download,
+#license-console { scroll-margin-top: 92px; }
+
+.account-download-command {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.58fr) minmax(0, 1.42fr);
+  gap: 0;
+  align-items: stretch;
+  margin-bottom: 18px;
+  padding: 0;
+  border-top: 1px solid rgba(125, 211, 252, 0.42);
+  border-bottom: 1px solid rgba(125, 211, 252, 0.28);
+  background: #081321;
+}
+
+.download-command-intro {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 16px;
+  align-content: center;
+  padding: 30px;
+  border-right: 1px solid rgba(125, 211, 252, 0.18);
+}
+
+.download-command-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  color: var(--cyan);
+}
+
+.download-command-icon svg { width: 21px; height: 21px; }
+.download-command-intro h2 { margin: 0; color: var(--white); font-size: 26px; line-height: 1.18; }
+.download-command-intro p:not(.section-kicker) { margin: 9px 0 0; color: rgba(244, 241, 248, 0.62); font-size: 12px; line-height: 1.6; }
+
+.release-edition-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 196px;
+}
+
+.release-edition-card {
+  display: grid;
+  grid-template-rows: auto auto minmax(34px, 1fr) auto;
+  gap: 9px;
+  min-height: 196px;
+  padding: 24px;
+  background: #0b1929;
+}
+
+.release-edition-card + .release-edition-card { border-left: 1px solid rgba(125, 211, 252, 0.18); }
+.release-edition-card.is-pro { box-shadow: inset 0 3px 0 var(--gold); background: #0d1c2d; }
+.release-edition-card.loading { opacity: 0.72; }
+.release-edition-card.is-unavailable { background: #091420; }
+.release-edition-card header { display: flex; align-items: center; justify-content: space-between; color: var(--constellation); }
+.release-edition-card header span { font: 800 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.1em; }
+.release-edition-card header svg { width: 17px; height: 17px; color: var(--gold); }
+.release-edition-card > strong { color: var(--white); font-size: 26px; line-height: 1.12; letter-spacing: 0; }
+.release-edition-card > small { color: rgba(244, 241, 248, 0.58); line-height: 1.45; }
+.release-edition-card .button { width: 100%; min-height: 38px; }
+
+.download-command-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  min-height: 66px;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(7, 16, 29, 0.54);
+}
+
+.account-download-command .download-progress { grid-column: 1 / -1; margin: 0 18px 18px; }
+
 .account-status-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 0;
+  margin-bottom: 22px;
+  border: 1px solid var(--line);
+  background: #0a1625;
 }
 
 .account-status-card {
@@ -2708,13 +2787,15 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto auto auto;
   column-gap: 12px;
-  min-height: 130px;
+  min-height: 118px;
   min-width: 0;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(12, 18, 34, 0.92);
+  padding: 19px 20px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
 }
+
+.account-status-card:last-child { border-right: 0; }
 
 .account-status-card svg {
   grid-row: 1 / span 3;
@@ -2740,8 +2821,8 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
 
 .account-console-grid {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 22px;
   align-items: start;
 }
 
@@ -2752,13 +2833,16 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   min-width: 0;
 }
 
+.account-main { order: 1; }
+.account-rail { order: 2; }
+
 .account-panel,
 .account-checklist {
   min-width: 0;
-  padding: 24px;
+  padding: 28px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(18, 26, 46, 0.96), rgba(8, 13, 25, 0.98));
+  background: #0b1728;
 }
 
 .account-panel {
@@ -2820,6 +2904,21 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   margin: 0;
   color: rgba(244, 241, 248, 0.74);
   line-height: 1.7;
+}
+
+.account-license-panel {
+  position: relative;
+  border-top-color: rgba(56, 189, 248, 0.54);
+}
+
+.account-license-panel::before {
+  position: absolute;
+  top: -1px;
+  left: 28px;
+  width: 86px;
+  height: 2px;
+  background: var(--cyan);
+  content: "";
 }
 
 .account-auth-card .auth-tabs {
@@ -2944,8 +3043,8 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   width: 30px;
   height: 30px;
   color: #07101d;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--cyan), var(--teal));
+  border-radius: 6px;
+  background: var(--cyan);
   font-size: 13px;
   font-weight: 900;
 }
@@ -2962,7 +3061,7 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
 
 .account-lower-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 18px;
 }
 
@@ -3022,6 +3121,7 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   }
 
   .account-console-head,
+  .account-download-command,
   .account-console-grid,
   .account-lower-grid,
   .activation-code-picker,
@@ -3030,9 +3130,18 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
     grid-template-columns: 1fr;
   }
 
+  .account-download-command .download-progress { grid-column: 1; }
+  .download-command-intro { border-right: 0; border-bottom: 1px solid rgba(125, 211, 252, 0.18); }
+  .download-command-actions { flex-direction: row; justify-content: flex-end; }
+  .account-main,
+  .account-rail { order: initial; }
+
   .account-status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .account-status-card:nth-child(2) { border-right: 0; }
+  .account-status-card:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
 }
 
 @media (max-width: 640px) {
@@ -3062,10 +3171,18 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   }
 
   .account-status-grid,
+  .release-edition-grid,
   .account-auth-card .auth-tabs,
   .account-console .code-field {
     grid-template-columns: 1fr;
   }
+
+  .release-edition-card + .release-edition-card { border-top: 1px solid rgba(125, 211, 252, 0.18); border-left: 0; }
+  .download-command-intro { padding: 24px 20px; }
+  .download-command-actions { flex-direction: column; align-items: stretch; padding: 14px; }
+  .download-command-actions .icon-button { align-self: flex-end; }
+  .account-status-card { border-right: 0; border-bottom: 1px solid var(--line); }
+  .account-status-card:last-child { border-bottom: 0; }
 
   .account-console .account-button,
   .account-console .code-button,

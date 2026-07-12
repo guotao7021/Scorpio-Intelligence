@@ -10,7 +10,7 @@
     />
     <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="site.css?v=20260711-base" />
-    <link rel="stylesheet" href="home-cinematic.css?v=20260712-05" />
+    <link rel="stylesheet" href="home-cinematic.css?v=20260712-3d-refined" />
     <script
       src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"
       defer
@@ -44,14 +44,28 @@
           aria-hidden="true"
         ></canvas>
         <div class="hero-grid" aria-hidden="true"></div>
-        <img
-          class="hero-workbench"
-          src="assets/scorpio-showcase-fund-risk.png"
-          alt="Sanitized Scorpio Intelligence fund risk research interface"
-          fetchpriority="high"
-        />
-        <div class="hero-signal" aria-hidden="true">
-          <span></span><span></span><span></span>
+        <div
+          class="hero-data-forge"
+          role="img"
+          aria-label="Three-dimensional architecture where market data is cleaned, validated, reasoned over by AI, and turned into traceable research conclusions"
+        >
+          <canvas class="hero-forge-canvas" aria-hidden="true"></canvas>
+          <div class="forge-heading" aria-hidden="true">
+            <span><b></b> COGNITIVE PRODUCTION SYSTEM</span>
+            <em>LIVE / 04 PIPELINES</em>
+          </div>
+          <ol class="forge-stages" aria-hidden="true">
+            <li><span>01</span><strong>Source data</strong><small>INGEST</small></li>
+            <li><span>02</span><strong>Clean & test</strong><small>VERIFY</small></li>
+            <li><span>03</span><strong>AI reasoning</strong><small>REASON</small></li>
+            <li><span>04</span><strong>Closed loop</strong><small>TRACE</small></li>
+          </ol>
+          <div class="forge-core-tag" aria-hidden="true">
+            <span>AI CORE</span><strong>Cognition engine</strong>
+          </div>
+          <div class="forge-output-tag" aria-hidden="true">
+            <span>VERIFIED</span><strong>Traceable result</strong>
+          </div>
         </div>
         <div class="hero-content">
           <p class="eyebrow">
@@ -174,10 +188,11 @@
           </div>
         </div>
         <div
-          class="constellation-map"
+          class="constellation-map constellation-map-3d"
           role="group"
           aria-label="Scorpio Intelligence brand story path"
         >
+          <canvas class="section-3d constellation-3d" data-scene="orbit" aria-hidden="true"></canvas>
           <span class="orbit orbit-one" aria-hidden="true"></span
           ><span class="orbit orbit-two" aria-hidden="true"></span
           ><span class="orbit orbit-three" aria-hidden="true"></span>
@@ -248,7 +263,7 @@
       >
         <div class="method-copy">
           <p class="section-kicker">THE COGNITIVE LOOP</p>
-          <h2>Begin with a question.<br />Close with review.</h2>
+          <h2>Start by understanding the market.<br />Close with review.</h2>
           <p>
             Scorpio does not make the decision for you. It continuously
             organizes questions, hypotheses, evidence, and results while keeping
@@ -260,7 +275,7 @@
           role="group"
           aria-label="Scorpio Intelligence cognition loop"
         >
-          <canvas class="section-3d" data-scene="reasoning" aria-hidden="true"></canvas>
+          <canvas class="section-3d" data-scene="mobius" aria-hidden="true"></canvas>
           <span class="loop-ring loop-ring-a" aria-hidden="true"></span
           ><span class="loop-ring loop-ring-b" aria-hidden="true"></span>
           <div class="loop-core">
@@ -269,8 +284,8 @@
           </div>
           <ol class="method-orbit">
             <li>
-              <i data-lucide="telescope"></i><span>01 / QUESTION</span
-              ><strong>Philosophical question</strong>
+              <i data-lucide="telescope"></i><span>01 / OBSERVE</span
+              ><strong>Market observation</strong>
               <p>What is happening, and which variable truly matters?</p>
             </li>
             <li>
@@ -369,15 +384,37 @@
         <div class="section-head">
           <div>
             <p class="section-kicker">DELIVERY PATH</p>
-            <h2>
-              From seeing the product to finding your own research rhythm.
-            </h2>
+            <h2>A better-fit edition<br />for every depth of research.</h2>
           </div>
           <p>
-            A legible delivery path that does not leave users stranded after
-            download.
+            From individual research to team delivery, capabilities, data scope,
+            and service boundaries stay clearly aligned.
           </p>
         </div>
+        <div class="edition-comparison" aria-label="Scorpio Intelligence edition comparison">
+          <article>
+            <header><i data-lucide="user"></i><span>PERSONAL</span></header>
+            <h3>Personal Standard</h3>
+            <p>For individuals building a consistent research workflow.</p>
+            <ul><li>Core market and asset research workbench</li><li>Standard data scope and stable channel</li><li>Account license, device binding, and updates</li></ul>
+            <a href="account.html#license-console">View license <i data-lucide="arrow-right"></i></a>
+          </article>
+          <article class="is-featured">
+            <header><i data-lucide="brain-circuit"></i><span>ADVANCED</span></header>
+            <h3>Personal Pro</h3>
+            <p>For deep researchers who need full data penetration and review.</p>
+            <ul><li>Complete fund, bond, and portfolio research</li><li>Standard + Pro data scope</li><li>Cloud data sync and priority releases</li></ul>
+            <a href="account.html#software-download">Download Pro client <i data-lucide="arrow-right"></i></a>
+          </article>
+          <article>
+            <header><i data-lucide="building-2"></i><span>DIRECTED</span></header>
+            <h3>Team / Enterprise</h3>
+            <p>For organizations requiring centralized licensing and delivery boundaries.</p>
+            <ul><li>Directed delivery based on the Pro scope</li><li>Central activation-code and device management</li><li>Data scope and release channel agreed per project</li></ul>
+            <a href="mailto:guotao7021@gmail.com">Request assessment <i data-lucide="arrow-right"></i></a>
+          </article>
+        </div>
+        <p class="edition-boundary">Every edition is a research and decision-support tool. No return guarantee, managed investment service, or automated trading instruction is provided.</p>
         <div class="edition-ledger">
           <article>
             <span>01</span>
@@ -439,6 +476,40 @@
             >Read the changelog <i data-lucide="arrow-right"></i
           ></a>
         </div>
+        <div class="delivery-flow" aria-label="Scorpio data production and cloud delivery flow">
+          <div class="delivery-flow-head">
+            <span>COGNITIVE DELIVERY PIPELINE</span><strong>From compute core to the user's decision workflow</strong>
+          </div>
+          <canvas class="section-3d delivery-3d" data-scene="delivery" aria-hidden="true"></canvas>
+          <div class="delivery-rail" aria-hidden="true">
+            <span class="delivery-packet packet-a"></span><span class="delivery-packet packet-b"></span
+            ><span class="delivery-packet packet-c"></span><span class="delivery-packet packet-d"></span>
+          </div>
+          <div class="delivery-stage stage-machine">
+            <span class="stage-index">01 / PRODUCE</span>
+            <div class="machine-shell">
+              <div class="machine-core"><i data-lucide="cpu"></i><small>Analysis core</small></div>
+              <div class="machine-logic"><i data-lucide="git-branch"></i><small>Processing logic</small></div>
+              <span class="machine-pulse pulse-a"></span><span class="machine-pulse pulse-b"></span>
+            </div>
+            <h3>Production compute</h3><p>The core orchestrates processing logic to generate validated result data.</p>
+          </div>
+          <div class="delivery-stage stage-result">
+            <span class="stage-index">02 / PACKAGE</span>
+            <div class="result-stack"><i data-lucide="database"></i><span></span><span></span><span></span></div>
+            <h3>Result dataset</h3><p>Traceable packages are formed by edition, date, and research scope.</p>
+          </div>
+          <div class="delivery-stage stage-cloud">
+            <span class="stage-index">03 / SYNC</span>
+            <div class="cloud-sync"><i data-lucide="cloud"></i><i data-lucide="refresh-cw"></i></div>
+            <h3>Cloud sync</h3><p>Authorized delivery keeps result data consistent across devices.</p>
+          </div>
+          <div class="delivery-stage stage-user">
+            <span class="stage-index">04 / APPLY</span>
+            <div class="user-terminal"><i data-lucide="monitor-check"></i><span class="terminal-line"></span></div>
+            <h3>User retrieval</h3><p>The desktop client pulls results into research and independent decisions.</p>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -468,7 +539,7 @@
       src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"
       defer
     ></script>
-    <script src="home-cinematic.js?v=20260712-06" defer></script>
+    <script src="home-cinematic.js?v=20260712-3d-refined" defer></script>
     <script src="site-analytics.js?v=20260630-analytics" defer></script>
   </body>
 </html>

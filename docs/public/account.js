@@ -3,7 +3,7 @@
   const TOKEN_KEY = "scorpio_user_auth";
   const LICENSE_KEY = "scorpio_user_license";
   const RELEASE_CHANNEL = "stable";
-  const RELEASE_EDITION_PRIORITY = ["personal_pro", "personal_standard"];
+  const RELEASE_EDITIONS = ["personal_standard", "personal_pro"];
 
   const state = loadAuth();
   const licenseState = loadLicenseState();
@@ -40,10 +40,14 @@
     activationCodeMeta: byId("activationCodeMeta"),
     machineFingerprint: byId("machineFingerprint"),
     licenseId: byId("licenseId"),
-    releaseVersion: byId("releaseVersion"),
-    releaseMeta: byId("releaseMeta"),
-    releaseBox: byId("releaseBox"),
-    downloadLink: byId("downloadLink"),
+    standardReleaseVersion: byId("standardReleaseVersion"),
+    standardReleaseMeta: byId("standardReleaseMeta"),
+    standardReleaseBox: byId("standardReleaseBox"),
+    standardDownloadLink: byId("standardDownloadLink"),
+    proReleaseVersion: byId("proReleaseVersion"),
+    proReleaseMeta: byId("proReleaseMeta"),
+    proReleaseBox: byId("proReleaseBox"),
+    proDownloadLink: byId("proDownloadLink"),
     downloadProgress: byId("downloadProgress"),
     downloadProgressText: byId("downloadProgressText"),
     downloadProgressPercent: byId("downloadProgressPercent"),
@@ -68,7 +72,8 @@
     els.statusForm.addEventListener("submit", guard(onCheckLicense, els.licenseMessage));
     els.activationCodeSelect.addEventListener("change", () => selectActivationCode(els.activationCodeSelect.value));
     els.refreshRelease.addEventListener("click", refreshRelease);
-    els.downloadLink.addEventListener("click", guard(downloadRelease, els.authMessage));
+    els.standardDownloadLink.addEventListener("click", guard((event) => downloadRelease("personal_standard", event), els.authMessage));
+    els.proDownloadLink.addEventListener("click", guard((event) => downloadRelease("personal_pro", event), els.authMessage));
     els.logoutButton.addEventListener("click", logout);
     renderSession();
     refreshAccountData();
@@ -294,48 +299,69 @@
   }
 
   async function refreshRelease() {
-    els.releaseBox.classList.add("loading");
     els.releaseState.textContent = "读取中";
-    els.releaseVersion.textContent = "正在读取...";
-    els.releaseMeta.textContent = "连接 Cloudflare API 获取最新发行信息。";
+    RELEASE_EDITIONS.forEach((edition) => setReleaseLoading(edition));
     if (!state.access_token) {
-      state.current_release = null;
+      state.current_releases = {};
       els.releaseState.textContent = "待登录";
-      els.releaseVersion.textContent = "登录后加载";
-      els.releaseMeta.textContent = "请先登录用户中心，系统会按账号授权开放对应安装包。";
-      els.downloadLink.href = "#";
-      els.downloadLink.classList.add("disabled");
-      els.downloadLink.setAttribute("aria-disabled", "true");
-      els.releaseBox.classList.remove("loading");
+      RELEASE_EDITIONS.forEach((edition) => renderReleaseUnavailable(edition, "登录后加载", "请先登录，系统将分别校验对应版本的下载权益。"));
       return;
     }
-    try {
-      await ensureCurrentLicenseLoaded();
-      const data = await fetchLatestReleaseForAccount();
-      state.current_release = data;
-      els.releaseVersion.textContent = data.version || data.latest_version || "--";
-      const editionText = releaseEditionLabel(data.edition || data.requested_edition);
-      els.releaseMeta.textContent = data.release_notes
-        ? `${editionText} · ${data.release_notes}`
-        : `${editionText} · 发布时间：${data.release_date || "未提供"}`;
-      if (data.download_available && data.download_endpoint) {
-        els.releaseState.textContent = "可下载";
-        els.downloadLink.href = "#";
-        els.downloadLink.classList.remove("disabled");
-        els.downloadLink.removeAttribute("aria-disabled");
-      } else {
-        els.releaseState.textContent = "暂无下载";
-        els.downloadLink.href = "#";
-        els.downloadLink.classList.add("disabled");
-        els.downloadLink.setAttribute("aria-disabled", "true");
+    await ensureCurrentLicenseLoaded();
+    state.current_releases = {};
+    const results = await Promise.all(RELEASE_EDITIONS.map(async (edition) => {
+      try {
+        const data = await fetchLatestRelease(edition);
+        state.current_releases[edition] = data;
+        renderRelease(edition, data);
+        return Boolean(data.download_available && data.download_endpoint);
+      } catch (error) {
+        renderReleaseUnavailable(edition, "不可下载", userFacingReleaseError(error));
+        return false;
       }
-    } catch (error) {
-      els.releaseState.textContent = "暂不可用";
-      els.releaseVersion.textContent = "暂不可用";
-      els.releaseMeta.textContent = userFacingReleaseError(error);
-    } finally {
-      els.releaseBox.classList.remove("loading");
-    }
+    }));
+    const availableCount = results.filter(Boolean).length;
+    els.releaseState.textContent = availableCount ? `${availableCount} 个版本可下载` : "暂无下载权益";
+  }
+
+  function releaseUi(edition) {
+    return edition === "personal_pro"
+      ? { box: els.proReleaseBox, version: els.proReleaseVersion, meta: els.proReleaseMeta, link: els.proDownloadLink }
+      : { box: els.standardReleaseBox, version: els.standardReleaseVersion, meta: els.standardReleaseMeta, link: els.standardDownloadLink };
+  }
+
+  function setReleaseLoading(edition) {
+    const ui = releaseUi(edition);
+    ui.box.classList.add("loading");
+    ui.version.textContent = "正在读取...";
+    ui.meta.textContent = `连接 ${releaseEditionLabel(edition)} 稳定发行通道。`;
+    setReleaseLinkState(ui.link, false);
+  }
+
+  function renderRelease(edition, data) {
+    const ui = releaseUi(edition);
+    ui.box.classList.remove("loading", "is-unavailable");
+    ui.version.textContent = data.version || data.latest_version || "--";
+    ui.meta.textContent = data.release_notes
+      ? data.release_notes
+      : `发布时间：${data.release_date || "未提供"}`;
+    setReleaseLinkState(ui.link, Boolean(data.download_available && data.download_endpoint));
+  }
+
+  function renderReleaseUnavailable(edition, versionText, message) {
+    const ui = releaseUi(edition);
+    ui.box.classList.remove("loading");
+    ui.box.classList.add("is-unavailable");
+    ui.version.textContent = versionText;
+    ui.meta.textContent = message;
+    setReleaseLinkState(ui.link, false);
+  }
+
+  function setReleaseLinkState(link, enabled) {
+    link.href = "#";
+    link.classList.toggle("disabled", !enabled);
+    if (enabled) link.removeAttribute("aria-disabled");
+    else link.setAttribute("aria-disabled", "true");
   }
 
   async function refreshAccountData() {
@@ -352,36 +378,13 @@
     }
   }
 
-  async function fetchLatestReleaseForAccount() {
-    const candidates = releaseEditionCandidates();
-    const errors = [];
-    for (const edition of candidates) {
-      try {
-        const data = await request(`/releases/latest?edition=${encodeURIComponent(edition)}&channel=${RELEASE_CHANNEL}`, {
-          method: "GET",
-          auth: true,
-        });
-        data.requested_edition = edition;
-        return data;
-      } catch (error) {
-        errors.push({ edition, error });
-        if (!isFallbackReleaseError(error)) {
-          throw error;
-        }
-      }
-    }
-    const detail = errors
-      .map((item) => `${releaseEditionLabel(item.edition)}: ${item.error.message || item.error.status || "不可用"}`)
-      .join("；");
-    throw new Error(detail || "当前账号暂无可下载的客户端安装包。");
-  }
-
-  function releaseEditionCandidates() {
-    const licensedEdition = isLicenseStateForCurrentUser() ? normalizeReleaseEdition(licenseState.edition) : "";
-    if (licensedEdition) {
-      return [licensedEdition];
-    }
-    return RELEASE_EDITION_PRIORITY.slice();
+  async function fetchLatestRelease(edition) {
+    const data = await request(`/releases/latest?edition=${encodeURIComponent(edition)}&channel=${RELEASE_CHANNEL}`, {
+      method: "GET",
+      auth: true,
+    });
+    data.requested_edition = edition;
+    return data;
   }
 
   function normalizeReleaseEdition(value) {
@@ -392,7 +395,7 @@
       personal: "personal_standard",
     };
     const normalized = aliases[edition] || edition;
-    return RELEASE_EDITION_PRIORITY.includes(normalized) ? normalized : "";
+    return RELEASE_EDITIONS.includes(normalized) ? normalized : "";
   }
 
   function releaseEditionLabel(value) {
@@ -400,10 +403,6 @@
     if (edition === "personal_pro") return "Personal Pro";
     if (edition === "personal_standard") return "Personal Standard";
     return "当前版本";
-  }
-
-  function isFallbackReleaseError(error) {
-    return [403, 404].includes(Number(error && error.status));
   }
 
   function userFacingReleaseError(error) {
@@ -417,21 +416,22 @@
     return message || "发行信息读取失败。";
   }
 
-  async function downloadRelease(event) {
+  async function downloadRelease(edition, event) {
     if (event && typeof event.preventDefault === "function") {
       event.preventDefault();
     }
     requireLogin();
-    const release = state.current_release || {};
+    const release = (state.current_releases && state.current_releases[edition]) || {};
+    const downloadLink = releaseUi(edition).link;
     if (!release.download_available || !release.download_endpoint) {
-      throw new Error("当前账号暂无可下载的客户端安装包。");
+      throw new Error(`当前账号暂无 ${releaseEditionLabel(edition)} 下载权益。`);
     }
-    els.downloadLink.classList.add("loading");
-    els.downloadLink.setAttribute("aria-disabled", "true");
+    downloadLink.classList.add("loading");
+    downloadLink.setAttribute("aria-disabled", "true");
     setDownloadProgress({
       visible: true,
       percent: 0,
-      text: "正在连接下载服务",
+      text: `正在连接 ${releaseEditionLabel(edition)} 下载服务`,
       meta: release.file_size_bytes ? `安装包大小 ${formatBytes(release.file_size_bytes)}` : "正在获取安装包大小。",
     });
     setMessage(els.authMessage, "正在下载客户端安装包，请保持页面打开。", "loading");
@@ -445,7 +445,7 @@
       if (response.status === 401 && state.refresh_token) {
         const refreshed = await refreshToken();
         if (refreshed) {
-          return downloadRelease(event);
+          return downloadRelease(edition, event);
         }
       }
       if (!response.ok) {
@@ -478,8 +478,8 @@
       URL.revokeObjectURL(url);
       setMessage(els.authMessage, "安装包已下载完成，浏览器正在保存文件。", "success");
     } finally {
-      els.downloadLink.classList.remove("loading");
-      els.downloadLink.removeAttribute("aria-disabled");
+      downloadLink.classList.remove("loading");
+      if (release.download_available && release.download_endpoint) downloadLink.removeAttribute("aria-disabled");
     }
   }
 
@@ -597,7 +597,7 @@
     state.refresh_token = "";
     state.email = "";
     state.user_id = "";
-    state.current_release = null;
+    state.current_releases = {};
     saveAuth();
     clearLicenseState();
     clearLicenseFields();
