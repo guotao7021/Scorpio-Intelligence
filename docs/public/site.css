@@ -6336,3 +6336,33 @@ body.language-hub::after {
     display: block;
   }
 }
+
+/* Final structural pass: widen the footing and progressively tighten each bay. */
+.column-a { left: 12%; }
+.column-b { left: 31%; }
+.column-c { left: 50%; }
+.column-d { left: 69%; }
+.column-e { left: 88%; }
+
+.column-f { left: 24%; }
+.column-g { left: 37%; }
+.column-h { left: 50%; }
+.column-i { left: 63%; }
+.column-j { left: 76%; }
+
+.column-k { left: 31%; }
+.column-l { left: 40.5%; }
+.column-m { left: 50%; }
+.column-n { left: 59.5%; }
+.column-o { left: 69%; }
+
+.column-p { left: 37%; }
+.column-q { left: 43.5%; }
+.column-r { left: 50%; }
+.column-s { left: 56.5%; }
+.column-t { left: 63%; }
+
+.floor-1 { --floor-width: 572px; }
+.floor-2 { --floor-width: 472px; }
+.floor-3 { --floor-width: 390px; }
+.floor-4 { --floor-width: 308px; }
