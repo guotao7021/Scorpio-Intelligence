@@ -7,7 +7,13 @@
   <meta name="description" content="Scorpio Intelligence 用户中心：账号登录、授权激活、客户端下载与桌面端数据同步入口。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="site.css?v=20260712-split-releases">
+  <script>
+    if (new URLSearchParams(window.location.search).get("lang") === "en") {
+      document.documentElement.lang = "en";
+    }
+  </script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  <script src="account-i18n.js?v=20260718-en" defer></script>
   <script src="account.js?v=20260712-split-releases" defer></script>
 </head>
 <body class="account-page">

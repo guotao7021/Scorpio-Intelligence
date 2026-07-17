@@ -1139,6 +1139,16 @@ body.observatory-page {
 .edition-comparison a svg { width: 15px; height: 15px; }
 .edition-boundary { margin: 0 0 42px; color: #6f839d; font-size: 11px; line-height: 1.6; }
 
+.edition-matrix { margin: 0 0 18px; border: 1px solid var(--home-line); background: rgba(6, 17, 31, 0.34); }
+.edition-matrix-label { margin: 0; padding: 13px 16px; border-bottom: 1px solid var(--home-line); color: var(--gold); font: 700 9px/1 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.14em; }
+.edition-matrix-row { display: grid; grid-template-columns: 0.72fr repeat(3, 1fr); border-bottom: 1px solid var(--home-line); }
+.edition-matrix-row:last-child { border-bottom: 0; }
+.edition-matrix-row span { min-height: 56px; padding: 13px 16px; border-right: 1px solid var(--home-line); color: #b7c7da; font-size: 12px; line-height: 1.5; }
+.edition-matrix-row span:last-child { border-right: 0; }
+.edition-matrix-row span:first-child { color: var(--home-muted); font-size: 11px; font-weight: 750; }
+.edition-matrix-head span { min-height: 42px; color: var(--white); font-size: 11px; font-weight: 750; }
+.edition-matrix-head span:first-child { color: var(--gold); }
+
 .edition-ledger { border-top: 1px solid var(--home-line-strong); }
 .edition-ledger article { display: grid; grid-template-columns: 72px minmax(0, 1fr) 40px; gap: 22px; align-items: center; min-height: 122px; padding: 22px 16px; border-bottom: 1px solid var(--home-line); transition: background 180ms ease; }
 .edition-ledger article:hover { background: var(--home-surface); }
@@ -1377,6 +1387,8 @@ body.observatory-page {
   .story-manifesto { grid-template-columns: 1fr; }
   .edition-comparison { grid-template-columns: 1fr; }
   .edition-comparison article { min-height: 320px; }
+  .edition-matrix-row { grid-template-columns: 0.7fr repeat(3, 1fr); }
+  .edition-matrix-row span { padding: 11px 10px; font-size: 11px; }
   .delivery-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .delivery-3d { height: 300px; }
   .delivery-stage:nth-of-type(odd) { border-right: 0; }
