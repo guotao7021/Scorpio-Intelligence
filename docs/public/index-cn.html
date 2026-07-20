@@ -89,9 +89,14 @@
             <a class="button primary" href="account.html"
               ><i data-lucide="arrow-up-right"></i> 进入用户中心</a
             >
-            <a class="button secondary" href="#experience"
-              ><i data-lucide="play"></i> 观看工作台</a
+            <button
+              class="button secondary"
+              type="button"
+              data-product-video
+              aria-haspopup="dialog"
             >
+              <i data-lucide="play"></i> 观看产品介绍
+            </button>
           </div>
           <p class="hero-note">
             研究辅助与决策支持工具，不构成投资建议、收益承诺或交易指令。
@@ -479,6 +484,48 @@
         </div>
       </section>
     </main>
+
+    <dialog
+      class="product-video-dialog"
+      data-product-video-dialog
+      aria-labelledby="product-video-title"
+    >
+      <div class="product-video-dialog__shell">
+        <header class="product-video-dialog__header">
+          <div>
+            <p class="section-kicker">PRODUCT FILM / 01</p>
+            <h2 id="product-video-title">Scorpio Intelligence 产品介绍</h2>
+            <p>从市场理解到研究行动，快速了解完整产品工作流。</p>
+          </div>
+          <button
+            class="product-video-dialog__close"
+            type="button"
+            data-product-video-close
+            aria-label="关闭产品介绍"
+            title="关闭"
+          >
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <video
+          class="product-video-dialog__video"
+          controls
+          preload="metadata"
+          playsinline
+          poster="assets/scorpio-workbench-preview.png"
+        >
+          <source
+            src="assets/Scorpio_Intelligence_Product_Introduction.mp4"
+            type="video/mp4"
+          />
+          当前浏览器不支持视频播放，请直接打开产品介绍视频。
+        </video>
+        <div class="product-video-dialog__meta">
+          <span>SCORPIO INTELLIGENCE</span>
+          <span>带字幕产品介绍</span>
+        </div>
+      </div>
+    </dialog>
 
     <footer class="site-footer observatory-footer">
       <div class="footer-brand">

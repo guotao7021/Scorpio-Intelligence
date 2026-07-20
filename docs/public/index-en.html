@@ -91,11 +91,16 @@
             why it matters, and what to review next.
           </p>
           <div class="hero-actions">
-            <a class="button primary" href="#experience"
-              ><i data-lucide="play"></i> Explore a research brief</a
-            ><a class="button secondary" href="#editions"
-              ><i data-lucide="arrow-up-right"></i> Compare editions</a
+            <a class="button primary" href="account.html"
+              ><i data-lucide="arrow-up-right"></i> Enter account center</a
+            ><button
+              class="button secondary"
+              type="button"
+              data-product-video
+              aria-haspopup="dialog"
             >
+              <i data-lucide="play"></i> Watch product introduction
+            </button>
           </div>
           <p class="hero-note">
             A research and decision-support tool. It is not investment advice, a
@@ -532,6 +537,48 @@
         </div>
       </section>
     </main>
+
+    <dialog
+      class="product-video-dialog"
+      data-product-video-dialog
+      aria-labelledby="product-video-title"
+    >
+      <div class="product-video-dialog__shell">
+        <header class="product-video-dialog__header">
+          <div>
+            <p class="section-kicker">PRODUCT FILM / 01</p>
+            <h2 id="product-video-title">Scorpio Intelligence product introduction</h2>
+            <p>See how market understanding becomes a traceable research workflow.</p>
+          </div>
+          <button
+            class="product-video-dialog__close"
+            type="button"
+            data-product-video-close
+            aria-label="Close product introduction"
+            title="Close"
+          >
+            <i data-lucide="x"></i>
+          </button>
+        </header>
+        <video
+          class="product-video-dialog__video"
+          controls
+          preload="metadata"
+          playsinline
+          poster="assets/scorpio-workbench-preview.png"
+        >
+          <source
+            src="assets/Scorpio_Intelligence_Product_Introduction.mp4"
+            type="video/mp4"
+          />
+          Your browser does not support video playback. Open the product film directly instead.
+        </video>
+        <div class="product-video-dialog__meta">
+          <span>SCORPIO INTELLIGENCE</span>
+          <span>Captioned product film</span>
+        </div>
+      </div>
+    </dialog>
 
     <footer class="site-footer observatory-footer">
       <div class="footer-brand">

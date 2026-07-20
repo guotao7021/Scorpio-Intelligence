@@ -183,6 +183,39 @@
     });
   }
 
+  function initProductVideo() {
+    const dialog = document.querySelector("[data-product-video-dialog]");
+    const video = dialog?.querySelector("video");
+    const launchers = document.querySelectorAll("[data-product-video]");
+    const closeButton = dialog?.querySelector("[data-product-video-close]");
+    if (!dialog || !video || !launchers.length) return;
+
+    const closeDialog = () => {
+      if (dialog.open) dialog.close();
+      video.pause();
+      video.currentTime = 0;
+    };
+
+    launchers.forEach((launcher) => {
+      launcher.addEventListener("click", () => {
+        if (typeof dialog.showModal !== "function") {
+          window.open(video.currentSrc || video.querySelector("source")?.src, "_blank", "noopener");
+          return;
+        }
+        dialog.showModal();
+      });
+    });
+
+    closeButton?.addEventListener("click", closeDialog);
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) closeDialog();
+    });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeDialog();
+    });
+  }
+
   async function initHeroDataForge() {
     const canvas = document.querySelector(".hero-forge-canvas");
     const host = canvas?.closest(".hero-data-forge");
@@ -1145,6 +1178,7 @@
     initHeroDataForge();
     initThreeScenes();
     initProductCarousel();
+    initProductVideo();
     initRevealMotion();
     initGsapMotion();
   });
