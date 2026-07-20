@@ -8,6 +8,8 @@ const TEXT_HEADERS = {
   "content-type": "text/plain; charset=utf-8",
 };
 
+const DEFAULT_PUBLIC_PRODUCT_VIDEO_R2_KEY = "产品介绍/Scorpio_Intelligence_Product_Introduction.mp4";
+
 const REAL_USER_SQL_FILTER = `
   LOWER(COALESCE(u.email, '')) NOT LIKE '%@example.com'
   AND LOWER(COALESCE(u.email, '')) NOT LIKE '%+cf%@%'
@@ -31,6 +33,12 @@ export default {
 
     try {
       if (!handler) {
+        if (
+          (request.method === "GET" || request.method === "HEAD") &&
+          path === "/v1/site/product-video"
+        ) {
+          return withCors(await servePublicProductVideo({ request, env }), corsHeaders);
+        }
         if (request.method === "GET" && path.startsWith("/v1/license/download/")) {
           const licenseId = decodeURIComponent(path.slice("/v1/license/download/".length)).trim();
           return withCors(await downloadLicenseFile({ request, env, licenseId }), corsHeaders);
@@ -2330,7 +2338,7 @@ function cors(request, env) {
   const allowOrigin = allowed.length === 0 || allowed.includes(origin) ? origin || "*" : allowed[0];
   return {
     "access-control-allow-origin": allowOrigin,
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,HEAD,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "authorization,content-type,x-admin-token,x-scorpio-timestamp,x-scorpio-nonce,x-scorpio-signature",
     "access-control-max-age": "86400",
     vary: "Origin",
@@ -4558,6 +4566,75 @@ async function downloadReleaseFile(ctx) {
     return Response.redirect(downloadUrl, 302);
   }
   return json({ error: "release_download_not_configured" }, 404);
+}
+
+async function servePublicProductVideo({ request, env }) {
+  if (!env.RELEASE_BUCKET) {
+    return json({ error: "release_bucket_not_configured" }, 500);
+  }
+
+  const key = safeText(
+    env.PUBLIC_PRODUCT_VIDEO_R2_KEY || DEFAULT_PUBLIC_PRODUCT_VIDEO_R2_KEY,
+    1024
+  );
+  const metadata = await env.RELEASE_BUCKET.head(key);
+  if (!metadata) {
+    return json({ error: "product_video_not_found" }, 404);
+  }
+
+  const size = Number(metadata.size || 0);
+  const headers = new Headers();
+  headers.set("content-type", metadata.httpMetadata?.contentType || "video/mp4");
+  headers.set("accept-ranges", "bytes");
+  headers.set("cache-control", `public, max-age=${positiveInteger(env.PUBLIC_PRODUCT_VIDEO_CACHE_SECONDS, 86400, 31536000)}`);
+  headers.set("content-disposition", 'inline; filename="Scorpio_Intelligence_Product_Introduction.mp4"');
+  headers.set("x-content-type-options", "nosniff");
+  if (metadata.httpEtag) headers.set("etag", metadata.httpEtag);
+  if (metadata.uploaded instanceof Date) headers.set("last-modified", metadata.uploaded.toUTCString());
+
+  let status = 200;
+  let object = null;
+  const rangeHeader = request.headers.get("Range");
+  if (rangeHeader && size > 0) {
+    const range = parseSingleByteRange(rangeHeader, size);
+    if (!range) {
+      headers.set("content-range", `bytes */${size}`);
+      return new Response(null, { status: 416, headers });
+    }
+    object = await env.RELEASE_BUCKET.get(key, {
+      range: { offset: range.start, length: range.end - range.start + 1 },
+    });
+    if (!object) return json({ error: "product_video_not_found" }, 404);
+    status = 206;
+    headers.set("content-range", `bytes ${range.start}-${range.end}/${size}`);
+    headers.set("content-length", String(range.end - range.start + 1));
+  } else {
+    headers.set("content-length", String(size));
+    if (request.method === "GET") {
+      object = await env.RELEASE_BUCKET.get(key);
+      if (!object) return json({ error: "product_video_not_found" }, 404);
+    }
+  }
+
+  return new Response(request.method === "HEAD" ? null : object?.body, { status, headers });
+}
+
+function parseSingleByteRange(value, size) {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(String(value || "").trim());
+  if (!match || (!match[1] && !match[2])) return null;
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isInteger(suffixLength) || suffixLength <= 0) return null;
+    return { start: Math.max(size - suffixLength, 0), end: size - 1 };
+  }
+
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isInteger(start) || !Number.isInteger(requestedEnd) || start < 0 || start >= size || requestedEnd < start) {
+    return null;
+  }
+  return { start, end: Math.min(requestedEnd, size - 1) };
 }
 
 async function recordReleaseDownload(env, request, options) {
