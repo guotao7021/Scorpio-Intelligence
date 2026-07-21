@@ -79,6 +79,11 @@
       feedback_description_required: "请填写详细说明。",
       email_invalid: "邮箱格式不正确。",
       invalid_json: "提交内容格式异常，请刷新页面后重试。",
+      turnstile_token_required: "请先完成安全验证后再提交。",
+      turnstile_verification_failed: "安全验证未通过，请刷新后重新验证。",
+      turnstile_verification_unavailable: "安全验证服务暂不可用，请稍后重试。",
+      turnstile_verification_not_configured: "反馈服务正在维护中，请稍后重试。",
+      feedback_ip_rate_limited: "提交过于频繁，请稍后再试。",
     };
     return map[code] || `提交失败：${code}`;
   }

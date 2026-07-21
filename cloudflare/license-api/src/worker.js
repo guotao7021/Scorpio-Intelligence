@@ -243,6 +243,19 @@ route("POST", "/v1/auth/send-code", async (ctx) => {
     return json({ error: "email_exists" }, 409);
   }
 
+  await enforcePublicRateLimit(ctx.env, {
+    scope: "auth_code_ip",
+    subject: clientIp(ctx.request) || "unknown",
+    limit: intEnv(ctx.env.AUTH_CODE_IP_RATE_LIMIT_PER_HOUR, 10),
+    windowSeconds: 60 * 60,
+  });
+  await enforcePublicRateLimit(ctx.env, {
+    scope: "auth_code_email",
+    subject: email,
+    limit: intEnv(ctx.env.AUTH_CODE_EMAIL_RATE_LIMIT_PER_HOUR, 3),
+    windowSeconds: 60 * 60,
+  });
+
   const code = sixDigitCode();
   const now = nowIso();
   const expiresAt = new Date(Date.now() + intEnv(ctx.env.AUTH_CODE_TTL_SECONDS, 600) * 1000).toISOString();
@@ -764,6 +777,13 @@ route("POST", "/v1/usage/report", async (ctx) => {
 
 route("POST", "/v1/feedback", async (ctx) => {
   const body = await readJson(ctx.request);
+  await enforcePublicRateLimit(ctx.env, {
+    scope: "feedback_ip",
+    subject: clientIp(ctx.request) || "unknown",
+    limit: intEnv(ctx.env.FEEDBACK_RATE_LIMIT_PER_HOUR, 5),
+    windowSeconds: 60 * 60,
+  });
+  await verifyTurnstileToken(ctx.env, body.turnstile_token, ctx.request);
   const item = normalizeFeedbackSubmission(body);
   const now = nowIso();
   const publicId = `FB-${Date.now().toString(36).toUpperCase()}-${randomToken(4).toUpperCase()}`;
@@ -2640,6 +2660,70 @@ async function enforceAnalysisRateLimit(env, user) {
     await env.DB.prepare("DELETE FROM analysis_rate_limits WHERE updated_at < ?")
       .bind(new Date(now - 24 * 60 * 60 * 1000).toISOString())
       .run();
+  }
+}
+
+async function enforcePublicRateLimit(env, options) {
+  if (!env.DB || !options) {
+    return;
+  }
+  const limit = Number(options.limit || 0);
+  const windowSeconds = Number(options.windowSeconds || 0);
+  if (!Number.isFinite(limit) || limit < 1 || !Number.isFinite(windowSeconds) || windowSeconds < 1) {
+    return;
+  }
+  const now = Date.now();
+  const bucketMilliseconds = Math.floor(now / (windowSeconds * 1000)) * windowSeconds * 1000;
+  const scope = safeText(options.scope || "public", 64) || "public";
+  const subject = safeText(options.subject || "unknown", 256) || "unknown";
+  const key = `${scope}:${subject}:${bucketMilliseconds}`;
+  const updatedAt = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO public_rate_limits (key, bucket_start, count, updated_at)
+     VALUES (?, ?, 1, ?)
+     ON CONFLICT(key) DO UPDATE SET count = count + 1, updated_at = excluded.updated_at`
+  )
+    .bind(key, bucketMilliseconds, updatedAt)
+    .run();
+  const row = await env.DB.prepare("SELECT count FROM public_rate_limits WHERE key = ?")
+    .bind(key)
+    .first();
+  if (Number(row && row.count) > limit) {
+    throwHttp(429, `${scope}_rate_limited`);
+  }
+  if (Math.random() < 0.02) {
+    await env.DB.prepare("DELETE FROM public_rate_limits WHERE updated_at < ?")
+      .bind(new Date(now - 24 * 60 * 60 * 1000).toISOString())
+      .run();
+  }
+}
+
+async function verifyTurnstileToken(env, value, request) {
+  const token = safeText(value || "", 4096);
+  if (!token) {
+    throwHttp(400, "turnstile_token_required");
+  }
+  const secretKey = String(env.FEEDBACK_TURNSTILE_SECRET || env.TURNSTILE_SECRET_KEY || "").trim();
+  if (!secretKey) {
+    throwHttp(503, "turnstile_verification_not_configured");
+  }
+  const form = new FormData();
+  form.set("secret", secretKey);
+  form.set("response", token);
+  const remoteIp = clientIp(request);
+  if (remoteIp) {
+    form.set("remoteip", remoteIp);
+  }
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throwHttp(502, "turnstile_verification_unavailable");
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!result || result.success !== true) {
+    throwHttp(403, "turnstile_verification_failed");
   }
 }
 
