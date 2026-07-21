@@ -493,7 +493,7 @@
       `v${String(row.version || "").replace(/^v/i, "")}`,
       row.channel || "-",
       row.edition || "-",
-      shortText(row.r2_key || row.download_url || "-", 46),
+      shortText(row.r2_key || row.hk_download_url || row.download_url || "-", 46),
       shortText(row.file_name || "-", 28),
       formatBytes(row.file_size_bytes),
       row.download_count || 0,

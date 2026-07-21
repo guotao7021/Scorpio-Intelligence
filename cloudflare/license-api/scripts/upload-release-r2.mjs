@@ -27,6 +27,7 @@ runWrangler([
   file,
   "--content-type",
   contentType,
+  "--remote",
 ]);
 
 if (apiBase) {
@@ -113,7 +114,7 @@ function runWrangler(argv) {
   const command = process.platform === "win32" ? "npx.cmd" : "npx";
   const result = spawnSync(command, ["wrangler", ...argv], {
     stdio: "inherit",
-    shell: false,
+    shell: process.platform === "win32",
   });
   if (result.status !== 0) {
     throw new Error(`wrangler failed with exit code ${result.status}`);

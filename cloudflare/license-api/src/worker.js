@@ -2004,7 +2004,7 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
   const where = [];
   const params = [];
-  addListTextSearch(where, params, ["version", "release_notes", "download_url", "r2_key", "file_name"], options.q);
+  addListTextSearch(where, params, ["version", "release_notes", "download_url", "hk_download_url", "r2_key", "file_name"], options.q);
   if (options.edition) {
     where.push("edition = ?");
     params.push(options.edition);
@@ -2016,7 +2016,7 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM release_versions ${filter}`).bind(...params).first();
   const rows = await ctx.env.DB.prepare(
-    `SELECT id, version, channel, edition, release_notes, download_url, r2_key, file_name,
+    `SELECT id, version, channel, edition, release_notes, download_url, hk_download_url, r2_key, file_name,
             content_type, file_hash_sha256, file_size_bytes, is_required, released_at,
             uploaded_at, download_count, is_active
      FROM release_versions

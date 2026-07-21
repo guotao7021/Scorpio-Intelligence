@@ -9,7 +9,8 @@
     "d1:create": "wrangler d1 create scorpio-license-db",
     "d1:migrate:local": "wrangler d1 migrations apply scorpio-license-db --local",
     "d1:migrate:remote": "wrangler d1 migrations apply scorpio-license-db --remote",
-    "release:upload": "node scripts/upload-release-r2.mjs"
+    "release:upload": "node scripts/upload-release-r2.mjs",
+    "release:publish-dual": "node scripts/publish-dual-release.mjs"
   },
   "dependencies": {
     "@noble/curves": "^1.9.0"
