@@ -1375,11 +1375,12 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
          WHERE event_date >= ?`
       ).bind(today).first(),
       ctx.env.DB.prepare(
-        `SELECT COALESCE(SUM(visit_count), 0) AS visits_24h,
-                COALESCE(SUM(unique_visitor_count), 0) AS unique_visitors_24h
-         FROM site_page_daily
-         WHERE event_date >= ?`
-      ).bind(today).first(),
+        `SELECT COUNT(*) AS visits_total,
+                COUNT(DISTINCT visitor_hash) AS unique_visitors_total,
+                SUM(CASE WHEN event_date = ? THEN 1 ELSE 0 END) AS visits_today,
+                COUNT(DISTINCT CASE WHEN event_date = ? THEN visitor_hash END) AS unique_visitors_today
+         FROM site_visit_events`
+      ).bind(today, today).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total_24h,
                 SUM(CASE WHEN status IN ('ok', 'contract_ready', 'compute_proxy') THEN 0 ELSE 1 END) AS exceptions_24h,
@@ -1439,8 +1440,13 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
     },
     release_latest_released_at: (releases && releases.latest_released_at) || "",
     site: {
-      visits_24h: numberField(visits, "visits_24h"),
-      unique_visitors_24h: numberField(visits, "unique_visitors_24h"),
+      visits_total: numberField(visits, "visits_total"),
+      unique_visitors_total: numberField(visits, "unique_visitors_total"),
+      visits_today: numberField(visits, "visits_today"),
+      unique_visitors_today: numberField(visits, "unique_visitors_today"),
+      // Keep the legacy names for older admin pages during the deployment transition.
+      visits_24h: numberField(visits, "visits_today"),
+      unique_visitors_24h: numberField(visits, "unique_visitors_today"),
     },
     analysis: {
       total_24h: numberField(analysis, "total_24h"),
@@ -4957,12 +4963,19 @@ async function recordSiteVisit(env, request, body) {
   const uaHash = await sha256Hex(ua);
   const eventId = safeText(body.event_id || "", 80) || `visit_${Date.now().toString(36)}_${randomToken(8)}`;
 
-  await env.DB.prepare(
+  const eventWrite = await env.DB.prepare(
     `INSERT OR IGNORE INTO site_visit_events
      (event_id, event_date, page_path, page_title, language, referrer_host,
       visitor_hash, user_agent_hash, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(eventId, date, pagePath, pageTitle, language, referrerHost, visitorHash, uaHash, now).run();
+
+  // The browser can retry a beacon. Only a newly written source event may update
+  // derived daily aggregates, otherwise a duplicate event_id inflates the count.
+  if (!numberField(eventWrite.meta, "changes")) {
+    return { ok: true, duplicate: true };
+  }
+
   await env.DB.prepare(
     `INSERT OR IGNORE INTO site_unique_visitors
      (event_date, page_path, visitor_hash, first_seen_at)
