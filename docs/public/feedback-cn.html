@@ -6,9 +6,8 @@
   <title>反馈与问卷 | Scorpio Intelligence</title>
   <meta name="description" content="提交 Scorpio Intelligence 的 bug、体验反馈、问题咨询和用户问卷。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260621-feedback-system">
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-  <script src="feedback.js?v=20260710-turnstile" defer></script>
+  <link rel="stylesheet" href="site.css?v=20260722-feedback-regional-security">
+  <script src="feedback.js?v=20260722-feedback-regional-security" defer></script>
 </head>
 <body class="feedback-page">
   <header class="site-header">
@@ -98,8 +97,17 @@
             <textarea name="description" rows="7" maxlength="5000" placeholder="请写清楚操作步骤、预期结果、实际结果；问卷类可以写使用场景和真实感受。" required></textarea>
           </label>
           <label>联系邮箱
-            <input name="contact_email" type="email" autocomplete="email" placeholder="可选，用于后续答复">
+            <input name="contact_email" type="email" autocomplete="email" placeholder="大陆用户需用于安全验证；其他地区可选">
           </label>
+          <div class="feedback-email-verification wide" id="feedbackEmailVerification" hidden>
+            <label>邮箱验证码
+              <div class="feedback-code-row">
+                <input name="feedback_verification_code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="输入邮件中的 6 位验证码">
+                <button class="button secondary" id="feedbackSendCode" type="button">发送验证码</button>
+              </div>
+            </label>
+            <p>为保障中国大陆用户可正常提交反馈，我们使用邮箱验证码替代 Turnstile；验证码 10 分钟内有效。</p>
+          </div>
           <label>版本 / 构建号
             <input name="client_version" type="text" maxlength="80" placeholder="例如 v0.1.24">
           </label>
@@ -138,12 +146,14 @@
         </div>
 
         <input name="page_url" type="hidden">
-        <div class="feedback-turnstile">
-          <div
-            class="cf-turnstile"
-            data-sitekey="0x4AAAAAADzKKGiOMI-xdBUr"
-            data-response-field-name="turnstile_token"
-          ></div>
+        <input name="turnstile_token" type="hidden">
+        <div class="feedback-honeypot" aria-hidden="true">
+          <label>公司官网
+            <input name="company_website" type="text" tabindex="-1" autocomplete="off">
+          </label>
+        </div>
+        <div class="feedback-turnstile" id="feedbackTurnstile" hidden>
+          <div id="feedbackTurnstileWidget"></div>
         </div>
         <div class="feedback-actions">
           <button class="button primary" type="submit">提交反馈</button>

@@ -777,14 +777,30 @@ route("POST", "/v1/usage/report", async (ctx) => {
 
 route("POST", "/v1/feedback", async (ctx) => {
   const body = await readJson(ctx.request);
+  if (hasFeedbackHoneypotValue(body)) {
+    // Do not disclose the honeypot to automated submitters. A success-shaped
+    // response prevents them from using the endpoint as an oracle.
+    return json({ accepted: true, status: "new" }, 201);
+  }
   await enforcePublicRateLimit(ctx.env, {
     scope: "feedback_ip",
     subject: clientIp(ctx.request) || "unknown",
     limit: intEnv(ctx.env.FEEDBACK_RATE_LIMIT_PER_HOUR, 5),
     windowSeconds: 60 * 60,
   });
-  await verifyTurnstileToken(ctx.env, body.turnstile_token, ctx.request);
   const item = normalizeFeedbackSubmission(body);
+  if (isMainlandChinaRequest(ctx.request)) {
+    if (!item.contact_email) {
+      throwHttp(400, "feedback_email_required");
+    }
+    const verificationCode = String(body.feedback_verification_code || body.verification_code || "").trim();
+    if (!verificationCode) {
+      throwHttp(400, "feedback_verification_code_required");
+    }
+    await consumeVerificationCode(ctx.env, item.contact_email, "feedback", verificationCode);
+  } else {
+    await verifyTurnstileToken(ctx.env, body.turnstile_token, ctx.request);
+  }
   const now = nowIso();
   const publicId = `FB-${Date.now().toString(36).toUpperCase()}-${randomToken(4).toUpperCase()}`;
 
@@ -816,6 +832,35 @@ route("POST", "/v1/feedback", async (ctx) => {
     .run();
 
   return json({ accepted: true, public_id: publicId, status: "new" }, 201);
+});
+
+route("GET", "/v1/feedback/security", async (ctx) => {
+  return json({ mode: isMainlandChinaRequest(ctx.request) ? "email" : "turnstile" });
+});
+
+route("POST", "/v1/feedback/send-code", async (ctx) => {
+  if (!isMainlandChinaRequest(ctx.request)) {
+    return json({ error: "feedback_email_verification_unavailable" }, 403);
+  }
+  const body = await readJson(ctx.request);
+  const email = normalizeEmail(body.email);
+  if (!isEmail(email)) {
+    return json({ error: "email_invalid" }, 400);
+  }
+  await enforcePublicRateLimit(ctx.env, {
+    scope: "feedback_code_ip",
+    subject: clientIp(ctx.request) || "unknown",
+    limit: intEnv(ctx.env.FEEDBACK_CODE_IP_RATE_LIMIT_PER_HOUR, 5),
+    windowSeconds: 60 * 60,
+  });
+  await enforcePublicRateLimit(ctx.env, {
+    scope: "feedback_code_email",
+    subject: email,
+    limit: intEnv(ctx.env.FEEDBACK_CODE_EMAIL_RATE_LIMIT_PER_HOUR, 3),
+    windowSeconds: 60 * 60,
+  });
+  const result = await issueVerificationCode(ctx, email, "feedback");
+  return json({ message: "feedback_verification_code_sent", ...result });
 });
 
 route("GET", "/v1/scorpio_v1_admin/feedback", async (ctx) => {
@@ -3630,6 +3675,7 @@ async function updateAdminRelease(ctx) {
     `UPDATE release_versions
      SET release_notes = ?,
          download_url = ?,
+         hk_download_url = ?,
          r2_key = ?,
          file_name = ?,
          content_type = ?,
@@ -3643,6 +3689,7 @@ async function updateAdminRelease(ctx) {
     .bind(
       record.release_notes,
       record.download_url,
+      record.hk_download_url,
       record.r2_key,
       record.file_name,
       record.content_type,
@@ -4626,6 +4673,15 @@ async function downloadReleaseFile(ctx) {
   if (!row) return json({ error: "release_not_found" }, 404);
   const entitlement = await requireReleaseEntitlement(ctx.env, user, row.edition);
 
+  const hkDownloadUrl = safeText(row.hk_download_url || "", 2048);
+  if (boolEnv(ctx.env.ALIYUN_CDN_DOWNLOAD_ENABLED, false) && isMainlandChinaRequest(ctx.request) && /^https:\/\//i.test(hkDownloadUrl)) {
+    const signedUrl = signAliyunCdnDownloadUrl(ctx.env, hkDownloadUrl);
+    if (signedUrl) {
+      recordReleaseDownload(ctx.env, ctx.request, { row, user, entitlement, source: "aliyun_hk_cdn" }).catch(() => {});
+      return Response.redirect(signedUrl, 302);
+    }
+  }
+
   const r2Key = safeText(row.r2_key || "", 512);
   if (r2Key) {
     if (!ctx.env.RELEASE_BUCKET) return json({ error: "release_bucket_not_configured" }, 500);
@@ -4650,6 +4706,110 @@ async function downloadReleaseFile(ctx) {
     return Response.redirect(downloadUrl, 302);
   }
   return json({ error: "release_download_not_configured" }, 404);
+}
+
+function isMainlandChinaRequest(request) {
+  return String(request.headers.get("CF-IPCountry") || "").trim().toUpperCase() === "CN";
+}
+
+function signAliyunCdnDownloadUrl(env, rawUrl) {
+  const key = safeText(env.ALIYUN_CDN_AUTH_KEY || "", 128);
+  const configuredHost = safeText(env.ALIYUN_CDN_DOWNLOAD_HOST || "", 255).toLowerCase();
+  if (!key || !configuredHost) return "";
+
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return "";
+  }
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== configuredHost || url.search || url.hash) {
+    return "";
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000).toString(16);
+  const signature = md5Hex(`${key}${url.pathname}${timestamp}`);
+  url.searchParams.set("sign", signature);
+  url.searchParams.set("time", timestamp);
+  return url.toString();
+}
+
+function md5Hex(value) {
+  const source = new TextEncoder().encode(String(value));
+  const paddedSize = (((source.length + 8) >>> 6) + 1) << 6;
+  const data = new Uint8Array(paddedSize);
+  data.set(source);
+  data[source.length] = 0x80;
+  const bitLength = source.length * 8;
+  for (let index = 0; index < 8; index += 1) {
+    data[paddedSize - 8 + index] = Math.floor(bitLength / (2 ** (8 * index))) & 0xff;
+  }
+
+  const shifts = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+  ];
+  const constants = Array.from({ length: 64 }, (_, index) => (
+    Math.floor(Math.abs(Math.sin(index + 1)) * 0x100000000) >>> 0
+  ));
+  let a0 = 0x67452301;
+  let b0 = 0xefcdab89;
+  let c0 = 0x98badcfe;
+  let d0 = 0x10325476;
+
+  for (let offset = 0; offset < data.length; offset += 64) {
+    const words = Array.from({ length: 16 }, (_, index) => {
+      const base = offset + index * 4;
+      return (data[base] | (data[base + 1] << 8) | (data[base + 2] << 16) | (data[base + 3] << 24)) >>> 0;
+    });
+    let a = a0;
+    let b = b0;
+    let c = c0;
+    let d = d0;
+    for (let index = 0; index < 64; index += 1) {
+      let f;
+      let g;
+      if (index < 16) {
+        f = (b & c) | (~b & d);
+        g = index;
+      } else if (index < 32) {
+        f = (d & b) | (~d & c);
+        g = (5 * index + 1) % 16;
+      } else if (index < 48) {
+        f = b ^ c ^ d;
+        g = (3 * index + 5) % 16;
+      } else {
+        f = c ^ (b | ~d);
+        g = (7 * index) % 16;
+      }
+      const next = d;
+      d = c;
+      c = b;
+      b = addUint32(b, rotateLeft(addUint32(a, f, constants[index], words[g]), shifts[index]));
+      a = next;
+    }
+    a0 = addUint32(a0, a);
+    b0 = addUint32(b0, b);
+    c0 = addUint32(c0, c);
+    d0 = addUint32(d0, d);
+  }
+  return [a0, b0, c0, d0].map(uint32ToLittleEndianHex).join("");
+}
+
+function addUint32(...values) {
+  return values.reduce((total, value) => (total + value) >>> 0, 0);
+}
+
+function rotateLeft(value, count) {
+  return ((value << count) | (value >>> (32 - count))) >>> 0;
+}
+
+function uint32ToLittleEndianHex(value) {
+  return [0, 8, 16, 24]
+    .map((shift) => ((value >>> shift) & 0xff).toString(16).padStart(2, "0"))
+    .join("");
 }
 
 async function servePublicProductVideo({ request, env }) {
@@ -4872,13 +5032,15 @@ function normalizeAdminRelease(body) {
   const channel = normalizePackageChannel(body.channel || "stable");
   const edition = normalizeEdition(body.edition || "personal_pro");
   const downloadUrl = safeText(body.download_url || "", 2048);
+  const hkDownloadUrl = safeText(body.hk_download_url || "", 2048);
   const r2Key = normalizeR2Key(body.r2_key || "");
-  const fileName = safeDownloadFileName(body.file_name || fileNameFromKey(r2Key || downloadUrl));
+  const fileName = safeDownloadFileName(body.file_name || fileNameFromKey(r2Key || downloadUrl || hkDownloadUrl));
   const contentType = safeText(body.content_type || "application/octet-stream", 120) || "application/octet-stream";
   const sha256 = safeText(body.file_hash_sha256 || body.sha256 || "", 128).toLowerCase();
   if (!version) throwHttp(400, "version_required");
-  if (!r2Key && !/^https:\/\//i.test(downloadUrl)) throwHttp(400, "release_download_source_required");
+  if (!r2Key && !/^https:\/\//i.test(downloadUrl) && !/^https:\/\//i.test(hkDownloadUrl)) throwHttp(400, "release_download_source_required");
   if (downloadUrl && !/^https:\/\//i.test(downloadUrl)) throwHttp(400, "download_url_https_required");
+  if (hkDownloadUrl && !/^https:\/\//i.test(hkDownloadUrl)) throwHttp(400, "hk_download_url_https_required");
   if (sha256 && !/^[a-f0-9]{64}$/i.test(sha256)) throwHttp(400, "sha256_invalid");
   return {
     version,
@@ -4886,6 +5048,7 @@ function normalizeAdminRelease(body) {
     edition,
     release_notes: safeText(body.release_notes || "", 4000),
     download_url: downloadUrl,
+    hk_download_url: hkDownloadUrl,
     r2_key: r2Key,
     file_name: fileName,
     content_type: contentType,
@@ -4901,13 +5064,14 @@ function normalizeAdminRelease(body) {
 async function upsertRelease(env, record) {
   await env.DB.prepare(
     `INSERT INTO release_versions
-       (version, channel, edition, release_notes, download_url, r2_key, file_name,
+       (version, channel, edition, release_notes, download_url, hk_download_url, r2_key, file_name,
         content_type, file_hash_sha256, file_size_bytes, is_required, is_active,
         released_at, uploaded_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(version, channel, edition) DO UPDATE SET
        release_notes = excluded.release_notes,
        download_url = excluded.download_url,
+       hk_download_url = excluded.hk_download_url,
        r2_key = excluded.r2_key,
        file_name = excluded.file_name,
        content_type = excluded.content_type,
@@ -4924,6 +5088,7 @@ async function upsertRelease(env, record) {
       record.edition,
       record.release_notes,
       record.download_url,
+      record.hk_download_url,
       record.r2_key,
       record.file_name,
       record.content_type,
@@ -4978,8 +5143,8 @@ function releasePayload(row) {
     release_notes: row.release_notes || "",
     download_url: row.r2_key ? "" : (row.download_url || ""),
     download_endpoint: downloadEndpoint,
-    download_available: Boolean(row.r2_key || row.download_url),
-    file_name: row.file_name || fileNameFromKey(row.r2_key || row.download_url || ""),
+    download_available: Boolean(row.r2_key || row.download_url || row.hk_download_url),
+    file_name: row.file_name || fileNameFromKey(row.r2_key || row.download_url || row.hk_download_url || ""),
     file_size_bytes: row.file_size_bytes || 0,
     sha256: row.file_hash_sha256 || "",
     is_required: Boolean(Number(row.is_required)),
@@ -5071,13 +5236,13 @@ async function sendVerificationEmail(env, options) {
     throwHttp(503, "email_delivery_not_configured");
   }
 
-  const subject =
-    options.purpose === "reset_password"
-      ? "Scorpio Intelligence 密码重置验证码"
-      : "Scorpio Intelligence 注册验证码";
-  const purposeText = options.purpose === "reset_password" ? "重置密码" : "完成注册";
+  const purposeCopy = options.purpose === "reset_password"
+    ? { subject: "Scorpio Intelligence 密码重置验证码", action: "重置密码" }
+    : options.purpose === "feedback"
+      ? { subject: "Scorpio Intelligence 反馈提交验证码", action: "提交反馈" }
+      : { subject: "Scorpio Intelligence 注册验证码", action: "完成注册" };
   const text = [
-    `你的 Scorpio Intelligence ${purposeText}验证码是：${options.code}`,
+    `你的 Scorpio Intelligence ${purposeCopy.action}验证码是：${options.code}`,
     "",
     "验证码 10 分钟内有效。如非本人操作，请忽略这封邮件。",
   ].join("\n");
@@ -5091,7 +5256,7 @@ async function sendVerificationEmail(env, options) {
     body: JSON.stringify({
       from,
       to: options.email,
-      subject,
+      subject: purposeCopy.subject,
       text,
     }),
   });
@@ -5103,7 +5268,7 @@ async function sendVerificationEmail(env, options) {
 
 function normalizeVerificationPurpose(value) {
   const purpose = String(value || "").trim().toLowerCase();
-  if (purpose === "register" || purpose === "reset_password") {
+  if (purpose === "register" || purpose === "reset_password" || purpose === "feedback") {
     return purpose;
   }
   throwHttp(400, "verification_purpose_invalid");
@@ -5177,6 +5342,10 @@ function normalizeFeedbackSubmission(body) {
       allow_contact: Boolean(surveyAnswers.allow_contact || body.allow_contact),
     },
   };
+}
+
+function hasFeedbackHoneypotValue(body) {
+  return Boolean(safeText(body.company_website || body.website || "", 500));
 }
 
 function normalizeFeedbackType(value, fallback = "experience") {

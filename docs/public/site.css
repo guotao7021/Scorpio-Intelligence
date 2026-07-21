@@ -3550,11 +3550,54 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
   align-items: center;
 }
 
+.feedback-code-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.feedback-code-row input {
+  min-width: 0;
+}
+
+.feedback-code-row .button {
+  flex: 0 0 auto;
+  min-height: 46px;
+}
+
+.feedback-email-verification > p {
+  margin: 8px 0 0;
+  color: rgba(244, 241, 248, 0.62);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.feedback-honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .feedback-message,
 #feedbackAdminMessage {
   min-height: 22px;
   color: rgba(244, 241, 248, 0.72);
   line-height: 1.6;
+}
+
+@media (max-width: 560px) {
+  .feedback-code-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .feedback-code-row .button {
+    width: 100%;
+  }
 }
 
 .feedback-message.success,
