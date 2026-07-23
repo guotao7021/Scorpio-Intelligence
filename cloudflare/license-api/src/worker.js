@@ -4376,6 +4376,12 @@ async function upsertDataPackage(env, record) {
 const PRODUCTION_UPLOAD_TABLES = new Map([
   ["score_history", "target_research"],
   ["stock_analysis_pool", "target_research"],
+  ["fund_profiles", "target_research"],
+  ["fund_nav_daily", "target_research"],
+  ["fund_performance_snapshots", "target_research"],
+  ["fund_exposure_profiles", "target_research"],
+  ["bond_profiles", "target_research"],
+  ["bond_daily_snapshot", "target_research"],
   ["stock_info", "target_research"],
   ["industry_info", "target_research"],
   ["stock_daily_latest", "market_context"],
