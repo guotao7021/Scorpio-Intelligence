@@ -5,8 +5,12 @@ import { spawnSync } from "node:child_process";
 
 const args = parseArgs(process.argv.slice(2));
 const version = String(requiredArg(args, "version")).replace(/^v/i, "");
-const proFile = requiredArg(args, "proFile");
-const standardFile = requiredArg(args, "standardFile");
+const proFile = String(args.proFile || "").trim();
+const standardFile = String(args.standardFile || "").trim();
+const apkFile = String(args.apkFile || "").trim();
+if (!proFile && !standardFile && !apkFile) {
+  throw new Error("Provide at least one of --pro-file, --standard-file, or --apk-file.");
+}
 const channel = normalize(args.channel || "stable");
 const notes = String(args.notes || "").trim();
 const releasedAt = String(args.releasedAt || new Date().toISOString()).trim();
@@ -19,9 +23,10 @@ const dryRun = Boolean(args.dryRun);
 const allowReplace = Boolean(args.allowReplace);
 
 const releases = await Promise.all([
-  buildRelease("personal_pro", proFile, notes || `Scorpio Intelligence Pro v${version} release.`),
-  buildRelease("personal_standard", standardFile, notes || `Scorpio Intelligence Standard v${version} release.`),
-]);
+  proFile ? buildRelease("personal_pro", proFile, notes || `Scorpio Intelligence Pro v${version} release.`) : null,
+  standardFile ? buildRelease("personal_standard", standardFile, notes || `Scorpio Intelligence Standard v${version} release.`) : null,
+  apkFile ? buildRelease("android", apkFile, notes || `Scorpio Intelligence Android v${version} release.`) : null,
+].filter(Boolean));
 
 for (const release of releases) {
   console.log(`Preparing ${release.edition}: ${release.fileName} (${release.fileSizeBytes} bytes)`);
@@ -47,6 +52,7 @@ async function buildRelease(edition, file, releaseNotes) {
   if (!info.isFile() || info.size < 1) throw new Error(`Release file is empty or invalid: ${file}`);
   const fileName = basename(file);
   const sha256 = await sha256File(file);
+  const contentType = edition === "android" ? "application/vnd.android.package-archive" : "application/octet-stream";
   const r2Key = `releases/${edition}/${channel}/${version}/${fileName}`;
   const ossKey = `releases/v${version}/${fileName}`;
   return {
@@ -55,6 +61,7 @@ async function buildRelease(edition, file, releaseNotes) {
     fileName,
     fileSizeBytes: info.size,
     sha256,
+    contentType,
     r2Key,
     ossKey,
     hkDownloadUrl: `https://${hkHost}/${ossKey}`,
@@ -75,7 +82,7 @@ function uploadR2(release) {
   run("npx.cmd", [
     "wrangler", "r2", "object", "put", `${r2Bucket}/${release.r2Key}`,
     "--file", release.file,
-    "--content-type", "application/octet-stream",
+    "--content-type", release.contentType,
     "--remote",
   ]);
 }
@@ -89,7 +96,7 @@ function uploadOss(release) {
     "--region", ossRegion,
     "--access-key-id", accessKeyId,
     "--access-key-secret", accessKeySecret,
-    "--meta", `Content-Type:application/octet-stream#Content-Disposition:attachment#x-oss-meta-sha256:${release.sha256}`,
+    "--meta", `Content-Type:${release.contentType}#Content-Disposition:attachment#x-oss-meta-sha256:${release.sha256}`,
     "--force",
   ]);
 }
@@ -115,7 +122,7 @@ function verifyOss(release) {
 
 function registerRelease(release) {
   const sql = `INSERT INTO release_versions (version, channel, edition, release_notes, download_url, hk_download_url, r2_key, file_name, content_type, file_hash_sha256, file_size_bytes, is_required, is_active, released_at, uploaded_at)
-VALUES (${sqlText(version)}, ${sqlText(channel)}, ${sqlText(release.edition)}, ${sqlText(release.releaseNotes)}, '', ${sqlText(release.hkDownloadUrl)}, ${sqlText(release.r2Key)}, ${sqlText(release.fileName)}, 'application/octet-stream', ${sqlText(release.sha256)}, ${release.fileSizeBytes}, 0, 1, ${sqlText(releasedAt)}, ${sqlText(new Date().toISOString())})
+VALUES (${sqlText(version)}, ${sqlText(channel)}, ${sqlText(release.edition)}, ${sqlText(release.releaseNotes)}, '', ${sqlText(release.hkDownloadUrl)}, ${sqlText(release.r2Key)}, ${sqlText(release.fileName)}, ${sqlText(release.contentType)}, ${sqlText(release.sha256)}, ${release.fileSizeBytes}, 0, 1, ${sqlText(releasedAt)}, ${sqlText(new Date().toISOString())})
 ON CONFLICT(version, channel, edition) DO UPDATE SET
 release_notes = excluded.release_notes, hk_download_url = excluded.hk_download_url, r2_key = excluded.r2_key, file_name = excluded.file_name, content_type = excluded.content_type, file_hash_sha256 = excluded.file_hash_sha256, file_size_bytes = excluded.file_size_bytes, is_active = excluded.is_active, released_at = excluded.released_at, uploaded_at = excluded.uploaded_at;`;
   run("npx.cmd", ["wrangler", "d1", "execute", "scorpio-license-db", "--remote", "--command", sql]);
@@ -179,6 +186,7 @@ function publicRelease(release) {
     file_name: release.fileName,
     file_size_bytes: release.fileSizeBytes,
     sha256: release.sha256,
+    content_type: release.contentType,
     r2_key: release.r2Key,
     hk_download_url: release.hkDownloadUrl,
   };

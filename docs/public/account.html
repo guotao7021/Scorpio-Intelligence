@@ -6,15 +6,15 @@
   <title>用户中心 | Scorpio Intelligence</title>
   <meta name="description" content="Scorpio Intelligence 用户中心：账号登录、授权激活、客户端下载与桌面端数据同步入口。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="site.css?v=20260712-split-releases">
+  <link rel="stylesheet" href="site.css?v=20260819-platform-downloads">
   <script>
     if (new URLSearchParams(window.location.search).get("lang") === "en") {
       document.documentElement.lang = "en";
     }
   </script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-  <script src="account-i18n.js?v=20260718-en" defer></script>
-  <script src="account.js?v=20260712-split-releases" defer></script>
+  <script src="account-i18n.js?v=20260819-platform-downloads" defer></script>
+  <script src="account.js?v=20260819-platform-downloads" defer></script>
 </head>
 <body class="account-page">
   <header class="site-header">
@@ -54,23 +54,30 @@
       <div class="download-command-intro">
         <span class="download-command-icon"><i data-lucide="download" aria-hidden="true"></i></span>
         <div>
-          <p class="section-kicker">Desktop Release</p>
+          <p class="section-kicker">Windows &amp; Android</p>
           <h2 id="downloadTitle">下载 Scorpio Intelligence</h2>
-          <p>获取与你当前授权版本匹配的稳定版客户端。</p>
+          <p>登录后可同时获取 Windows 桌面端与 Android 移动端。</p>
         </div>
       </div>
       <div class="release-edition-grid">
-        <article class="release-edition-card" id="standardReleaseBox">
-          <header><span>PERSONAL STANDARD</span><i data-lucide="box"></i></header>
-          <strong id="standardReleaseVersion">正在读取...</strong>
-          <small id="standardReleaseMeta">Standard 数据范围与稳定通道。</small>
-          <a class="button secondary disabled" id="standardDownloadLink" href="#" aria-disabled="true"><i data-lucide="download"></i> 下载 Standard</a>
+        <article class="release-edition-card is-pro" id="windowsReleaseBox">
+          <header><span>WINDOWS DESKTOP</span><i data-lucide="monitor-down"></i></header>
+          <label class="release-platform-select">桌面版本
+            <select id="windowsEditionSelect">
+              <option value="personal_pro" selected>Personal Pro（默认）</option>
+              <option value="personal_standard">Personal Standard</option>
+            </select>
+          </label>
+          <strong id="windowsReleaseVersion">正在读取...</strong>
+          <small id="windowsReleaseMeta">默认提供 Pro 完整研究版本，也可切换 Standard 标准版本。</small>
+          <a class="button primary disabled" id="windowsDownloadLink" href="#" aria-disabled="true"><i data-lucide="download"></i> 下载 Windows Pro</a>
         </article>
-        <article class="release-edition-card is-pro" id="proReleaseBox">
-          <header><span>PERSONAL PRO</span><i data-lucide="brain-circuit"></i></header>
-          <strong id="proReleaseVersion">正在读取...</strong>
-          <small id="proReleaseMeta">Pro 数据范围与完整研究能力。</small>
-          <a class="button primary disabled" id="proDownloadLink" href="#" aria-disabled="true"><i data-lucide="download"></i> 下载 Pro</a>
+        <article class="release-edition-card is-android" id="androidReleaseBox">
+          <header><span>ANDROID MOBILE</span><i data-lucide="smartphone"></i></header>
+          <div class="release-platform-name">Android APK</div>
+          <strong id="androidReleaseVersion">即将提供</strong>
+          <small id="androidReleaseMeta">APK 上传并发布后，这里会自动开放下载。</small>
+          <a class="button secondary disabled" id="androidDownloadLink" href="#" aria-disabled="true"><i data-lucide="download"></i> 下载 Android APK</a>
         </article>
       </div>
       <div class="download-command-actions">

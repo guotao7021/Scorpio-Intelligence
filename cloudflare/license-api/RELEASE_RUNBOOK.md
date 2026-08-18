@@ -1,6 +1,6 @@
 # Dual-source release runbook
 
-Use this workflow for every new public Windows release. It publishes both editions to Cloudflare R2 and Alibaba Cloud OSS Hong Kong, verifies the OSS object metadata, and registers the release in the production D1 database.
+Use this workflow for every public Windows or Android release. It publishes the selected artifacts to Cloudflare R2 and Alibaba Cloud OSS Hong Kong, verifies the OSS object metadata, and registers the release in the production D1 database.
 
 ## Prerequisites
 
@@ -31,6 +31,17 @@ npm run release:publish-dual -- `
   --standard-file D:\path\Scorpio-Std-Setup-v1.0.12-YYYYMMDD.exe `
   --notes "Scorpio Intelligence v1.0.12 release."
 ```
+
+Android APK can be published independently after the mobile build is ready:
+
+```powershell
+npm run release:publish-dual -- `
+  --version 1.0.12 `
+  --apk-file "D:\release\Scorpio-Android-v1.0.12.apk" `
+  --notes "Scorpio Intelligence Android v1.0.12 release."
+```
+
+The Android record uses edition `android`, R2 path `releases/android/...`, and MIME type `application/vnd.android.package-archive`. A signed-in user with an active Personal Standard or Personal Pro entitlement can download it.
 
 The command refuses to replace an existing `version + channel + edition`. Pass `--allow-replace` only for a deliberate correction.
 

@@ -2841,7 +2841,7 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
 
 .release-edition-card {
   display: grid;
-  grid-template-rows: auto auto minmax(34px, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(34px, 1fr) auto;
   gap: 9px;
   min-height: 196px;
   padding: 24px;
@@ -2850,6 +2850,7 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
 
 .release-edition-card + .release-edition-card { border-left: 1px solid rgba(125, 211, 252, 0.18); }
 .release-edition-card.is-pro { box-shadow: inset 0 3px 0 var(--gold); background: #0d1c2d; }
+.release-edition-card.is-android { box-shadow: inset 0 3px 0 #22c55e; }
 .release-edition-card.loading { opacity: 0.72; }
 .release-edition-card.is-unavailable { background: #091420; }
 .release-edition-card header { display: flex; align-items: center; justify-content: space-between; color: var(--constellation); }
@@ -2858,6 +2859,35 @@ body:not(.observatory-page):not(.language-hub) select:focus { outline: 2px solid
 .release-edition-card > strong { color: var(--white); font-size: 26px; line-height: 1.12; letter-spacing: 0; }
 .release-edition-card > small { color: rgba(244, 241, 248, 0.58); line-height: 1.45; }
 .release-edition-card .button { width: 100%; min-height: 38px; }
+
+.release-platform-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: rgba(244, 241, 248, 0.64);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.release-platform-select select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 32px 8px 10px;
+  border: 1px solid rgba(56, 189, 248, 0.34);
+  border-radius: 6px;
+  color: var(--white);
+  background: #07111f;
+}
+
+.release-platform-name {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  color: rgba(244, 241, 248, 0.78);
+  font-size: 14px;
+  font-weight: 800;
+}
 
 .download-command-actions {
   display: flex;

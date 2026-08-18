@@ -3,7 +3,8 @@
   const TOKEN_KEY = "scorpio_user_auth";
   const LICENSE_KEY = "scorpio_user_license";
   const RELEASE_CHANNEL = "stable";
-  const RELEASE_EDITIONS = ["personal_standard", "personal_pro"];
+  const WINDOWS_RELEASE_EDITIONS = ["personal_pro", "personal_standard"];
+  const RELEASE_EDITIONS = [...WINDOWS_RELEASE_EDITIONS, "android"];
 
   const state = loadAuth();
   const licenseState = loadLicenseState();
@@ -40,14 +41,15 @@
     activationCodeMeta: byId("activationCodeMeta"),
     machineFingerprint: byId("machineFingerprint"),
     licenseId: byId("licenseId"),
-    standardReleaseVersion: byId("standardReleaseVersion"),
-    standardReleaseMeta: byId("standardReleaseMeta"),
-    standardReleaseBox: byId("standardReleaseBox"),
-    standardDownloadLink: byId("standardDownloadLink"),
-    proReleaseVersion: byId("proReleaseVersion"),
-    proReleaseMeta: byId("proReleaseMeta"),
-    proReleaseBox: byId("proReleaseBox"),
-    proDownloadLink: byId("proDownloadLink"),
+    windowsEditionSelect: byId("windowsEditionSelect"),
+    windowsReleaseVersion: byId("windowsReleaseVersion"),
+    windowsReleaseMeta: byId("windowsReleaseMeta"),
+    windowsReleaseBox: byId("windowsReleaseBox"),
+    windowsDownloadLink: byId("windowsDownloadLink"),
+    androidReleaseVersion: byId("androidReleaseVersion"),
+    androidReleaseMeta: byId("androidReleaseMeta"),
+    androidReleaseBox: byId("androidReleaseBox"),
+    androidDownloadLink: byId("androidDownloadLink"),
     downloadProgress: byId("downloadProgress"),
     downloadProgressText: byId("downloadProgressText"),
     downloadProgressPercent: byId("downloadProgressPercent"),
@@ -71,9 +73,10 @@
     els.activateForm.addEventListener("submit", guard(onActivate, els.licenseMessage));
     els.statusForm.addEventListener("submit", guard(onCheckLicense, els.licenseMessage));
     els.activationCodeSelect.addEventListener("change", () => selectActivationCode(els.activationCodeSelect.value));
+    els.windowsEditionSelect.addEventListener("change", renderSelectedWindowsRelease);
     els.refreshRelease.addEventListener("click", refreshRelease);
-    els.standardDownloadLink.addEventListener("click", guard((event) => downloadRelease("personal_standard", event), els.authMessage));
-    els.proDownloadLink.addEventListener("click", guard((event) => downloadRelease("personal_pro", event), els.authMessage));
+    els.windowsDownloadLink.addEventListener("click", guard((event) => downloadRelease(selectedWindowsEdition(), event), els.authMessage));
+    els.androidDownloadLink.addEventListener("click", guard((event) => downloadRelease("android", event), els.authMessage));
     els.logoutButton.addEventListener("click", logout);
     renderSession();
     refreshAccountData();
@@ -300,56 +303,96 @@
 
   async function refreshRelease() {
     els.releaseState.textContent = "读取中";
-    RELEASE_EDITIONS.forEach((edition) => setReleaseLoading(edition));
+    setReleaseLoading("windows");
+    setReleaseLoading("android");
     if (!state.access_token) {
       state.current_releases = {};
+      state.current_release_errors = {};
       els.releaseState.textContent = "待登录";
-      RELEASE_EDITIONS.forEach((edition) => renderReleaseUnavailable(edition, "登录后加载", "请先登录，系统将分别校验对应版本的下载权益。"));
+      renderReleaseUnavailable("windows", "登录后加载", "请先登录，系统将校验 Windows 版本下载权益。");
+      renderReleaseUnavailable("android", "登录后加载", "请先登录，APK 发布后即可在这里下载。");
       return;
     }
     await ensureCurrentLicenseLoaded();
     state.current_releases = {};
-    const results = await Promise.all(RELEASE_EDITIONS.map(async (edition) => {
+    state.current_release_errors = {};
+    await Promise.all(RELEASE_EDITIONS.map(async (edition) => {
       try {
         const data = await fetchLatestRelease(edition);
         state.current_releases[edition] = data;
-        renderRelease(edition, data);
-        return Boolean(data.download_available && data.download_endpoint);
       } catch (error) {
-        renderReleaseUnavailable(edition, "不可下载", userFacingReleaseError(error));
-        return false;
+        state.current_release_errors[edition] = error;
       }
     }));
-    const availableCount = results.filter(Boolean).length;
-    els.releaseState.textContent = availableCount ? `${availableCount} 个版本可下载` : "暂无下载权益";
+    renderSelectedWindowsRelease();
+    renderAndroidRelease();
+    const windowsAvailable = WINDOWS_RELEASE_EDITIONS.some((edition) => releaseAvailable(state.current_releases[edition]));
+    const androidAvailable = releaseAvailable(state.current_releases.android);
+    const availablePlatforms = Number(windowsAvailable) + Number(androidAvailable);
+    els.releaseState.textContent = availablePlatforms ? `${availablePlatforms} 个平台可下载` : "暂无下载权益";
   }
 
-  function releaseUi(edition) {
-    return edition === "personal_pro"
-      ? { box: els.proReleaseBox, version: els.proReleaseVersion, meta: els.proReleaseMeta, link: els.proDownloadLink }
-      : { box: els.standardReleaseBox, version: els.standardReleaseVersion, meta: els.standardReleaseMeta, link: els.standardDownloadLink };
+  function selectedWindowsEdition() {
+    const selected = String(els.windowsEditionSelect.value || "personal_pro");
+    return WINDOWS_RELEASE_EDITIONS.includes(selected) ? selected : "personal_pro";
   }
 
-  function setReleaseLoading(edition) {
-    const ui = releaseUi(edition);
+  function releaseUi(target) {
+    return target === "android"
+      ? { box: els.androidReleaseBox, version: els.androidReleaseVersion, meta: els.androidReleaseMeta, link: els.androidDownloadLink }
+      : { box: els.windowsReleaseBox, version: els.windowsReleaseVersion, meta: els.windowsReleaseMeta, link: els.windowsDownloadLink };
+  }
+
+  function releaseAvailable(data) {
+    return Boolean(data && data.download_available && data.download_endpoint);
+  }
+
+  function setReleaseLoading(target) {
+    const ui = releaseUi(target);
     ui.box.classList.add("loading");
     ui.version.textContent = "正在读取...";
-    ui.meta.textContent = `连接 ${releaseEditionLabel(edition)} 稳定发行通道。`;
+    ui.meta.textContent = target === "android"
+      ? "正在检查 Android APK 稳定发行通道。"
+      : `正在检查 ${releaseEditionLabel(selectedWindowsEdition())} 稳定发行通道。`;
     setReleaseLinkState(ui.link, false);
   }
 
-  function renderRelease(edition, data) {
-    const ui = releaseUi(edition);
+  function renderSelectedWindowsRelease() {
+    const edition = selectedWindowsEdition();
+    const data = state.current_releases && state.current_releases[edition];
+    const error = state.current_release_errors && state.current_release_errors[edition];
+    els.windowsReleaseBox.classList.toggle("is-pro", edition === "personal_pro");
+    els.windowsDownloadLink.innerHTML = `<i data-lucide="download"></i> 下载 Windows ${edition === "personal_pro" ? "Pro" : "Standard"}`;
+    if (window.lucide) window.lucide.createIcons();
+    if (data) {
+      renderRelease("windows", data);
+      return;
+    }
+    renderReleaseUnavailable("windows", "不可下载", userFacingReleaseError(error, edition));
+  }
+
+  function renderAndroidRelease() {
+    const data = state.current_releases && state.current_releases.android;
+    const error = state.current_release_errors && state.current_release_errors.android;
+    if (data) {
+      renderRelease("android", data);
+      return;
+    }
+    renderReleaseUnavailable("android", "尚未发布", userFacingReleaseError(error, "android"));
+  }
+
+  function renderRelease(target, data) {
+    const ui = releaseUi(target);
     ui.box.classList.remove("loading", "is-unavailable");
     ui.version.textContent = data.version || data.latest_version || "--";
     ui.meta.textContent = data.release_notes
       ? data.release_notes
       : `发布时间：${data.release_date || "未提供"}`;
-    setReleaseLinkState(ui.link, Boolean(data.download_available && data.download_endpoint));
+    setReleaseLinkState(ui.link, releaseAvailable(data));
   }
 
-  function renderReleaseUnavailable(edition, versionText, message) {
-    const ui = releaseUi(edition);
+  function renderReleaseUnavailable(target, versionText, message) {
+    const ui = releaseUi(target);
     ui.box.classList.remove("loading");
     ui.box.classList.add("is-unavailable");
     ui.version.textContent = versionText;
@@ -393,6 +436,8 @@
       pro: "personal_pro",
       standard: "personal_standard",
       personal: "personal_standard",
+      apk: "android",
+      mobile: "android",
     };
     const normalized = aliases[edition] || edition;
     return RELEASE_EDITIONS.includes(normalized) ? normalized : "";
@@ -402,15 +447,17 @@
     const edition = normalizeReleaseEdition(value);
     if (edition === "personal_pro") return "Personal Pro";
     if (edition === "personal_standard") return "Personal Standard";
+    if (edition === "android") return "Android APK";
     return "当前版本";
   }
 
-  function userFacingReleaseError(error) {
+  function userFacingReleaseError(error, edition = "") {
     const message = error && error.message ? error.message : "";
     if (message.includes("release_entitlement_required")) {
       return "当前账号没有对应版本的下载权益，请先激活或绑定授权。";
     }
     if (message.includes("release_not_found")) {
+      if (edition === "android") return "Android APK 尚未上传，发布后会自动开放下载。";
       return "当前授权版本暂未发布可下载安装包。";
     }
     return message || "发行信息读取失败。";

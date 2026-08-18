@@ -5026,21 +5026,25 @@ function safeReferrerHost(value) {
 async function requireReleaseEntitlement(env, user, edition) {
   const normalized = normalizeEdition(edition || "personal_pro");
   if (normalized === "all") return true;
+  const entitlementEditions = normalized === "android"
+    ? ["personal_pro", "personal_standard"]
+    : [normalized];
+  const placeholders = entitlementEditions.map(() => "?").join(", ");
   const license = await env.DB.prepare(
     `SELECT id, license_id FROM licenses
-     WHERE user_id = ? AND edition = ? AND is_active = 1 AND revoked = 0
+     WHERE user_id = ? AND edition IN (${placeholders}) AND is_active = 1 AND revoked = 0
        AND datetime(expires_at) >= datetime('now')
      LIMIT 1`
   )
-    .bind(user.id, normalized)
+    .bind(user.id, ...entitlementEditions)
     .first();
   if (license) return license;
   const code = await env.DB.prepare(
     `SELECT id FROM activation_codes
-     WHERE assigned_to_user_id = ? AND edition = ? AND status IN ('active', 'assigned', 'used')
+     WHERE assigned_to_user_id = ? AND edition IN (${placeholders}) AND status IN ('active', 'assigned', 'used')
      LIMIT 1`
   )
-    .bind(user.id, normalized)
+    .bind(user.id, ...entitlementEditions)
     .first();
   if (code) return { activation_code_id: code.id };
   throwHttp(403, "release_entitlement_required");
