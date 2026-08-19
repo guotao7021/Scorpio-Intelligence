@@ -19,6 +19,33 @@ const REAL_USER_SQL_FILTER = `
 
 const ROUTES = new Map();
 
+const MOBILE_COMPLIANCE_VERSION = "2026-08-19.v1";
+const MOBILE_COMPLIANCE_COPY = Object.freeze({
+  title: "使用前请确认",
+  investment_notice: "本应用提供研究信息与分析工具，不构成投资建议、收益承诺或交易指令。投资决策及其风险由用户自行承担。",
+  data_delay_notice: "A 股行情、资金流与研究数据通常按 T+1 更新，节假日、数据源维护或网络波动可能造成进一步延迟，请以交易所及持牌机构披露为准。",
+  confirm_label: "我已阅读并理解以上说明",
+});
+
+export const __mobilePresentationTest = {
+  mobileBootstrapPayload,
+  mobileIndustryPayload,
+  rankMobileSamplePoolItems,
+  mobileSamplePoolItem,
+  mobileStockResearchPayload,
+  mobileStockResearchUnavailablePayload,
+  mobileAnalysisComputeAvailable,
+  mobileCompliancePayload,
+  mobileMarketCenterPayload,
+  mobileDeepAnalysisQuotaPayload,
+  mergeMobilePortfolioPositions,
+  analysisFallbackPortfolioBundle,
+};
+
+export const __productionUploadMaintenanceTest = {
+  cleanupStaleProductionUploads,
+};
+
 export default {
   async fetch(request, env) {
     const corsHeaders = cors(request, env);
@@ -31,6 +58,7 @@ export default {
     const key = `${request.method.toUpperCase()} ${path}`;
     const handler = ROUTES.get(key);
 
+    let ctx = null;
     try {
       if (!handler) {
         if (
@@ -61,66 +89,80 @@ export default {
           const tableName = decodeURIComponent(
             path.slice("/v1/scorpio_v1_admin/cloud-db/tables/".length)
           ).trim();
-          return withCors(await getAdminCloudDbTableDetail({ request, env, url, tableName }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, tableName }, getAdminCloudDbTableDetail), corsHeaders);
         }
         if (request.method === "GET" && path.startsWith("/v1/scorpio_v1_admin/production-uploads/")) {
           const batchId = decodeURIComponent(
             path.slice("/v1/scorpio_v1_admin/production-uploads/".length)
           ).trim();
-          return withCors(await getAdminProductionUploadBatchDetail({ request, env, url, batchId }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, batchId }, getAdminProductionUploadBatchDetail), corsHeaders);
         }
         if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/customers/")) {
           const customerId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/customers/".length)).trim());
           if (request.method === "PUT") {
-            return withCors(await updateAdminCustomer({ request, env, customerId }), corsHeaders);
+            return withCors(await runAdminRequest({ request, env, url, customerId }, updateAdminCustomer), corsHeaders);
           }
-          return withCors(await deleteAdminCustomer({ request, env, customerId }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, customerId }, deleteAdminCustomer), corsHeaders);
         }
         if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/activation-codes/")) {
           const code = decodeURIComponent(path.slice("/v1/scorpio_v1_admin/activation-codes/".length)).trim().toUpperCase();
           if (request.method === "PUT") {
-            return withCors(await updateAdminActivationCode({ request, env, code }), corsHeaders);
+            return withCors(await runAdminRequest({ request, env, url, code }, updateAdminActivationCode), corsHeaders);
           }
-          return withCors(await revokeAdminActivationCode({ request, env, code }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, code }, revokeAdminActivationCode), corsHeaders);
         }
         if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/licenses/")) {
           const licenseId = decodeURIComponent(path.slice("/v1/scorpio_v1_admin/licenses/".length)).trim();
           if (request.method === "PUT") {
-            return withCors(await updateAdminLicense({ request, env, licenseId }), corsHeaders);
+            return withCors(await runAdminRequest({ request, env, url, licenseId }, updateAdminLicense), corsHeaders);
           }
-          return withCors(await revokeAdminLicense({ request, env, licenseId }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, licenseId }, revokeAdminLicense), corsHeaders);
         }
         if (request.method === "PUT" && path.startsWith("/v1/scorpio_v1_admin/feedback/")) {
           const feedbackId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/feedback/".length)).trim());
-          return withCors(await updateAdminFeedback({ request, env, feedbackId }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, feedbackId }, updateAdminFeedback), corsHeaders);
         }
 
         if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/data-packages/")) {
           const packageId = decodeURIComponent(path.slice("/v1/scorpio_v1_admin/data-packages/".length)).trim();
           if (request.method === "PUT") {
-            return withCors(await updateAdminDataPackage({ request, env, packageId }), corsHeaders);
+            return withCors(await runAdminRequest({ request, env, url, packageId }, updateAdminDataPackage), corsHeaders);
           }
-          return withCors(await deactivateAdminDataPackage({ request, env, packageId }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, packageId }, deactivateAdminDataPackage), corsHeaders);
         }
         if ((request.method === "PUT" || request.method === "DELETE") && path.startsWith("/v1/scorpio_v1_admin/releases/")) {
           const releaseId = Number(decodeURIComponent(path.slice("/v1/scorpio_v1_admin/releases/".length)).trim());
           if (request.method === "PUT") {
-            return withCors(await updateAdminRelease({ request, env, releaseId }), corsHeaders);
+            return withCors(await runAdminRequest({ request, env, url, releaseId }, updateAdminRelease), corsHeaders);
           }
-          return withCors(await deactivateAdminRelease({ request, env, releaseId }), corsHeaders);
+          return withCors(await runAdminRequest({ request, env, url, releaseId }, deactivateAdminRelease), corsHeaders);
         }
         if (request.method === "GET" && path === "/health") {
           return json({ ok: true, service: "scorpio-license-api" }, 200, corsHeaders);
         }
         return json({ error: "not_found" }, 404, corsHeaders);
       }
-      const result = await handler({ request, env, url, corsHeaders });
+      ctx = { request, env, url, corsHeaders };
+      const result = await handler(ctx);
+      await recordAdminRequest(ctx, result.status);
       return withCors(result, corsHeaders);
     } catch (error) {
       const message = error && error.publicMessage ? error.publicMessage : "internal_server_error";
       const status = error && error.status ? error.status : 500;
+      console.error("worker_request_failed", {
+        method: request.method,
+        path,
+        status,
+        error: safeText(error && error.message ? error.message : String(error), 500),
+      });
+      if (path.startsWith("/v1/scorpio_v1_admin/") && !ctx?.adminActor && !error?.adminAuditLogged) {
+        await recordAdminRequest({ request, env, url }, status, message);
+      }
       return json({ error: message }, status, corsHeaders);
     }
+  },
+  async scheduled(_controller, env, executionCtx) {
+    executionCtx.waitUntil(runScheduledMaintenance(env));
   },
 };
 
@@ -193,7 +235,20 @@ route("POST", "/v1/auth/login", async (ctx) => {
   }
 
   const response = await tokenResponse(ctx.env, user);
-  const activationCodes = await assignedActivationCodes(ctx.env, user.id);
+  const mobileFingerprint = safeText(body.machine_fingerprint || "", 160);
+  if (mobileFingerprint) {
+    if (!(await allowRateLimit(ctx.env, "mobile_authorize_user", String(user.id), 12, 60 * 60 * 1000))) {
+      throwHttp(429, "mobile_authorize_rate_limited");
+    }
+    const authorization = await authorizeMobileCompanionDevice(ctx.env, {
+      user,
+      machineFingerprint: mobileFingerprint,
+      clientVersion: safeText(body.client_version || "", 64),
+      deviceLabel: safeText(body.device_label || "Android", 96),
+    });
+    response.mobile_license = mobileAuthorizationPayload(authorization);
+  }
+  const activationCodes = await activationCodesForUser(ctx.env, user.id);
   return json(withActivationCodes(response, activationCodes));
 });
 
@@ -319,6 +374,12 @@ route("POST", "/v1/auth/reset-password", async (ctx) => {
 
 route("POST", "/v1/license/activate", async (ctx) => {
   const user = await requireUser(ctx);
+  if (!(await allowRateLimit(ctx.env, "activate_user", String(user.id), 5, 60 * 60 * 1000))) {
+    return json({ error: "rate_limit_exceeded" }, 429);
+  }
+  if (!(await allowRateLimit(ctx.env, "activate_ip", clientIp(ctx.request) || "unknown", 20, 60 * 60 * 1000))) {
+    return json({ error: "rate_limit_exceeded" }, 429);
+  }
   const body = await readJson(ctx.request);
   const activationCode = String(body.activation_code || "").trim().toUpperCase();
   const machineFingerprint = String(body.machine_fingerprint || "").trim();
@@ -387,15 +448,6 @@ route("POST", "/v1/license/activate", async (ctx) => {
     return json({ error: "activation_code_invalid_or_used" }, 400);
   }
 
-  const existingCount = await ctx.env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM licenses WHERE activation_code_id = ? AND revoked = 0"
-  )
-    .bind(code.id)
-    .first();
-  if (Number(existingCount.count || 0) >= Number(code.max_devices || 1)) {
-    return json({ error: "device_limit_reached" }, 400);
-  }
-
   const autoIssue = listEnv(ctx.env.LICENSE_AUTO_ISSUE_EDITIONS, "personal_standard,personal_pro").includes(
     code.edition
   );
@@ -408,15 +460,24 @@ route("POST", "/v1/license/activate", async (ctx) => {
   });
 
   const now = nowIso();
-  await ctx.env.DB.batch([
+  const activationResults = await ctx.env.DB.batch([
     ctx.env.DB.prepare(
       `INSERT INTO licenses
        (user_id, activation_code_id, license_id, edition, machine_fingerprint, signed_payload, signature, nonce,
         issued_at, expires_at, is_active, approval_status, max_offline_days, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       SELECT ?, ac.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       FROM activation_codes ac
+       WHERE ac.id = ?
+         AND ac.status IN ('active', 'assigned')
+         AND (ac.assigned_to_user_id IS NULL OR ac.assigned_to_user_id = ?)
+         AND (ac.customer_email IS NULL OR ac.customer_email = '' OR lower(ac.customer_email) = ?)
+         AND (
+           SELECT COUNT(*)
+           FROM licenses existing
+           WHERE existing.activation_code_id = ac.id AND existing.revoked = 0
+         ) < ac.max_devices`
     ).bind(
       user.id,
-      code.id,
       issued.license_id,
       issued.edition,
       machineFingerprint,
@@ -428,17 +489,34 @@ route("POST", "/v1/license/activate", async (ctx) => {
       autoIssue ? 1 : 0,
       autoIssue ? "auto" : "pending",
       intEnv(ctx.env.MAX_OFFLINE_DAYS, 7),
-      now
+      now,
+      code.id,
+      user.id,
+      normalizeEmail(user.email)
     ),
     ctx.env.DB.prepare(
-      "UPDATE activation_codes SET status = 'used', used_by_user_id = ?, used_at = ? WHERE id = ?"
+      `UPDATE activation_codes
+       SET status = CASE
+             WHEN (
+               SELECT COUNT(*) FROM licenses
+               WHERE activation_code_id = activation_codes.id AND revoked = 0
+             ) >= max_devices THEN 'used'
+             ELSE status
+           END,
+           used_by_user_id = ?,
+           used_at = ?
+       WHERE id = ?`
     ).bind(user.id, now, code.id),
     ctx.env.DB.prepare(
       `INSERT INTO validation_logs
-       (license_id, user_id, machine_fingerprint, client_version, client_ip, is_valid, fail_reason, validated_at)
-       VALUES (?, ?, ?, ?, ?, 1, '', ?)`
-    ).bind(issued.license_id, user.id, machineFingerprint, clientVersion, clientIp(ctx.request), now),
+        (license_id, user_id, machine_fingerprint, client_version, client_ip, is_valid, fail_reason, validated_at)
+       SELECT ?, ?, ?, ?, ?, 1, '', ?
+       WHERE EXISTS (SELECT 1 FROM licenses WHERE license_id = ?)`
+    ).bind(issued.license_id, user.id, machineFingerprint, clientVersion, clientIp(ctx.request), now, issued.license_id),
   ]);
+  if (Number(activationResults[0]?.meta?.changes || 0) !== 1) {
+    return json({ error: "device_limit_reached" }, 400);
+  }
 
   if (!autoIssue) {
     return json(
@@ -465,10 +543,17 @@ route("POST", "/v1/license/activate", async (ctx) => {
 
 route("POST", "/v1/license/status", async (ctx) => {
   const user = await requireUser(ctx);
+  if (!(await allowRateLimit(ctx.env, "status_user", String(user.id), 30, 60 * 1000))) {
+    return json({ error: "rate_limit_exceeded" }, 429);
+  }
   const body = await readJson(ctx.request);
   const licenseId = String(body.license_id || "").trim();
   const machineFingerprint = String(body.machine_fingerprint || "").trim();
   const clientVersion = String(body.client_version || "").trim();
+
+  if (!licenseId || !machineFingerprint) {
+    return json({ error: "license_id_and_machine_fingerprint_required" }, 400);
+  }
 
   const lic = await ctx.env.DB.prepare("SELECT * FROM licenses WHERE license_id = ? AND user_id = ?")
     .bind(licenseId, user.id)
@@ -495,7 +580,7 @@ route("POST", "/v1/license/status", async (ctx) => {
     valid = false;
     reason = lic.approval_status === "pending" ? "pending_approval" : "inactive";
     message = "license_inactive";
-  } else if (lic.machine_fingerprint && machineFingerprint && lic.machine_fingerprint !== machineFingerprint) {
+  } else if (!lic.machine_fingerprint || lic.machine_fingerprint !== machineFingerprint) {
     valid = false;
     reason = "machine_mismatch";
     message = "machine_fingerprint_mismatch";
@@ -529,17 +614,24 @@ route("POST", "/v1/license/status", async (ctx) => {
 
 route("GET", "/v1/license/current", async (ctx) => {
   const user = await requireUser(ctx);
-  const lic = await ctx.env.DB.prepare(
-    `SELECT *
-     FROM licenses
-     WHERE user_id = ? AND is_active = 1 AND revoked = 0
-     ORDER BY created_at DESC, id DESC
-     LIMIT 1`
-  )
-    .bind(user.id)
-    .first();
+  const machineFingerprint = safeText(ctx.url.searchParams.get("machine_fingerprint") || "", 160);
+  const activationCodes = await activationCodesForUser(ctx.env, user.id);
+  const lic = machineFingerprint
+    ? await ctx.env.DB.prepare(
+      `SELECT *
+       FROM licenses
+       WHERE user_id = ? AND machine_fingerprint = ? AND is_active = 1 AND revoked = 0
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    ).bind(user.id, machineFingerprint).first()
+    : await ctx.env.DB.prepare(
+      `SELECT *
+       FROM licenses
+       WHERE user_id = ? AND is_active = 1 AND revoked = 0
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`
+    ).bind(user.id).first();
   if (!lic) {
-    const activationCodes = await assignedActivationCodes(ctx.env, user.id);
     return json(
       withActivationCodes(
         {
@@ -550,8 +642,21 @@ route("GET", "/v1/license/current", async (ctx) => {
       )
     );
   }
+  if (machineFingerprint && (!lic.machine_fingerprint || lic.machine_fingerprint !== machineFingerprint)) {
+    return json(
+      withActivationCodes(
+        {
+          active: false,
+          valid: false,
+          reason: "machine_mismatch",
+          message: "machine_fingerprint_mismatch",
+          ...licenseActivationResponse(lic),
+        },
+        activationCodes
+      )
+    );
+  }
   const valid = lic.expires_at >= todayIso() && !["pending", "rejected"].includes(String(lic.approval_status || ""));
-  const activationCodes = await assignedActivationCodes(ctx.env, user.id);
   return json(
     withActivationCodes(
       {
@@ -567,6 +672,9 @@ route("GET", "/v1/license/current", async (ctx) => {
 
 route("POST", "/v1/license/rebind", async (ctx) => {
   const user = await requireUser(ctx);
+  if (!(await allowRateLimit(ctx.env, "rebind_user", String(user.id), 3, 24 * 60 * 60 * 1000))) {
+    return json({ error: "rate_limit_exceeded" }, 429);
+  }
   const body = await readJson(ctx.request);
   const licenseId = String(body.license_id || "").trim();
   const machineFingerprint = String(body.machine_fingerprint || "").trim();
@@ -584,19 +692,24 @@ route("POST", "/v1/license/rebind", async (ctx) => {
   if (Number(lic.revoked)) {
     return json({ error: "license_revoked" }, 400);
   }
+  if (!Number(lic.is_active) || ["pending", "rejected"].includes(String(lic.approval_status || ""))) {
+    return json({ error: "license_inactive" }, 400);
+  }
+  if (lic.expires_at < todayIso()) {
+    return json({ error: "license_expired" }, 400);
+  }
 
   const history = parseJson(lic.machine_fingerprint_history, []);
   if (lic.machine_fingerprint) {
     history.push({ fingerprint: lic.machine_fingerprint, changed_at: nowIso() });
   }
 
-  const remainingDays = Math.max(1, daysBetween(todayIso(), lic.expires_at));
   const issued = await issueLicensePayload(ctx.env, {
     edition: lic.edition,
     customerName: user.username || user.email,
     customerEmail: user.email,
     machineFingerprint,
-    days: remainingDays,
+    expiresAt: lic.expires_at,
     licenseId: lic.license_id,
   });
 
@@ -660,75 +773,76 @@ function licenseActivationResponse(license, extras = {}) {
   };
 }
 
-async function assignedActivationCodes(env, userId) {
+function mobileAuthorizationPayload(authorization) {
+  return {
+    active: true,
+    valid: true,
+    message: "mobile_device_authorized",
+    ...licenseActivationResponse(authorization.license),
+    mobile_device: authorization.device,
+  };
+}
+
+async function activationCodesForUser(env, userId) {
   const rows = await env.DB.prepare(
     `SELECT ac.code, ac.edition, ac.license_days, ac.status, ac.created_at,
-            linked_license.license_id, linked_license.expires_at,
-            linked_license.is_active AS license_active,
-            linked_license.revoked AS license_revoked,
-            linked_license.approval_status,
-            linked_license.machine_fingerprint
-     FROM activation_codes AS ac
-     LEFT JOIN licenses AS linked_license
-       ON linked_license.id = (
-         SELECT latest_license.id
-         FROM licenses AS latest_license
-         WHERE latest_license.activation_code_id = ac.id
-           AND latest_license.user_id = ?
-         ORDER BY latest_license.created_at DESC, latest_license.id DESC
+            l.license_id, l.expires_at, l.is_active AS license_active,
+            l.revoked AS license_revoked, l.approval_status, l.machine_fingerprint
+     FROM activation_codes ac
+     LEFT JOIN licenses l
+       ON l.id = (
+         SELECT l2.id
+         FROM licenses l2
+         WHERE l2.activation_code_id = ac.id
+           AND l2.user_id = ?
+         ORDER BY l2.created_at DESC, l2.id DESC
          LIMIT 1
        )
-     WHERE (
-       ac.assigned_to_user_id = ?
-       OR ac.used_by_user_id = ?
-       OR EXISTS (
-         SELECT 1
-         FROM licenses AS linked_license
-         WHERE linked_license.activation_code_id = ac.id
-           AND linked_license.user_id = ?
-       )
-     )
-       AND ac.status IN ('assigned', 'active', 'used')
-     ORDER BY
-       CASE
-         WHEN linked_license.is_active = 1 AND linked_license.revoked = 0 THEN 0
-         WHEN ac.status IN ('assigned', 'active') THEN 1
-         WHEN ac.status = 'used' THEN 2
-         ELSE 3
-       END,
-       ac.created_at DESC,
-       ac.id DESC`
+     WHERE ac.assigned_to_user_id = ?
+        OR ac.used_by_user_id = ?
+        OR EXISTS (
+          SELECT 1
+          FROM licenses owned
+          WHERE owned.activation_code_id = ac.id
+            AND owned.user_id = ?
+        )
+     ORDER BY COALESCE(l.created_at, ac.created_at) DESC, ac.id DESC`
   )
     .bind(userId, userId, userId, userId)
     .all();
-  return rows.results || [];
+  return (rows.results || []).map((row) => ({
+    code: row.code || "",
+    edition: row.edition || "",
+    license_days: Number(row.license_days || 0),
+    status: row.status || "",
+    created_at: row.created_at || "",
+    license_id: row.license_id || "",
+    expires_at: row.expires_at || "",
+    license_active: Boolean(Number(row.license_active || 0)),
+    license_revoked: Boolean(Number(row.license_revoked || 0)),
+    approval_status: row.approval_status || "",
+    machine_fingerprint: row.machine_fingerprint || "",
+  }));
 }
 
 function withActivationCodes(payload, activationCodes) {
-  const codes = (activationCodes || []).map((item) => ({
-    code: item.code,
-    status: item.status || "",
-    edition: item.edition || "",
-    license_days: Number(item.license_days || 0),
-    created_at: item.created_at || "",
-    license_id: item.license_id || "",
-    expires_at: item.expires_at || "",
-    license_active: Boolean(Number(item.license_active || 0)),
-    license_revoked: Boolean(Number(item.license_revoked || 0)),
-    approval_status: item.approval_status || "",
-    machine_fingerprint: item.machine_fingerprint || "",
-  }));
-  const activationCode = codes[0] || null;
+  const codes = Array.isArray(activationCodes) ? activationCodes : [];
+  const activationCode =
+    codes.find((item) => item.license_id && item.license_id === payload.license_id) ||
+    codes[0];
+  if (!activationCode) {
+    return { ...payload, activation_codes: [] };
+  }
   return {
     ...payload,
     activation_codes: codes,
-    activation_code: activationCode ? activationCode.code : "",
-    activation_code_status: activationCode ? activationCode.status : "",
-    activation_edition: activationCode ? activationCode.edition : "",
-    activation_license_days: activationCode ? activationCode.license_days : 0,
-    trial_activation_code: activationCode ? activationCode.code : "",
-    trial_edition: activationCode ? activationCode.edition : "",
-    trial_license_days: activationCode ? activationCode.license_days : 0,
+    activation_code: activationCode.code,
+    activation_code_status: activationCode.status || "",
+    activation_edition: activationCode.edition || "",
+    activation_license_days: Number(activationCode.license_days || 0),
+    trial_activation_code: activationCode.code,
+    trial_edition: activationCode.edition || "",
+    trial_license_days: Number(activationCode.license_days || 0),
   };
 }
 
@@ -776,18 +890,18 @@ route("POST", "/v1/usage/report", async (ctx) => {
 });
 
 route("POST", "/v1/feedback", async (ctx) => {
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, 16 * 1024);
   if (hasFeedbackHoneypotValue(body)) {
-    // Do not disclose the honeypot to automated submitters. A success-shaped
-    // response prevents them from using the endpoint as an oracle.
     return json({ accepted: true, status: "new" }, 201);
   }
+  const clientAddress = clientIp(ctx.request) || "unknown";
   await enforcePublicRateLimit(ctx.env, {
     scope: "feedback_ip",
-    subject: clientIp(ctx.request) || "unknown",
+    subject: clientAddress,
     limit: intEnv(ctx.env.FEEDBACK_RATE_LIMIT_PER_HOUR, 5),
     windowSeconds: 60 * 60,
   });
+  await verifyFeedbackTurnstile(ctx.env, body, clientAddress);
   const item = normalizeFeedbackSubmission(body);
   if (isMainlandChinaRequest(ctx.request)) {
     if (!item.contact_email) {
@@ -802,6 +916,16 @@ route("POST", "/v1/feedback", async (ctx) => {
     await verifyTurnstileToken(ctx.env, body.turnstile_token, ctx.request);
   }
   const now = nowIso();
+  const duplicate = await ctx.env.DB.prepare(
+    `SELECT public_id FROM feedback_items
+     WHERE client_ip = ? AND title = ? AND description = ? AND created_at >= ?
+     ORDER BY id DESC LIMIT 1`
+  )
+    .bind(clientAddress, item.title, item.description, new Date(Date.now() - 15 * 60 * 1000).toISOString())
+    .first();
+  if (duplicate) {
+    return json({ accepted: true, duplicate: true, public_id: duplicate.public_id, status: "new" }, 202);
+  }
   const publicId = `FB-${Date.now().toString(36).toUpperCase()}-${randomToken(4).toUpperCase()}`;
 
   await ctx.env.DB.prepare(
@@ -824,7 +948,7 @@ route("POST", "/v1/feedback", async (ctx) => {
       item.environment,
       item.rating,
       JSON.stringify(item.survey_answers),
-      clientIp(ctx.request),
+      clientAddress,
       safeText(ctx.request.headers.get("user-agent") || "", 400),
       now,
       now
@@ -1007,14 +1131,16 @@ route("POST", "/v1/data-sync/client-log", async (ctx) => {
 
 route("GET", "/v1/analysis/health", async (ctx) => {
   const compute = await analysisComputeHealth(ctx.env);
-  const mode = !compute.configured ? "contract_ready" : compute.ok ? "compute_proxy" : "compute_unreachable";
+  const cache = await analysisCacheHealth(ctx.env);
+  const mode = compute.ok ? "compute_proxy" : cache.ready ? "cache_fallback" : "degraded";
   return json({
     ok: true,
     service: "scorpio-analysis-api",
     mode,
-    ready: !compute.configured || compute.ok,
+    ready: compute.ok || cache.ready,
     gateway: { ok: true },
     compute,
+    cache,
     security: analysisSecurityStatus(ctx.env),
     generated_at: nowIso(),
   });
@@ -1025,7 +1151,7 @@ route("POST", "/v1/analysis/stock/bundle", async (ctx) => {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/bundle" });
 
   if (analysisComputeConfigured(ctx.env)) {
@@ -1035,14 +1161,21 @@ route("POST", "/v1/analysis/stock/bundle", async (ctx) => {
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackStockBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: "/v1/analysis/stock/bundle",
+        feature: "stock_bundle",
+      }, reason),
     });
   }
 
-  const response = contractStockBundle(request, {
+  const response = await analysisFallbackStockBundle(ctx.env, request, {
     user,
     license,
     endpoint: "/v1/analysis/stock/bundle",
-  });
+    feature: "stock_bundle",
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
@@ -1062,7 +1195,7 @@ route("POST", "/v1/analysis/stock/price-technical", async (ctx) => {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/price-technical" });
 
   if (analysisComputeConfigured(ctx.env)) {
@@ -1072,15 +1205,21 @@ route("POST", "/v1/analysis/stock/price-technical", async (ctx) => {
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackStockBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: "/v1/analysis/stock/price-technical",
+        feature: "price_technical",
+      }, reason),
     });
   }
 
-  const response = contractFeatureBundle(request, {
+  const response = await analysisFallbackStockBundle(ctx.env, request, {
     user,
     license,
     endpoint: "/v1/analysis/stock/price-technical",
     feature: "price_technical",
-  });
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
@@ -1100,7 +1239,7 @@ route("POST", "/v1/analysis/stock/reason", async (ctx) => {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/reason" });
 
   if (analysisComputeConfigured(ctx.env)) {
@@ -1110,15 +1249,21 @@ route("POST", "/v1/analysis/stock/reason", async (ctx) => {
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackStockBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: "/v1/analysis/stock/reason",
+        feature: "reason",
+      }, reason),
     });
   }
 
-  const response = contractFeatureBundle(request, {
+  const response = await analysisFallbackStockBundle(ctx.env, request, {
     user,
     license,
     endpoint: "/v1/analysis/stock/reason",
     feature: "reason",
-  });
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
@@ -1194,56 +1339,410 @@ route("GET", "/v1/analysis/bond/bundle", async (ctx) => {
   });
 });
 
-route("POST", "/v1/site/visit", async (ctx) => {
-  const body = await readJson(ctx.request);
-  const result = await recordSiteVisit(ctx.env, ctx.request, body);
-  return json(result);
+route("POST", "/v1/analysis/portfolio/analyze", async (ctx) => {
+  return handlePortfolioAnalysis(ctx, {
+    endpoint: "/v1/analysis/portfolio/analyze",
+    feature: "portfolio_analyze",
+  });
 });
 
 route("POST", "/v1/analysis/portfolio/enrich", async (ctx) => {
+  return handlePortfolioAnalysis(ctx, {
+    endpoint: "/v1/analysis/portfolio/enrich",
+    feature: "portfolio_enrich",
+  });
+});
+
+route("POST", "/v1/mobile/authorize", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const machineFingerprint = safeText(body.machine_fingerprint || "", 160);
+  const clientVersion = safeText(body.client_version || "", 64);
+  if (!machineFingerprint) {
+    throwHttp(400, "mobile_machine_fingerprint_required");
+  }
+  if (!(await allowRateLimit(ctx.env, "mobile_authorize_user", String(user.id), 12, 60 * 60 * 1000))) {
+    throwHttp(429, "mobile_authorize_rate_limited");
+  }
+  await enforceAnalysisRateLimit(ctx.env, user);
+  await verifyAnalysisRequestSignature(ctx, { user, requestBody: body });
+  const authorization = await authorizeMobileCompanionDevice(ctx.env, {
+    user,
+    machineFingerprint,
+    clientVersion,
+    deviceLabel: safeText(body.device_label || "Android", 96),
+  });
+  return json(mobileAuthorizationPayload(authorization));
+});
+
+route("GET", "/v1/mobile/network-check", async (ctx) => {
+  const startedAt = performance.now();
+  const response = {
+    ok: true,
+    service: "scorpio-mobile-edge",
+    generated_at: nowIso(),
+    edge: {
+      colo: safeText(ctx.request.cf && ctx.request.cf.colo, 16),
+      country: safeText(ctx.request.cf && ctx.request.cf.country, 8),
+      protocol: safeText(ctx.request.cf && ctx.request.cf.httpProtocol, 24),
+    },
+  };
+  return json(response, 200, {
+    "cache-control": "no-store",
+    "server-timing": `worker;dur=${Math.max(0, performance.now() - startedAt).toFixed(2)}`,
+  });
+});
+
+route("POST", "/v1/mobile/bootstrap", async (ctx) => {
+  const startedAt = Date.now();
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(
+    ctx.env,
+    user,
+    request.license_id,
+    request.machine_fingerprint
+  );
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/bootstrap",
+  });
+
+  const rawPositions = request.positions.length
+    ? request.positions
+    : await loadMobilePortfolioPositions(ctx.env, user.id);
+  const positionsPromise = enrichMobilePortfolioPositions(ctx.env, license, rawPositions);
+  const [savedPositions, market, portfolio, latestPackageRow, watchlist, sampleRows, compliance] = await Promise.all([
+    positionsPromise,
+    mobileMarketAnalysis(ctx, { user, license, request, startedAt }),
+    positionsPromise.then((positions) => mobilePortfolioAnalysis(ctx, {
+      user,
+      license,
+      request: { ...request, positions },
+      startedAt,
+    })),
+    latestDataPackage(ctx.env, license.edition, "stable", request.client_version).catch(() => null),
+    loadMobileWatchlist(ctx.env, user.id).catch(() => []),
+    loadMobileSamplePoolRows(ctx.env, license, {
+      strategy: "balanced",
+      keyword: "",
+      industry: "",
+      limit: 3,
+    }).catch(() => []),
+    mobileComplianceNotice(ctx.env, user, request.machine_fingerprint),
+  ]);
+
+  return json(mobileBootstrapPayload({
+    user,
+    license,
+    request,
+    market,
+    portfolio,
+    latestPackageRow,
+    positionCount: savedPositions.length,
+    positions: savedPositions,
+    watchlist,
+    sampleItems: rankMobileSamplePoolItems(sampleRows, "balanced").slice(0, 3),
+    compliance,
+  }));
+});
+
+route("POST", "/v1/mobile/compliance/accept", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(
+    ctx.env,
+    user,
+    request.license_id,
+    request.machine_fingerprint
+  );
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/compliance/accept",
+  });
+  const version = safeText(body.compliance_version || "", 64);
+  if (version !== MOBILE_COMPLIANCE_VERSION) {
+    throwHttp(409, "compliance_version_outdated");
+  }
+  await recordMobileComplianceAcceptance(ctx.env, {
+    user,
+    machineFingerprint: request.machine_fingerprint,
+    clientVersion: request.client_version,
+    complianceVersion: version,
+    clientIp: clientIp(ctx.request),
+  });
+  return json({
+    ok: true,
+    compliance: mobileCompliancePayload(true),
+  });
+});
+
+route("PUT", "/v1/mobile/portfolio", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(
+    ctx.env,
+    user,
+    request.license_id,
+    request.machine_fingerprint
+  );
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/portfolio",
+  });
+  const positions = await enrichMobilePortfolioPositions(ctx.env, license, request.positions);
+  await saveMobilePortfolioPositions(ctx.env, user.id, positions);
+  return json({
+    ok: true,
+    position_count: positions.length,
+    positions,
+    updated_at: nowIso(),
+  });
+});
+
+route("POST", "/v1/mobile/watchlist/query", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/watchlist/query",
+  });
+  return json({ ok: true, items: await loadMobileWatchlist(ctx.env, user.id), updated_at: nowIso() });
+});
+
+route("PUT", "/v1/mobile/watchlist", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/watchlist",
+  });
+  const items = normalizeMobileWatchlist(body.items);
+  await saveMobileWatchlist(ctx.env, user.id, items);
+  return json({ ok: true, items, item_count: items.length, updated_at: nowIso() });
+});
+
+route("POST", "/v1/mobile/stock/search", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/stock/search",
+  });
+  const keyword = safeText(body.keyword || body.query || "", 64).toUpperCase();
+  if (!keyword) throwHttp(400, "stock_search_keyword_required");
+  const rows = await searchPublishedStockRows(ctx.env, license, keyword, 100);
+  const items = rows.map(mobileStockSearchItem).filter((item) =>
+    `${item.code} ${item.name} ${item.industry}`.toUpperCase().includes(keyword)
+  ).slice(0, 30);
+  return json({ ok: true, keyword, items, result_count: items.length, source: "cloudflare_d1" });
+});
+
+route("POST", "/v1/mobile/sample-pool", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/sample-pool",
+  });
+  const filters = normalizeMobileSamplePoolRequest(body);
+  const rows = await loadMobileSamplePoolRows(ctx.env, license, filters);
+  const items = rankMobileSamplePoolItems(rows, filters.strategy);
+  return json({
+    ok: true,
+    title: "研究样本池",
+    summary: items.length
+      ? `已按${mobileStrategyLabel(filters.strategy)}筛选 ${items.length} 个标的`
+      : "当前筛选条件下暂无标的",
+    strategy: filters.strategy,
+    strategy_label: mobileStrategyLabel(filters.strategy),
+    as_of: mobileDateLabel(rows[0] && rows[0]._data_date),
+    state: items.length ? "ready" : "empty",
+    items,
+  });
+});
+
+route("POST", "/v1/mobile/market", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/market",
+  });
+  const market = await loadMobileMarketCenter(ctx.env, license);
+  return json({ ok: true, market, source: "published_cloud_data" });
+});
+
+route("POST", "/v1/mobile/stock/detail", async (ctx) => {
+  const startedAt = Date.now();
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeAnalysisRequest(body, "stock");
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/stock/detail",
+  });
+  const result = await mobileStockAnalysis(ctx, { user, license, request, startedAt });
+  return json({ ok: true, result, source: "analysis_compute" });
+});
+
+route("POST", "/v1/mobile/stock/research", async (ctx) => {
+  const startedAt = Date.now();
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeAnalysisRequest(body, "stock");
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/stock/research",
+  });
+  const deepRefresh = Boolean(body.deep_refresh);
+  let quota = deepRefresh
+    ? await claimMobileDeepAnalysisQuota(ctx.env, user)
+    : await mobileDeepAnalysisQuotaStatus(ctx.env, user);
+  const analysisPromise = deepRefresh
+    ? mobileStockAnalysis(ctx, { user, license, request, startedAt })
+    : analysisFallbackStockBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: "/v1/mobile/stock/research",
+        feature: "stock_bundle",
+      }, "published_mobile_data");
+  const [analysisResult, scoreRowsResult] = await Promise.allSettled([
+    analysisPromise,
+    publishedRowsForCode(ctx.env, "score_history", license, request.code, 1),
+  ]);
+  const analysis = analysisResult.status === "fulfilled"
+    ? analysisResult.value
+    : mobileStockAnalysisUnavailable(request, "edge_fallback_failed");
+  const scoreRows = scoreRowsResult.status === "fulfilled" ? scoreRowsResult.value : [];
+  const scoreRow = scoreRows.find((row) => firstText(row.asset_type, "stock").toLowerCase() === "stock") || {};
+  let research;
+  try {
+    research = mobileStockResearchPayload(analysis, scoreRow, request);
+  } catch (error) {
+    console.error("mobile_stock_presentation_failed", {
+      code: request.code,
+      error: safeText(error && error.message ? error.message : String(error), 500),
+    });
+    research = mobileStockResearchUnavailablePayload(request);
+  }
+  return json({
+    ok: true,
+    research,
+    quota,
+    source: deepRefresh && analysisResult.status === "fulfilled"
+      ? "cloudflare_deep_analysis"
+      : "published_data_fallback",
+  });
+});
+
+route("POST", "/v1/mobile/industry", async (ctx) => {
+  const startedAt = Date.now();
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/industry",
+  });
+  const result = await mobileSharedAnalysis(ctx, {
+    user,
+    license,
+    request,
+    startedAt,
+    endpoint: "/v1/analysis/industry/overview",
+    feature: "industry_overview",
+    assetType: "industry",
+  });
+  return json({
+    ok: true,
+    industry: mobileIndustryPayload(result),
+    result,
+    source: "cloudflare_worker",
+  });
+});
+
+route("POST", "/v1/site/visit", async (ctx) => {
+  const clientAddress = clientIp(ctx.request) || "unknown";
+  if (!(await allowRateLimit(ctx.env, "site_visit_ip", clientAddress, 120, 60 * 60 * 1000))) {
+    return json({ ok: true, rate_limited: true });
+  }
+  const body = await readJson(ctx.request, 4 * 1024);
+  return json(await recordSiteVisit(ctx.env, ctx.request, body));
+});
+
+async function handlePortfolioAnalysis(ctx, options) {
   const startedAt = Date.now();
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
   const request = normalizePortfolioRequest(body);
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
-  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/portfolio/enrich" });
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
     return proxyAnalysisCompute(ctx, {
-      endpoint: "/v1/analysis/portfolio/enrich",
+      endpoint: options.endpoint,
       body: { ...request, user_id: user.id, email: user.email },
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackPortfolioBundle(request, {
+        user,
+        license,
+        endpoint: options.endpoint,
+        feature: options.feature,
+      }, reason),
     });
   }
 
-  const response = {
-    status: "contract_ready",
-    feature: "portfolio_enrich",
-    as_of: nowIso(),
-    data_quality: {
-      level: "not_computed",
-      freshness: "not_bound",
-      missing: ["analysis_compute_service"],
-    },
-    summary: {
-      title: "Analysis contract is ready",
-      brief: "The Cloudflare API has authentication and safe response contracts. Bind Analysis Compute to enable real portfolio enrichment.",
-      risk_level: "unknown",
-    },
-    portfolio: {
-      position_count: request.positions.length,
-      uploaded_fields: ["asset_type", "code", "weight"],
-    },
-    risk_flags: [],
-    next_actions: ["Bind Analysis Compute before enabling production portfolio enrichment."],
-    source: safeAnalysisSource("/v1/analysis/portfolio/enrich", user, license),
-  };
+  const response = analysisFallbackPortfolioBundle(request, {
+    user,
+    license,
+    endpoint: options.endpoint,
+    feature: options.feature,
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
-    endpoint: "/v1/analysis/portfolio/enrich",
+    endpoint: options.endpoint,
     assetType: "portfolio",
     assetCode: "",
     request,
@@ -1252,7 +1751,1707 @@ route("POST", "/v1/analysis/portfolio/enrich", async (ctx) => {
     latencyMs: Date.now() - startedAt,
   });
   return json(response);
-});
+}
+
+function normalizeMobileBootstrapRequest(body) {
+  const portfolio = normalizePortfolioRequest(body || {});
+  return {
+    ...portfolio,
+    market: normalizeMarket(body.market || "CN"),
+    client_version: safeText(body.client_version || "", 64),
+  };
+}
+
+async function loadMobilePortfolioPositions(env, userId) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT positions_json FROM mobile_portfolio_snapshots WHERE user_id = ? LIMIT 1"
+    ).bind(userId).first();
+    const positions = parseJson(row && row.positions_json, []);
+    return normalizePortfolioRequest({ positions }).positions;
+  } catch {
+    // Allows a zero-downtime Worker rollout immediately before the D1 migration.
+    return [];
+  }
+}
+
+async function enrichMobilePortfolioPositions(env, license, positions) {
+  const normalized = normalizePortfolioRequest({ positions }).positions;
+  const grouped = { stock: [], fund: [], bond: [] };
+  for (const position of normalized) {
+    if (grouped[position.asset_type]) grouped[position.asset_type].push(position.code);
+  }
+  const tablePairs = {
+    stock: ["stock_daily_latest", "stock_info"],
+    fund: ["fund_nav_daily", "fund_profiles"],
+    bond: ["bond_daily_snapshot", "bond_profiles"],
+  };
+  const rowGroups = {};
+  await Promise.all(Object.entries(tablePairs).map(async ([assetType, tables]) => {
+    const codes = uniqueStrings(grouped[assetType].flatMap((code) => assetCodeCandidates(code)));
+    if (!codes.length) {
+      rowGroups[assetType] = { daily: [], profiles: [] };
+      return;
+    }
+    const limit = Math.min(500, Math.max(20, codes.length * 4));
+    const [daily, profiles] = await Promise.all([
+      publishedRows(env, tables[0], license, { asset_codes: codes, limit }),
+      publishedRows(env, tables[1], license, { asset_codes: codes, limit }),
+    ]);
+    rowGroups[assetType] = { daily, profiles };
+  }));
+  return mergeMobilePortfolioPositions(normalized, rowGroups);
+}
+
+function mergeMobilePortfolioPositions(positions, rowGroups = {}) {
+  const merged = positions.map((position) => {
+    const group = rowGroups[position.asset_type] || {};
+    const daily = findMobilePortfolioRow(group.daily, position.code);
+    const profile = findMobilePortfolioRow(group.profiles, position.code);
+    const publishedPrice = mobilePortfolioRowPrice(position.asset_type, daily);
+    const currentPrice = publishedPrice && publishedPrice > 0
+      ? publishedPrice
+      : firstNumber(position.current_price, position.cost_price, 0);
+    const cloudName = firstText(
+      profile && (profile.name || profile.stock_name || profile.fund_name || profile.bond_name || profile.short_name),
+      daily && (daily.name || daily.stock_name || daily.fund_name || daily.bond_name || daily.short_name)
+    );
+    const inputName = firstText(position.name);
+    return {
+      ...position,
+      name: inputName && inputName.toUpperCase() !== position.code.toUpperCase()
+        ? inputName
+        : firstText(cloudName, inputName, position.code),
+      current_price: firstNumber(currentPrice, 0),
+      price_as_of: firstText(
+        daily && (daily.trade_date || daily.nav_date || daily.date || daily._data_date || daily._updated_at),
+        position.price_as_of
+      ),
+      price_source: publishedPrice && publishedPrice > 0 ? "published_market_data" : "user_or_cost_fallback",
+    };
+  });
+  const totalValue = merged.reduce((total, position) => (
+    total + firstNumber(position.quantity, 0) * firstNumber(position.current_price, 0)
+  ), 0);
+  return merged.map((position) => ({
+    ...position,
+    weight: totalValue > 0
+      ? (firstNumber(position.quantity, 0) * firstNumber(position.current_price, 0)) / totalValue
+      : 0,
+  }));
+}
+
+function findMobilePortfolioRow(rows, code) {
+  const target = mobilePortfolioCodeKey(code);
+  return (Array.isArray(rows) ? rows : []).find((row) => mobilePortfolioCodeKey(firstText(
+    row.code, row.stock_code, row.symbol, row.ts_code, row.asset_code, row.fund_code, row.bond_code
+  )) === target) || null;
+}
+
+function mobilePortfolioCodeKey(value) {
+  return String(value || "").trim().toUpperCase()
+    .replace(/\.(SH|SZ|BJ)$/i, "")
+    .replace(/^(SH|SZ|BJ)/i, "");
+}
+
+function mobilePortfolioRowPrice(assetType, row) {
+  if (!row) return null;
+  if (assetType === "fund") {
+    return firstNumber(row.unit_nav, row.nav, row.latest_nav, row.acc_nav, row.close, null);
+  }
+  if (assetType === "bond") {
+    return firstNumber(row.latest_price, row.price, row.close, row.full_price, row.clean_price, null);
+  }
+  return firstNumber(row.latest_price, row.close, row.close_price, row.price, null);
+}
+
+async function saveMobilePortfolioPositions(env, userId, positions) {
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO mobile_portfolio_snapshots (user_id, positions_json, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       positions_json = excluded.positions_json,
+       updated_at = excluded.updated_at`
+  ).bind(userId, JSON.stringify(positions || []), now).run();
+}
+
+async function authorizeMobileCompanionDevice(env, options) {
+  const existing = await env.DB.prepare(
+    `SELECT b.id AS binding_id, b.device_label, b.created_at AS bound_at, l.*
+     FROM mobile_device_bindings b
+     JOIN licenses l ON l.license_id = b.license_id AND l.user_id = b.user_id
+     WHERE b.user_id = ? AND b.machine_fingerprint = ? AND b.revoked = 0
+       AND l.is_active = 1 AND l.revoked = 0
+     ORDER BY b.id DESC
+     LIMIT 1`
+  ).bind(options.user.id, options.machineFingerprint).first();
+  if (existing && (!existing.expires_at || existing.expires_at >= todayIso())) {
+    await env.DB.prepare(
+      "UPDATE mobile_device_bindings SET client_version = ?, last_seen_at = ? WHERE id = ?"
+    ).bind(options.clientVersion, nowIso(), existing.binding_id).run();
+    return {
+      license: existing,
+      device: {
+        device_label: existing.device_label || options.deviceLabel,
+        bound_at: existing.bound_at || "",
+        companion: true,
+      },
+    };
+  }
+
+  let license = await env.DB.prepare(
+    `SELECT * FROM licenses
+     WHERE user_id = ? AND is_active = 1 AND revoked = 0
+       AND expires_at >= ?
+       AND COALESCE(approval_status, '') NOT IN ('pending', 'rejected')
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`
+  ).bind(options.user.id, todayIso()).first();
+  if (!license) {
+    license = await redeemAssignedMobileEntitlement(env, options.user);
+  }
+  if (!license) {
+    throwHttp(403, "account_entitlement_required");
+  }
+
+  const countRow = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM mobile_device_bindings WHERE user_id = ? AND revoked = 0"
+  ).bind(options.user.id).first();
+  const maxDevices = await mobileDeviceLimitForLicense(env, license);
+  if (Number(countRow && countRow.total) >= maxDevices) {
+    throwHttp(403, "mobile_device_limit_reached");
+  }
+
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO mobile_device_bindings
+       (user_id, license_id, machine_fingerprint, platform, device_label, client_version,
+        revoked, created_at, last_seen_at)
+     VALUES (?, ?, ?, 'android', ?, ?, 0, ?, ?)
+     ON CONFLICT(user_id, machine_fingerprint) DO UPDATE SET
+       license_id = excluded.license_id,
+       platform = excluded.platform,
+       device_label = excluded.device_label,
+       client_version = excluded.client_version,
+       revoked = 0,
+       last_seen_at = excluded.last_seen_at`
+  ).bind(
+    options.user.id,
+    license.license_id,
+    options.machineFingerprint,
+    options.deviceLabel,
+    options.clientVersion,
+    now,
+    now
+  ).run();
+  return {
+    license,
+    device: { device_label: options.deviceLabel, bound_at: now, companion: true },
+  };
+}
+
+async function mobileDeviceLimitForLicense(env, license) {
+  const fallback = Math.max(1, intEnv(env.MOBILE_MAX_COMPANION_DEVICES, 2));
+  const activationCodeId = Number(license && license.activation_code_id);
+  if (!Number.isInteger(activationCodeId) || activationCodeId <= 0) {
+    return fallback;
+  }
+  const entitlement = await env.DB.prepare(
+    "SELECT max_devices FROM activation_codes WHERE id = ? LIMIT 1"
+  ).bind(activationCodeId).first();
+  const entitlementLimit = Number(entitlement && entitlement.max_devices);
+  return Number.isFinite(entitlementLimit) && entitlementLimit > 0
+    ? Math.max(1, Math.floor(entitlementLimit))
+    : fallback;
+}
+
+async function redeemAssignedMobileEntitlement(env, user) {
+  const code = await env.DB.prepare(
+    `SELECT * FROM activation_codes
+     WHERE assigned_to_user_id = ?
+       AND status IN ('active', 'assigned')
+       AND (customer_email IS NULL OR customer_email = '' OR lower(customer_email) = ?)
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`
+  ).bind(user.id, normalizeEmail(user.email)).first();
+  if (!code) return null;
+
+  const autoIssueEditions = listEnv(
+    env.LICENSE_AUTO_ISSUE_EDITIONS,
+    "personal_standard,personal_pro"
+  );
+  if (!autoIssueEditions.includes(normalizeEdition(code.edition))) return null;
+
+  const previous = await env.DB.prepare(
+    `SELECT * FROM licenses
+     WHERE user_id = ? AND edition = ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`
+  ).bind(user.id, normalizeEdition(code.edition)).first();
+  const currentPayload = parseJson(previous && previous.signed_payload, {});
+  const machineFingerprint = safeText(
+    (previous && previous.machine_fingerprint) || code.machine_fingerprint_prebind || "",
+    128
+  );
+  const issued = await issueLicensePayload(env, {
+    edition: code.edition,
+    customerName: currentPayload.customer_name || user.username || user.email,
+    customerEmail: user.email,
+    machineFingerprint,
+    licenseId: previous && previous.license_id,
+    days: Number(code.license_days || 365),
+    features: currentPayload.features || {},
+  });
+  const now = nowIso();
+  let entitlementStatement;
+  if (previous) {
+    entitlementStatement = env.DB.prepare(
+      `UPDATE licenses
+       SET activation_code_id = ?, edition = ?, machine_fingerprint = ?, signed_payload = ?, signature = ?, nonce = ?,
+           issued_at = ?, expires_at = ?, is_active = 1, revoked = 0, revoke_reason = '', approval_status = 'auto',
+           last_online_check = ?, max_offline_days = ?
+       WHERE id = ?
+         AND EXISTS (
+           SELECT 1 FROM activation_codes ac
+           WHERE ac.id = ? AND ac.assigned_to_user_id = ? AND ac.status IN ('active', 'assigned')
+             AND (ac.customer_email IS NULL OR ac.customer_email = '' OR lower(ac.customer_email) = ?)
+         )`
+    ).bind(
+      code.id,
+      issued.edition,
+      machineFingerprint,
+      JSON.stringify(issued.payload),
+      issued.signature,
+      issued.payload.nonce,
+      issued.issued_at,
+      issued.expires_at,
+      now,
+      intEnv(env.MAX_OFFLINE_DAYS, 7),
+      previous.id,
+      code.id,
+      user.id,
+      normalizeEmail(user.email)
+    );
+  } else {
+    entitlementStatement = env.DB.prepare(
+      `INSERT INTO licenses
+       (user_id, activation_code_id, license_id, edition, machine_fingerprint, signed_payload, signature, nonce,
+        issued_at, expires_at, is_active, revoked, approval_status, last_online_check, max_offline_days, created_at)
+       SELECT ?, ac.id, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'auto', ?, ?, ?
+       FROM activation_codes ac
+       WHERE ac.id = ? AND ac.assigned_to_user_id = ? AND ac.status IN ('active', 'assigned')
+         AND (ac.customer_email IS NULL OR ac.customer_email = '' OR lower(ac.customer_email) = ?)
+         AND NOT EXISTS (
+           SELECT 1 FROM licenses existing
+           WHERE existing.user_id = ? AND existing.activation_code_id = ac.id
+             AND COALESCE(existing.machine_fingerprint, '') = '' AND existing.revoked = 0
+         )`
+    ).bind(
+      user.id,
+      issued.license_id,
+      issued.edition,
+      machineFingerprint,
+      JSON.stringify(issued.payload),
+      issued.signature,
+      issued.payload.nonce,
+      issued.issued_at,
+      issued.expires_at,
+      now,
+      intEnv(env.MAX_OFFLINE_DAYS, 7),
+      now,
+      code.id,
+      user.id,
+      normalizeEmail(user.email),
+      user.id
+    );
+  }
+
+  await env.DB.batch([
+    entitlementStatement,
+    env.DB.prepare(
+      `UPDATE activation_codes
+       SET status = CASE
+             WHEN (
+               SELECT COUNT(*) FROM licenses
+               WHERE activation_code_id = activation_codes.id AND revoked = 0
+             ) >= max_devices THEN 'used'
+             ELSE status
+           END,
+           used_by_user_id = ?,
+           used_at = ?
+       WHERE id = ? AND assigned_to_user_id = ? AND status IN ('active', 'assigned')`
+    ).bind(user.id, now, code.id, user.id),
+  ]);
+
+  const redeemed = await env.DB.prepare(
+    `SELECT * FROM licenses
+     WHERE user_id = ? AND license_id = ? AND is_active = 1 AND revoked = 0 AND expires_at >= ?
+     LIMIT 1`
+  ).bind(user.id, issued.license_id, todayIso()).first();
+  if (!redeemed) return null;
+  await audit(env, "auto_redeem_mobile_entitlement", "mobile_authorize", {
+    user_id: user.id,
+    activation_code_id: code.id,
+    license_id: redeemed.license_id,
+    edition: redeemed.edition,
+    expires_at: redeemed.expires_at,
+    renewed_existing_license: Boolean(previous),
+    preserved_machine_binding: Boolean(machineFingerprint),
+  });
+  return redeemed;
+}
+
+async function verifyMobileLicense(env, user, licenseId, machineFingerprint) {
+  const normalizedLicenseId = safeText(licenseId || "", 96);
+  const normalizedFingerprint = safeText(machineFingerprint || "", 160);
+  if (!normalizedLicenseId || !normalizedFingerprint) {
+    throwHttp(403, "mobile_authorization_required");
+  }
+  const license = await env.DB.prepare(
+    `SELECT l.*
+     FROM mobile_device_bindings b
+     JOIN licenses l ON l.license_id = b.license_id AND l.user_id = b.user_id
+     WHERE b.user_id = ? AND b.license_id = ? AND b.machine_fingerprint = ? AND b.revoked = 0
+     LIMIT 1`
+  ).bind(user.id, normalizedLicenseId, normalizedFingerprint).first();
+  if (!license) throwHttp(403, "mobile_device_not_authorized");
+  if (!Number(license.is_active) || Number(license.revoked)) throwHttp(403, "license_inactive");
+  if (license.expires_at && license.expires_at < todayIso()) throwHttp(403, "license_expired");
+  await env.DB.prepare(
+    "UPDATE mobile_device_bindings SET last_seen_at = ? WHERE user_id = ? AND machine_fingerprint = ?"
+  ).bind(nowIso(), user.id, normalizedFingerprint).run();
+  return license;
+}
+
+function normalizeMobileWatchlist(value) {
+  const items = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  return items.slice(0, 200).map((item) => ({
+    asset_type: normalizeAssetType(item.asset_type || "stock"),
+    code: normalizeAssetCode(item.code || item.symbol || ""),
+    name: safeText(item.name || "", 128),
+    market: normalizeMarket(item.market || "CN"),
+  })).filter((item) => {
+    const key = `${item.asset_type}:${item.market}:${item.code}`;
+    if (!item.code || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function loadMobileWatchlist(env, userId) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT items_json FROM mobile_watchlists WHERE user_id = ? LIMIT 1"
+    ).bind(userId).first();
+    return normalizeMobileWatchlist(parseJson(row && row.items_json, []));
+  } catch {
+    return [];
+  }
+}
+
+async function saveMobileWatchlist(env, userId, items) {
+  await env.DB.prepare(
+    `INSERT INTO mobile_watchlists (user_id, items_json, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       items_json = excluded.items_json,
+       updated_at = excluded.updated_at`
+  ).bind(userId, JSON.stringify(items || []), nowIso()).run();
+}
+
+function mobileStockSearchItem(row) {
+  return {
+    code: firstText(row.code, row.ts_code, row.stock_code, row.symbol),
+    name: firstText(row.name, row.stock_name, row.code, row.ts_code),
+    industry: firstText(row.industry, row.industry_name, row.sector),
+    market: firstText(row.market, row.exchange, "CN"),
+  };
+}
+
+async function searchPublishedStockRows(env, license, keyword, limit = 100) {
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
+  const rows = await env.DB.prepare(
+    `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+            r.edition_scope, r.module, r.batch_id, r.updated_at
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE r.table_name = 'stock_info'
+       AND r.module = 'target_research'
+       AND r.edition_scope IN (${scopePlaceholders})
+       AND b.status = 'committed'
+       AND UPPER(r.row_json) LIKE ?
+     ORDER BY r.data_date DESC,
+              CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+              r.updated_at DESC,
+              r.row_key ASC
+     LIMIT ?`
+  ).bind(...scopes, `%${keyword}%`, ...scopes, Math.max(1, Math.min(Number(limit || 100), 500))).all();
+  return (rows.results || []).map((row) => ({
+    ...(dataSyncRowPayload(row).row || {}),
+    _data_date: row.data_date || "",
+  }));
+}
+
+function normalizeMobileSamplePoolRequest(body) {
+  const requestedStrategy = safeText(body.strategy || "balanced", 24).toLowerCase();
+  const strategy = ["conservative", "balanced", "aggressive", "momentum"].includes(requestedStrategy)
+    ? requestedStrategy
+    : "balanced";
+  return {
+    strategy,
+    keyword: safeText(body.keyword || body.query || "", 64).toUpperCase(),
+    industry: safeText(body.industry || "", 64),
+    limit: Math.max(1, Math.min(Number(body.limit || 40), 60)),
+  };
+}
+
+async function loadMobileSamplePoolRows(env, license, filters) {
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
+  const strategyPath = `$.all_strategy_scores.${filters.strategy}.total_score`;
+  const where = [
+    "r.table_name = 'score_history'",
+    "r.module = 'target_research'",
+    `r.edition_scope IN (${scopePlaceholders})`,
+    "b.status = 'committed'",
+    "COALESCE(json_extract(r.row_json, '$.asset_type'), 'stock') = 'stock'",
+    `r.data_date = (
+      SELECT MAX(r2.data_date)
+      FROM production_table_rows r2
+      JOIN production_upload_batches b2 ON b2.batch_id = r2.batch_id
+      WHERE r2.table_name = 'score_history'
+        AND r2.module = 'target_research'
+        AND r2.edition_scope IN (${scopePlaceholders})
+        AND b2.status = 'committed'
+    )`,
+  ];
+  const params = [...scopes, ...scopes];
+  if (filters.keyword) {
+    where.push("UPPER(r.row_json) LIKE ?");
+    params.push(`%${filters.keyword}%`);
+  }
+  if (filters.industry) {
+    where.push("r.row_json LIKE ?");
+    params.push(`%${filters.industry}%`);
+  }
+  const rows = await env.DB.prepare(
+    `SELECT r.row_json, r.data_date, r.updated_at, r.edition_scope, r.row_key
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${where.join(" AND ")}
+     ORDER BY COALESCE(
+                CAST(json_extract(json_extract(r.row_json, '$.public_details'), '${strategyPath}') AS REAL),
+                CAST(json_extract(r.row_json, '$.total_score') AS REAL),
+                0
+              ) DESC,
+              CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+              CAST(json_extract(r.row_json, '$.rank') AS INTEGER) ASC,
+              r.row_key ASC
+     LIMIT ?`
+  ).bind(...params, ...scopes, Math.min(filters.limit * 4, 240)).all();
+  const seen = new Set();
+  const result = [];
+  for (const row of rows.results || []) {
+    const payload = parseJson(row.row_json || "{}", {});
+    const code = firstText(payload.code, payload.ts_code, payload.symbol);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    result.push({
+      ...payload,
+      _data_date: row.data_date || "",
+      _updated_at: row.updated_at || "",
+      _edition_scope: row.edition_scope || "",
+    });
+    if (result.length >= filters.limit) break;
+  }
+  return result;
+}
+
+function mobileSamplePoolItem(row, strategy, index) {
+  const details = parseJson(row.public_details || row.details || "{}", {});
+  const strategyScores = safeJsonObject(safeJsonObject(details.all_strategy_scores)[strategy] || {});
+  const behavior = safeJsonObject(details.behavior_profile || {});
+  const risk = safeJsonObject(behavior.risk || {});
+  const score = firstNumber(strategyScores.total_score, details.total_score, row.total_score, 0);
+  const rating = mobileRatingLabel(firstText(strategyScores.rating, details.rating, row.rating), score);
+  const riskLabel = mobileRiskLabel(firstText(risk.level, row.risk_level), row.risk_score);
+  const industry = firstText(row.group_name, behavior.industry, row.industry, "行业待补充");
+  return {
+    code: firstText(row.code, row.ts_code, row.symbol),
+    name: firstText(row.name, details.name, row.code),
+    industry,
+    market: firstText(row.market, "CN"),
+    rank: index + 1,
+    score: Number(score.toFixed(1)),
+    score_label: `${Number(score.toFixed(1))} 分`,
+    rating,
+    risk_label: riskLabel,
+    summary: mobileSampleSummary(score, riskLabel),
+    tone: mobileResearchTone(score, riskLabel),
+    as_of: mobileDateLabel(firstText(row.score_date, row._data_date)),
+  };
+}
+
+function mobileSampleSummary(score, riskLabel) {
+  if (riskLabel === "较高" || riskLabel === "严重") return "评分具备观察价值，但风险项仍需复核";
+  if (score >= 70) return "综合表现靠前，可继续跟踪确认";
+  if (score >= 60) return "具备观察价值，等待趋势与资金确认";
+  return "当前信号偏弱，适合保留观察";
+}
+
+function mobileStrategyLabel(value) {
+  return ({
+    conservative: "稳健策略",
+    balanced: "平衡策略",
+    aggressive: "进取策略",
+    momentum: "动量策略",
+  })[String(value || "").toLowerCase()] || "平衡策略";
+}
+
+function mobileStockResearchPayload(analysis, scoreRow, request) {
+  const summary = safeJsonObject(analysis.summary || {});
+  const sections = safeJsonObject(analysis.sections || {});
+  const quote = safeJsonObject(sections.quote || analysis.quote || {});
+  const technical = safeJsonObject(sections.price_technical || sections.technical || sections.price || {});
+  const fundamental = safeJsonObject(sections.fundamental || {});
+  const financial = safeJsonObject(sections.financial || {});
+  const riskMetrics = safeJsonObject(sections.risk_metrics || sections.risk || {});
+  const reason = safeJsonObject(sections.reason || analysis.reason || {});
+  const details = parseJson(scoreRow.public_details || scoreRow.details || "{}", {});
+  const behavior = safeJsonObject(details.behavior_profile || {});
+  const risk = safeJsonObject(behavior.risk || {});
+  const capital = safeJsonObject(behavior.capital_behavior || {});
+  const sector = safeJsonObject(behavior.sector_lifecycle || {});
+  const model = safeJsonObject(behavior.model_matching || {});
+  const business = safeJsonObject(behavior.business_positioning || {});
+  const board = safeJsonObject(behavior.board_behavior || {});
+  const quality = safeJsonObject(behavior.data_quality || {});
+  const score = firstNumber(details.total_score, scoreRow.total_score, summary.score, null);
+  const rating = mobileRatingLabel(firstText(details.rating, scoreRow.rating, summary.rating), score);
+  const riskLabel = mobileRiskLabel(firstText(risk.level, summary.risk_level), scoreRow.risk_score);
+  const name = firstText(
+    details.name,
+    behavior.name,
+    quote.stock_name,
+    quote.name,
+    scoreRow.name,
+    request.code
+  );
+  const industry = firstText(scoreRow.group_name, behavior.industry, quote.industry, fundamental.industry, "行业待补充");
+  const ohlcv = mobileResearchOhlcv(technical, sections);
+  const riskFlags = mobileTextList(risk.flags).map((item) => mobileUserText(item, "需复核风险项"));
+  const qualityIssues = mobileTextList(quality.issues).map((item) => mobileUserText(item, "部分数据仍待补充"));
+  const cautionItems = uniqueStrings([...riskFlags, ...qualityIssues]).slice(0, 5);
+  const researchSummary = mobileUserText(
+    behavior.research_summary,
+    details.summary,
+    reason.summary,
+    summary.brief,
+    score === null ? "云端暂未形成完整研究结论。" : `${rating}，综合评分 ${Number(score.toFixed(1))} 分。`
+  );
+  const highlights = uniqueStrings([
+    mobileUserText(business.summary, business.label, business.asset_role_label, ""),
+    mobileUserText(model.market_state, model.decision_bias, model.model_label, ""),
+    capital.label ? `资金行为：${mobileUserText(capital.label, "等待确认")}` : "",
+    sector.label ? `${industry}处于${mobileUserText(sector.label, "观察")}阶段` : "",
+  ]).filter(Boolean).slice(0, 4);
+  const movementFactors = [
+    mobileResearchFactor("资金行为", mobileUserText(capital.label, capital.signal, "尚未形成明确资金信号"), mobileTone(capital.label || capital.signal)),
+    mobileResearchFactor("板块位置", sector.label ? `${industry} · ${mobileUserText(sector.label, "观察")}` : `${industry} · 等待确认`, mobileTone(sector.label)),
+    mobileResearchFactor("市场环境", mobileUserText(model.market_state, model.decision_bias, "当前市场环境仍需观察"), "primary"),
+    mobileResearchFactor("价格表现", mobileMovementPriceText(board, quote, ohlcv), mobileTone(firstText(board.label, quote.change_percent, quote.pct_change))),
+  ];
+  const status = score !== null || ohlcv.length ? "ready" : analysis.status === "error" ? "error" : "partial";
+  const freshness = firstText(
+    scoreRow.score_date,
+    analysis.data_quality && analysis.data_quality.freshness,
+    quote.trade_date,
+    analysis.as_of
+  );
+  return {
+    code: firstText(analysis.code, request.code),
+    name,
+    market: firstText(analysis.market, request.market, "CN"),
+    industry,
+    state: status,
+    state_message: mobileResearchStateMessage(status),
+    as_of: mobileDateLabel(freshness),
+    header: {
+      score: score === null ? null : Number(score.toFixed(1)),
+      score_label: score === null ? "待评估" : `${Number(score.toFixed(1))} 分`,
+      rating,
+      risk_label: riskLabel,
+      price: mobilePrice(firstNumber(quote.latest_price, quote.price, null)),
+      change: mobilePercent(firstNumber(quote.change_percent, quote.pct_change, null)),
+      tone: mobileResearchTone(score, riskLabel),
+    },
+    conclusion: {
+      title: rating,
+      summary: researchSummary,
+      highlights,
+      cautions: cautionItems.length ? cautionItems : ["研究结果仅供复核，不构成投资建议。"],
+    },
+    movement: {
+      title: mobileMovementTitle(board, quote, ohlcv),
+      summary: mobileMovementSummary(capital, sector, model),
+      factors: movementFactors,
+    },
+    trend: {
+      title: ohlcv.length ? `近 ${ohlcv.length} 个交易日走势` : "走势数据待更新",
+      values: ohlcv.map((item) => item.close),
+      dates: ohlcv.map((item) => item.date),
+      latest_price: ohlcv.length ? mobilePrice(ohlcv[ohlcv.length - 1].close) : mobilePrice(firstNumber(quote.latest_price, quote.price, null)),
+      period_change: mobilePeriodChange(ohlcv),
+    },
+    profile: {
+      title: mobileUserText(business.label, business.asset_role_label, rating, "综合画像"),
+      summary: mobileUserText(business.summary, researchSummary, "画像信息正在更新。"),
+      items: [
+        mobileResearchMetric("所属行业", industry, "行业分类"),
+        mobileResearchMetric("市场模型", mobileUserText(model.model_label, "观察中"), "当前主导环境"),
+        mobileResearchMetric("资金行为", mobileUserText(capital.label, capital.signal, "待确认"), "资金状态"),
+        mobileResearchMetric("板块阶段", mobileUserText(sector.label, "待确认"), "行业生命周期"),
+        mobileResearchMetric("风险等级", riskLabel, "综合风险评估"),
+      ],
+      tags: highlights,
+    },
+    technical: {
+      title: ohlcv.length ? "趋势与风险指标" : "技术数据待更新",
+      summary: mobileMovementPriceText(board, quote, ohlcv),
+      metrics: mobileTechnicalMetrics({ scoreRow, quote, board, capital, riskMetrics }),
+    },
+    financial: {
+      title: "财务与估值指标",
+      summary: firstText(financial.report_date, fundamental.report_date)
+        ? `报告期 ${firstText(financial.report_date, fundamental.report_date)}`
+        : "最新财务口径",
+      metrics: mobileFinancialMetrics({ fundamental, financial }),
+    },
+    data: {
+      status_label: mobileDataStatusLabel(status, quality),
+      metrics: mobileResearchMetrics({ scoreRow, quote, fundamental, financial, capital, quality }),
+    },
+  };
+}
+
+function mobileResearchMetric(label, value, note) {
+  return { label, value: firstText(value, "--"), note };
+}
+
+function mobileTechnicalMetrics(values) {
+  const rows = [
+    ["技术评分", mobileScoreLabel(values.scoreRow.technical_score), "趋势与量价综合"],
+    ["风险评分", mobileScoreLabel(firstNumber(values.riskMetrics.risk_score, values.scoreRow.risk_score, null)), "分数越高需越谨慎"],
+    ["当日涨跌", mobilePercent(firstNumber(values.quote.change_percent, values.quote.pct_change, null)), "较前一交易日"],
+    ["量比", mobileNumberLabel(firstNumber(values.board.volume_ratio, null)), "成交活跃度"],
+    ["20日波动", mobilePercent(firstNumber(values.riskMetrics.volatility_20, null)), "近20个交易日"],
+    ["60日波动", mobilePercent(firstNumber(values.riskMetrics.volatility_60, null)), "近60个交易日"],
+    ["20日回撤", mobilePercent(firstNumber(values.riskMetrics.max_drawdown_20, null)), "阶段最大回撤"],
+    ["60日回撤", mobilePercent(firstNumber(values.riskMetrics.max_drawdown_60, null)), "阶段最大回撤"],
+    ["资金强度", mobileScoreLabel(firstNumber(values.capital.main_flow_score, values.capital.score, null)), "主力资金行为"],
+  ];
+  return rows.map(([label, value, note]) => ({ label, value, note })).filter((item) => item.value !== "--");
+}
+
+function mobileFinancialMetrics(values) {
+  const rows = [
+    ["市盈率", mobileNumberLabel(firstNumber(values.fundamental.pe, values.financial.pe, null)), "估值参考"],
+    ["市净率", mobileNumberLabel(firstNumber(values.fundamental.pb, values.financial.pb, null)), "估值参考"],
+    ["净资产收益率", mobilePercent(firstNumber(values.fundamental.roe, values.financial.roe, null)), "盈利能力"],
+    ["每股收益", mobileNumberLabel(firstNumber(values.financial.eps, values.fundamental.eps, null)), "最新报告期"],
+    ["营收增速", mobilePercent(firstNumber(values.financial.revenue_growth, values.fundamental.revenue_growth, null)), "同比变化"],
+    ["净利润增速", mobilePercent(firstNumber(values.financial.profit_growth, values.fundamental.profit_growth, null)), "同比变化"],
+    ["营业收入", mobileMoneyAmount(firstNumber(values.financial.revenue, null)), "最新报告期"],
+    ["净利润", mobileMoneyAmount(firstNumber(values.financial.net_profit, null)), "最新报告期"],
+  ];
+  return rows.map(([label, value, note]) => ({ label, value, note })).filter((item) => item.value !== "--");
+}
+
+function mobileStockResearchUnavailablePayload(request) {
+  return {
+    code: firstText(request && request.code),
+    name: firstText(request && request.code, "个股研究"),
+    market: firstText(request && request.market, "CN"),
+    industry: "行业待补充",
+    state: "partial",
+    state_message: "部分研究数据正在更新",
+    as_of: "云端数据正在更新",
+    header: {
+      score: null,
+      score_label: "待评估",
+      rating: "等待更新",
+      risk_label: "待评估",
+      price: "--",
+      change: "--",
+      tone: "primary",
+    },
+    conclusion: {
+      title: "研究结果正在更新",
+      summary: "当前网络或云端计算较慢，已保留个股页面，稍后刷新即可补全研究结果。",
+      highlights: [],
+      cautions: ["研究结果仅供复核，不构成投资建议。"],
+    },
+    movement: {
+      title: "涨跌表现待更新",
+      summary: "资金、板块与价格表现正在同步。",
+      factors: [],
+    },
+    trend: {
+      title: "走势数据待更新",
+      values: [],
+      dates: [],
+      latest_price: "--",
+      period_change: "--",
+    },
+    profile: {
+      title: "综合画像待更新",
+      summary: "画像信息正在同步。",
+      items: [],
+      tags: [],
+    },
+    technical: {
+      title: "技术数据待更新",
+      summary: "趋势与风险指标正在同步。",
+      metrics: [],
+    },
+    financial: {
+      title: "财务数据待更新",
+      summary: "最新财务口径正在同步。",
+      metrics: [],
+    },
+    data: {
+      status_label: "部分数据暂不可用",
+      metrics: [],
+    },
+  };
+}
+
+function mobileResearchFactor(title, detail, tone) {
+  return { title, detail, tone: ["success", "warning", "danger", "primary"].includes(tone) ? tone : "primary" };
+}
+
+function mobileResearchOhlcv(technical, sections) {
+  const candidates = [
+    technical.ohlcv,
+    safeJsonObject(sections.price || {}).ohlcv,
+    safeJsonObject(sections.technical || {}).ohlcv,
+  ];
+  const rows = candidates.find((value) => Array.isArray(value)) || [];
+  return rows.map((row) => ({
+    date: firstText(row.trade_date, row.date),
+    close: firstNumber(row.close, row.price, row.latest_price, null),
+  })).filter((row) => row.close !== null).slice(-60);
+}
+
+function mobileTextList(value) {
+  if (Array.isArray(value)) return value.map((item) => safeText(item, 180)).filter(Boolean);
+  if (typeof value === "string") return [safeText(value, 180)].filter(Boolean);
+  return [];
+}
+
+function mobileMovementPriceText(board, quote, ohlcv) {
+  const change = firstNumber(board.pct_change, quote.change_percent, quote.pct_change, null);
+  const volumeRatio = firstNumber(board.volume_ratio, null);
+  const parts = [];
+  if (change !== null) parts.push(`当日${change >= 0 ? "上涨" : "下跌"} ${Math.abs(change).toFixed(2)}%`);
+  if (volumeRatio !== null) parts.push(`量能为近期均值的 ${volumeRatio.toFixed(2)} 倍`);
+  if (!parts.length && ohlcv.length >= 2) parts.push(`阶段变化 ${mobilePeriodChange(ohlcv)}`);
+  return parts.join("，") || "价格与量能数据仍待更新";
+}
+
+function mobileMovementTitle(board, quote, ohlcv) {
+  const change = firstNumber(board.pct_change, quote.change_percent, quote.pct_change, null);
+  if (change !== null) return change > 1 ? "短线表现偏强" : change < -1 ? "短线表现偏弱" : "短线以震荡为主";
+  if (ohlcv.length >= 2) {
+    const delta = ohlcv[ohlcv.length - 1].close - ohlcv[0].close;
+    return delta > 0 ? "阶段走势偏强" : delta < 0 ? "阶段走势偏弱" : "阶段走势平稳";
+  }
+  return "涨跌表现待更新";
+}
+
+function mobileMovementSummary(capital, sector, model) {
+  const parts = [
+    capital.label ? `资金${mobileUserText(capital.label, "等待确认")}` : "资金信号尚未明确",
+    sector.label ? `板块处于${mobileUserText(sector.label, "观察")}阶段` : "板块阶段待确认",
+    mobileUserText(model.model_label, model.decision_bias, "市场模型仍在观察"),
+  ];
+  return `${parts.join("，")}。`;
+}
+
+function mobilePeriodChange(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return "--";
+  const first = Number(rows[0].close);
+  const last = Number(rows[rows.length - 1].close);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first === 0) return "--";
+  return mobilePercent(((last - first) / first) * 100);
+}
+
+function mobileResearchMetrics(values) {
+  const rows = [
+    ["最新价格", mobilePrice(firstNumber(values.quote.latest_price, values.quote.price, null)), "最新交易快照"],
+    ["当日涨跌", mobilePercent(firstNumber(values.quote.change_percent, values.quote.pct_change, null)), "较前一交易日"],
+    ["技术评分", mobileScoreLabel(values.scoreRow.technical_score), "趋势与量价表现"],
+    ["基本面评分", mobileScoreLabel(values.scoreRow.fundamental_score), "经营与估值表现"],
+    ["风险评分", mobileScoreLabel(values.scoreRow.risk_score), "分数越高需越谨慎"],
+    ["市盈率", mobileNumberLabel(firstNumber(values.fundamental.pe, values.financial.pe, null)), "估值参考"],
+    ["市净率", mobileNumberLabel(firstNumber(values.fundamental.pb, values.financial.pb, null)), "估值参考"],
+    ["净资产收益率", mobilePercent(firstNumber(values.fundamental.roe, values.financial.roe, null)), "最新财务口径"],
+  ];
+  return rows.map(([label, value, note]) => ({ label, value, note })).filter((item) => item.value !== "--");
+}
+
+async function loadMobileMarketCenter(env, license) {
+  const [scoreRows, sentimentRows, flowRows, sectorRows] = await Promise.all([
+    publishedRows(env, "market_score_daily", license, { limit: 20 }),
+    publishedRows(env, "market_sentiment_daily", license, { limit: 20 }),
+    publishedRows(env, "market_fund_flow_cache", license, { limit: 20 }),
+    publishedRows(env, "sector_rotation_daily", license, { limit: 240 }),
+  ]);
+  return mobileMarketCenterPayload({
+    scoreRows: latestDateRows(scoreRows),
+    sentimentRows: latestDateRows(sentimentRows),
+    flowRows: latestDateRows(flowRows),
+    sectorRows: latestDateRows(sectorRows),
+  });
+}
+
+function mobileMarketCenterPayload(values) {
+  const score = preferredMarketScoreRow(values.scoreRows || []) || {};
+  const sentiment = (values.sentimentRows || [])[0] || {};
+  const flow = (values.flowRows || [])[0] || {};
+  const marketScore = firstNumber(score.market_score, sentiment.sentiment_score, null);
+  const phase = mobileMarketPhaseLabel(firstText(score.market_phase, sentiment.phase, "观察"));
+  const riskLabel = mobileRiskLabel(firstText(score.risk_level, "unknown"));
+  const upCount = firstNumber(sentiment.up_count, null);
+  const downCount = firstNumber(sentiment.down_count, null);
+  const totalCount = firstNumber(sentiment.total_count, upCount !== null && downCount !== null ? upCount + downCount : null);
+  const upRatio = totalCount && upCount !== null ? (upCount / totalCount) * 100 : null;
+  const mainNet = firstNumber(flow.main_net, flow.net_amount, null);
+  const sectors = (values.sectorRows || [])
+    .map((row) => {
+      const change = firstNumber(row.pct_change, null);
+      return {
+        name: firstText(row.sector_name, row.name, row.sector_code),
+        change: mobilePercent(change),
+        hot_score: firstNumber(row.hot_score, null),
+        amount: mobileMoneyAmount(firstNumber(row.amount, null)).replace(/^\+/, ""),
+        tone: change === null ? "primary" : change >= 0 ? "success" : "danger",
+      };
+    })
+    .filter((row) => row.name)
+    .sort((left, right) => (right.hot_score || 0) - (left.hot_score || 0))
+    .slice(0, 12)
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+  const freshness = maxText([
+    score.trade_date,
+    sentiment.trade_date,
+    flow.trade_date,
+    ...(values.sectorRows || []).slice(0, 3).map((row) => row.trade_date || row._data_date),
+  ]);
+  const ready = marketScore !== null || totalCount !== null || mainNet !== null || sectors.length > 0;
+  return {
+    title: "市场中心",
+    summary: ready
+      ? `${phase}，上涨家数占比${upRatio === null ? "待更新" : `${upRatio.toFixed(1)}%`}，主力资金${mainNet === null ? "方向待确认" : mainNet >= 0 ? "净流入" : "净流出"}。`
+      : "市场数据正在更新，请稍后刷新。",
+    freshness: mobileDateLabel(freshness),
+    state: ready ? "ready" : "empty",
+    state_message: ready ? "市场数据已更新" : "市场数据暂不可用",
+    overview: {
+      score: marketScore === null ? null : Number(marketScore.toFixed(1)),
+      score_label: marketScore === null ? "待评估" : `${Number(marketScore.toFixed(1))} 分`,
+      phase,
+      risk_label: riskLabel,
+      sh_change: mobilePercent(firstNumber(flow.sh_pct, null)),
+    },
+    breadth: {
+      up_count: upCount === null ? null : Math.round(upCount),
+      down_count: downCount === null ? null : Math.round(downCount),
+      flat_count: firstNumber(sentiment.flat_count, null),
+      limit_up_count: firstNumber(sentiment.limit_up_count, null),
+      limit_down_count: firstNumber(sentiment.limit_down_count, null),
+      up_ratio: upRatio === null ? "--" : `${upRatio.toFixed(1)}%`,
+      total_amount: mobileMoneyAmount(firstNumber(sentiment.total_amount, null)).replace(/^\+/, ""),
+    },
+    capital: {
+      main_net: mobileMoneyAmount(mainNet),
+      main_tone: mainNet === null ? "primary" : mainNet >= 0 ? "success" : "danger",
+      super_net: mobileMoneyAmount(firstNumber(flow.super_net, null)),
+      big_net: mobileMoneyAmount(firstNumber(flow.big_net, null)),
+      sh_change: mobilePercent(firstNumber(flow.sh_pct, null)),
+      sz_change: mobilePercent(firstNumber(flow.sz_pct, null)),
+    },
+    sectors: sectors.map(({ hot_score, ...row }) => row),
+  };
+}
+
+function mobileIndustryPayload(result) {
+  const rawItems = Array.isArray(result.items) ? result.items : [];
+  const items = rawItems.map((row, index) => {
+    const net = firstNumber(row.net_amount, row.net_inflow, row.main_net, null);
+    const change = firstNumber(row.pct_change, row.change_pct, row.change_percent, null);
+    return {
+      name: firstText(row.name, row.sector_name, row.industry_name, `行业 ${index + 1}`),
+      rank: index + 1,
+      change: mobilePercent(change),
+      flow: mobileIndustryMoneyAmount(row, net),
+      direction: net === null ? "资金待更新" : net >= 0 ? "资金净流入" : "资金净流出",
+      leader: firstText(row.lead_stock, row.leader),
+      tone: net === null ? "primary" : net >= 0 ? "success" : "danger",
+      net_amount: net,
+      trade_date: firstText(row.trade_date, row.date, row._data_date),
+    };
+  }).sort((left, right) => (right.net_amount || 0) - (left.net_amount || 0)).slice(0, 20)
+    .map((item, index) => ({ ...item, rank: index + 1 }));
+  const positive = items.filter((item) => item.net_amount !== null && item.net_amount > 0).length;
+  const top = items[0];
+  const freshness = firstText(
+    result.data_quality && result.data_quality.freshness,
+    top && top.trade_date,
+    result.as_of
+  );
+  return {
+    title: "行业资金表现",
+    summary: items.length
+      ? `${positive} 个行业呈现资金净流入${top ? `，${top.name}位居前列` : ""}`
+      : "当前暂无可展示的行业结果",
+    freshness: mobileDateLabel(freshness),
+    state: items.length ? "ready" : result.status === "error" ? "error" : "empty",
+    state_message: items.length ? "已更新行业资金排名" : "请稍后刷新行业结果",
+    items: items.map(({ net_amount, trade_date, ...item }) => item),
+  };
+}
+
+function mobileResearchStateMessage(status) {
+  if (status === "ready") return "研究结果已更新";
+  if (status === "error") return "本次解析失败，请稍后重试";
+  return "部分数据暂未返回，已展示可用结果";
+}
+
+function mobileDataStatusLabel(status, quality) {
+  if (status === "error") return "解析失败";
+  if (status === "ready" && !mobileTextList(quality.issues).length) return "数据可用";
+  return "部分数据待补充";
+}
+
+function mobileRatingLabel(value, score = null) {
+  const text = safeText(value || "", 40);
+  if (/^[\u3400-\u9fff]/.test(text)) return text;
+  const normalized = text.toLowerCase();
+  if (["ready", "positive", "buy", "strong_buy"].includes(normalized)) return "重点观察";
+  if (["watch", "neutral", "hold"].includes(normalized)) return "中性观察";
+  if (["partial", "review", "risk_review"].includes(normalized)) return "需要复核";
+  if (["avoid", "negative", "sell"].includes(normalized)) return "暂不纳入";
+  if (Number.isFinite(Number(score))) return Number(score) >= 70 ? "重点观察" : Number(score) >= 60 ? "中性观察" : "谨慎观察";
+  return "待评估";
+}
+
+function mobileRiskLabel(value, score = null) {
+  const text = safeText(value || "", 32);
+  if (["较低", "中等", "较高", "严重"].includes(text)) return text;
+  const normalized = text.toLowerCase();
+  if (["low", "minor"].includes(normalized)) return "较低";
+  if (["medium", "moderate"].includes(normalized)) return "中等";
+  if (["high"].includes(normalized)) return "较高";
+  if (["critical", "severe"].includes(normalized)) return "严重";
+  const number = Number(score);
+  if (Number.isFinite(number)) return number >= 80 ? "严重" : number >= 60 ? "较高" : number >= 35 ? "中等" : "较低";
+  return "待评估";
+}
+
+function mobileResearchTone(score, riskLabel) {
+  if (riskLabel === "严重" || riskLabel === "较高") return "warning";
+  if (Number(score) >= 70) return "success";
+  if (Number(score) < 50) return "danger";
+  return "primary";
+}
+
+function mobileUserText(...values) {
+  for (const value of values) {
+    const text = safeText(value || "", 360);
+    if (!text) continue;
+    if (/(?:^|[\s|])(phase|score|rows|direction|lead_bucket|capital_direction)=/i.test(text)) continue;
+    if (/\b(latest_available|market overview|industry overview|capital_outflow|capital_inflow)\b/i.test(text)) continue;
+    if (/[a-z]+_[a-z]+/i.test(text) && !/[\u3400-\u9fff]/.test(text)) continue;
+    return text;
+  }
+  return "";
+}
+
+function mobileMoneyAmount(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  const absolute = Math.abs(number);
+  const sign = number > 0 ? "+" : number < 0 ? "-" : "";
+  if (absolute >= 1000000000000) return `${sign}${(absolute / 1000000000000).toFixed(2)} 万亿元`;
+  if (absolute >= 100000000) return `${sign}${(absolute / 100000000).toFixed(2)} 亿元`;
+  if (absolute >= 10000) return `${sign}${(absolute / 10000).toFixed(0)} 万元`;
+  return `${sign}${absolute.toFixed(0)} 元`;
+}
+
+function mobileIndustryMoneyAmount(row, value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  const absolute = Math.abs(number);
+  const sign = number > 0 ? "+" : number < 0 ? "-" : "";
+  const unit = firstText(row.amount_unit, row.net_amount_unit, row.unit).toLowerCase();
+  const source = firstText(row.source, row.data_source).toLowerCase();
+  if (/亿|100m|hundred.?million/.test(unit) || /sina|industry_fund_flow_cache/.test(source)) {
+    return `${sign}${absolute.toFixed(2)} 亿元`;
+  }
+  if (/万|10k/.test(unit)) return `${sign}${absolute.toFixed(2)} 万元`;
+  if (/元|cny|rmb|yuan/.test(unit)) return mobileMoneyAmount(number);
+  // The published industry flow dataset uses 亿元. Large unlabelled values from
+  // other compute providers are treated as base CNY for backwards compatibility.
+  return absolute < 10000
+    ? `${sign}${absolute.toFixed(2)} 亿元`
+    : mobileMoneyAmount(number);
+}
+
+function mobilePrice(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "--";
+}
+
+function mobileScoreLabel(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(1)} 分` : "--";
+}
+
+function mobileNumberLabel(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : "--";
+}
+
+function mobileDateLabel(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "latest_available") return "云端数据已更新";
+  const parsed = new Date(text.includes("T") ? text : `${text.replace(" ", "T")}Z`);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = parsed.getUTCFullYear();
+    const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getUTCDate()).padStart(2, "0");
+    return `更新至 ${year}-${month}-${day}`;
+  }
+  return "云端数据已更新";
+}
+
+async function mobileStockAnalysis(ctx, options) {
+  if (await mobileAnalysisComputeAvailable(ctx.env)) {
+    const response = await proxyAnalysisCompute(ctx, {
+      endpoint: "/v1/analysis/stock/bundle",
+      body: { ...options.request, user_id: options.user.id, email: options.user.email },
+      user: options.user,
+      license: options.license,
+      startedAt: options.startedAt,
+      timeoutMs: intEnv(ctx.env.ANALYSIS_COMPUTE_TIMEOUT_MS, 4500),
+      fallback: (reason) => analysisFallbackStockBundle(ctx.env, options.request, {
+        user: options.user,
+        license: options.license,
+        endpoint: "/v1/analysis/stock/bundle",
+        feature: "stock_bundle",
+      }, reason),
+    });
+    return responseJsonObject(response);
+  }
+  return analysisFallbackStockBundle(ctx.env, options.request, {
+    user: options.user,
+    license: options.license,
+    endpoint: "/v1/analysis/stock/bundle",
+    feature: "stock_bundle",
+  }, "compute_not_configured");
+}
+
+function mobileStockAnalysisUnavailable(request, reason = "edge_fallback_failed") {
+  return {
+    status: "partial",
+    feature: "stock_bundle",
+    code: request.code,
+    market: request.market,
+    as_of: nowIso(),
+    data_quality: {
+      level: "partial_cache",
+      missing: ["analysis_compute_service"],
+      fallback_reason: reason,
+    },
+    summary: {
+      score: null,
+      rating: "partial",
+      risk_level: "unknown",
+      brief: "云端深度计算暂时不可用，当前展示已发布研究数据。",
+    },
+    sections: {
+      quote: { code: request.code, name: request.code },
+      price: { ohlcv: [] },
+      technical: { ohlcv: [] },
+      fundamental: {},
+      financial: {},
+      reason: { summary: "云端深度计算暂时不可用，当前展示已发布研究数据。" },
+    },
+    risk_flags: [],
+    next_actions: ["稍后刷新可获取完整分析。"],
+  };
+}
+
+async function mobileSharedAnalysis(ctx, options) {
+  const request = {
+    asset_type: options.assetType,
+    market: options.request.market,
+    client_version: options.request.client_version,
+    license_id: options.request.license_id,
+    machine_fingerprint: options.request.machine_fingerprint,
+  };
+  if (await mobileAnalysisComputeAvailable(ctx.env)) {
+    const response = await proxyAnalysisCompute(ctx, {
+      endpoint: options.endpoint,
+      body: { ...request, user_id: options.user.id, email: options.user.email },
+      user: options.user,
+      license: options.license,
+      startedAt: options.startedAt,
+      fallback: (reason) => analysisFallbackSharedBundle(ctx.env, request, {
+        user: options.user,
+        license: options.license,
+        endpoint: options.endpoint,
+        feature: options.feature,
+        assetType: options.assetType,
+      }, reason),
+    });
+    return responseJsonObject(response);
+  }
+  return analysisFallbackSharedBundle(ctx.env, request, {
+    user: options.user,
+    license: options.license,
+    endpoint: options.endpoint,
+    feature: options.feature,
+    assetType: options.assetType,
+  }, "compute_not_configured");
+}
+
+async function mobileMarketAnalysis(ctx, options) {
+  const request = {
+    asset_type: "market",
+    market: options.request.market,
+    client_version: options.request.client_version,
+    license_id: options.request.license_id,
+    machine_fingerprint: options.request.machine_fingerprint,
+  };
+  if (await mobileAnalysisComputeAvailable(ctx.env)) {
+    const response = await proxyAnalysisCompute(ctx, {
+      endpoint: "/v1/analysis/market/overview",
+      body: { ...request, user_id: options.user.id, email: options.user.email },
+      user: options.user,
+      license: options.license,
+      startedAt: options.startedAt,
+      fallback: (reason) => analysisFallbackSharedBundle(ctx.env, request, {
+        user: options.user,
+        license: options.license,
+        endpoint: "/v1/analysis/market/overview",
+        feature: "market_overview",
+        assetType: "market",
+      }, reason),
+    });
+    return responseJsonObject(response);
+  }
+  const payload = await analysisFallbackSharedBundle(ctx.env, request, {
+    user: options.user,
+    license: options.license,
+    endpoint: "/v1/analysis/market/overview",
+    feature: "market_overview",
+    assetType: "market",
+  }, "compute_not_configured");
+  await recordAnalysisRequest(ctx.env, {
+    user: options.user,
+    license: options.license,
+    endpoint: "/v1/analysis/market/overview",
+    assetType: "market",
+    assetCode: request.market,
+    request,
+    clientIp: clientIp(ctx.request),
+    status: payload.status,
+    latencyMs: Date.now() - options.startedAt,
+  });
+  return payload;
+}
+
+async function mobilePortfolioAnalysis(ctx, options) {
+  const request = {
+    license_id: options.request.license_id,
+    machine_fingerprint: options.request.machine_fingerprint,
+    client_version: options.request.client_version,
+    mode: "mobile_bootstrap",
+    positions: options.request.positions,
+  };
+  if (!request.positions.length) {
+    return analysisFallbackPortfolioBundle(request, {
+      user: options.user,
+      license: options.license,
+      endpoint: "/v1/analysis/portfolio/analyze",
+      feature: "portfolio_analyze",
+    }, "portfolio_snapshot_empty");
+  }
+  if (await mobileAnalysisComputeAvailable(ctx.env)) {
+    const response = await proxyAnalysisCompute(ctx, {
+      endpoint: "/v1/analysis/portfolio/analyze",
+      body: { ...request, user_id: options.user.id, email: options.user.email },
+      user: options.user,
+      license: options.license,
+      startedAt: options.startedAt,
+      fallback: (reason) => analysisFallbackPortfolioBundle(request, {
+        user: options.user,
+        license: options.license,
+        endpoint: "/v1/analysis/portfolio/analyze",
+        feature: "portfolio_analyze",
+      }, reason),
+    });
+    return responseJsonObject(response);
+  }
+  const payload = analysisFallbackPortfolioBundle(request, {
+    user: options.user,
+    license: options.license,
+    endpoint: "/v1/analysis/portfolio/analyze",
+    feature: "portfolio_analyze",
+  }, "compute_not_configured");
+  await recordAnalysisRequest(ctx.env, {
+    user: options.user,
+    license: options.license,
+    endpoint: "/v1/analysis/portfolio/analyze",
+    assetType: "portfolio",
+    assetCode: "",
+    request,
+    clientIp: clientIp(ctx.request),
+    status: payload.status,
+    latencyMs: Date.now() - options.startedAt,
+  });
+  return payload;
+}
+
+async function responseJsonObject(response) {
+  try {
+    const payload = await response.json();
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload
+      : { status: "error", error: "analysis_payload_invalid" };
+  } catch {
+    return { status: "error", error: "analysis_payload_invalid" };
+  }
+}
+
+function mobileCompliancePayload(accepted = false) {
+  return {
+    version: MOBILE_COMPLIANCE_VERSION,
+    required: true,
+    accepted: Boolean(accepted),
+    ...MOBILE_COMPLIANCE_COPY,
+  };
+}
+
+async function mobileComplianceNotice(env, user, machineFingerprint) {
+  const row = await env.DB.prepare(
+    `SELECT 1 AS accepted
+     FROM mobile_compliance_acceptances
+     WHERE user_id = ? AND compliance_version = ? AND machine_fingerprint = ?
+     LIMIT 1`
+  ).bind(user.id, MOBILE_COMPLIANCE_VERSION, machineFingerprint).first();
+  return mobileCompliancePayload(Boolean(row && row.accepted));
+}
+
+async function recordMobileComplianceAcceptance(env, options) {
+  await env.DB.prepare(
+    `INSERT INTO mobile_compliance_acceptances
+       (user_id, compliance_version, machine_fingerprint, client_version, client_ip, accepted_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, compliance_version, machine_fingerprint) DO UPDATE SET
+       client_version = excluded.client_version,
+       client_ip = excluded.client_ip,
+       accepted_at = excluded.accepted_at`
+  ).bind(
+    options.user.id,
+    options.complianceVersion,
+    options.machineFingerprint,
+    options.clientVersion || "",
+    options.clientIp || "",
+    nowIso()
+  ).run();
+}
+
+function mobileDeepAnalysisUnlimited(env, user) {
+  const email = String(user && user.email || "").trim().toLowerCase();
+  return listEnv(env.MOBILE_ANALYSIS_UNLIMITED_EMAILS, "")
+    .map((item) => item.toLowerCase())
+    .includes(email);
+}
+
+function mobileDeepAnalysisQuotaPayload(env, user, used = 0) {
+  const limit = Math.max(1, intEnv(env.MOBILE_DAILY_DEEP_ANALYSIS_LIMIT, 5));
+  const unlimited = mobileDeepAnalysisUnlimited(env, user);
+  return {
+    limit,
+    used: unlimited ? 0 : Math.max(0, Number(used || 0)),
+    remaining: unlimited ? limit : Math.max(0, limit - Number(used || 0)),
+    unlimited,
+    reset_at: chinaDayStartIso(addDays(chinaTodayIso(), 1)),
+  };
+}
+
+async function mobileDeepAnalysisQuotaStatus(env, user) {
+  if (mobileDeepAnalysisUnlimited(env, user)) return mobileDeepAnalysisQuotaPayload(env, user, 0);
+  const row = await env.DB.prepare(
+    `SELECT used_count
+     FROM mobile_daily_analysis_usage
+     WHERE user_id = ? AND usage_date = ?`
+  ).bind(user.id, chinaTodayIso()).first();
+  return mobileDeepAnalysisQuotaPayload(env, user, row && row.used_count);
+}
+
+async function claimMobileDeepAnalysisQuota(env, user) {
+  if (mobileDeepAnalysisUnlimited(env, user)) return mobileDeepAnalysisQuotaPayload(env, user, 0);
+  const limit = Math.max(1, intEnv(env.MOBILE_DAILY_DEEP_ANALYSIS_LIMIT, 5));
+  const row = await env.DB.prepare(
+    `INSERT INTO mobile_daily_analysis_usage (user_id, usage_date, used_count, updated_at)
+     VALUES (?, ?, 1, ?)
+     ON CONFLICT(user_id, usage_date) DO UPDATE SET
+       used_count = mobile_daily_analysis_usage.used_count + 1,
+       updated_at = excluded.updated_at
+     WHERE mobile_daily_analysis_usage.used_count < ?
+     RETURNING used_count`
+  ).bind(user.id, chinaTodayIso(), nowIso(), limit).first();
+  if (!row) throwHttp(429, "mobile_daily_analysis_limit_reached");
+  return mobileDeepAnalysisQuotaPayload(env, user, row.used_count);
+}
+
+function mobileBootstrapPayload(options) {
+  const generatedAt = nowIso();
+  const marketSummary = safeJsonObject(options.market.summary || {});
+  const portfolioSummary = safeJsonObject(options.portfolio.summary || {});
+  const portfolioItems = (options.positions || []).map((item) => portfolioSnapshotItem(item));
+  const computedTotalCost = portfolioItems.reduce((total, item) => total + Number(item.cost_total || 0), 0);
+  const computedTotalValue = portfolioItems.reduce((total, item) => total + Number(item.market_value || 0), 0);
+  const computedTotalPnl = computedTotalValue - computedTotalCost;
+  const positionCount = Number(portfolioSummary.total_count || options.positionCount || 0);
+  const risk = mobileRisk(options.portfolio, positionCount);
+  const changes = mobileChanges(options.market);
+  const reviews = positionCount > 0 ? mobileReviews(options.portfolio) : [];
+  const packagePayload = options.latestPackageRow
+    ? {
+      package_id: options.latestPackageRow.package_id,
+      version: options.latestPackageRow.version,
+    }
+    : null;
+  const freshness = firstText(
+    options.market.data_quality && options.market.data_quality.freshness,
+    options.market.as_of,
+    generatedAt
+  );
+  const marketPresentation = mobileMarketPresentation(options.market);
+  const marketTitle = marketPresentation.title;
+  const marketDetail = marketPresentation.detail;
+  const packageStatus = packagePayload
+    ? `正式数据 ${firstText(packagePayload.version, packagePayload.package_id)} · 已校验`
+    : "正式数据已准备";
+  const headline = reviews.length
+    ? reviews[0].title
+    : positionCount
+      ? firstText(portfolioSummary.title, "组合分析已更新")
+      : "尚未同步组合持仓";
+  const headlineSummary = reviews.length
+    ? reviews[0].detail
+    : positionCount
+      ? firstText(portfolioSummary.brief, "正式服务端结果已返回")
+      : "登录和授权有效；从商业客户端同步持仓后可生成组合复核结果。";
+
+  return {
+    ok: true,
+    generated_at: generatedAt,
+    session: {
+      user_id: options.user.id,
+      email: options.user.email,
+    },
+    license: {
+      valid: true,
+      license_id: options.license.license_id,
+      edition: options.license.edition,
+      edition_label: mobileEditionLabel(options.license.edition),
+      expires_at: options.license.expires_at || "",
+      days_left: options.license.expires_at
+        ? Math.max(0, daysBetween(todayIso(), options.license.expires_at))
+        : 0,
+    },
+    source: {
+      provider: "cloudflare_worker",
+      market_status: firstText(options.market.status, "unknown"),
+      portfolio_status: firstText(options.portfolio.status, "unknown"),
+      demo: false,
+    },
+    compliance: options.compliance || mobileCompliancePayload(false),
+    home: {
+      freshness: mobileDateLabel(freshness),
+      market_state: marketTitle,
+      market_detail: marketDetail,
+      portfolio_risk: risk.label,
+      review_count: reviews.length,
+      changes,
+      watchlist: Array.isArray(options.watchlist) ? options.watchlist : [],
+      samples: Array.isArray(options.sampleItems) ? options.sampleItems : [],
+    },
+    portfolio: {
+      cloud_status: positionCount > 0
+        ? `组合数据已同步 · ${mobileTime(generatedAt)}`
+        : "尚未同步组合持仓",
+      risk_state: risk.state,
+      risk_score: risk.score,
+      risk_label: risk.label,
+      risk_detail: risk.detail,
+      day_change: mobilePercent(portfolioSummary.total_pnl_pct),
+      holding_count: positionCount,
+      review_count: reviews.length,
+      total_cost: firstNumber(portfolioSummary.total_cost, computedTotalCost, 0),
+      total_market_value: firstNumber(portfolioSummary.total_market_value, computedTotalValue, 0),
+      total_pnl: firstNumber(portfolioSummary.total_pnl, computedTotalPnl, 0),
+      total_pnl_pct: firstNumber(
+        portfolioSummary.total_pnl_pct,
+        computedTotalCost ? computedTotalPnl / computedTotalCost * 100 : 0
+      ),
+      reviews,
+      market_series: mobileMarketSeries(options.market),
+      positions: portfolioItems,
+    },
+    briefing: {
+      package_status: packageStatus,
+      headline,
+      summary: headlineSummary,
+      events: mobileBriefingEvents({
+        generatedAt,
+        marketTitle,
+        marketDetail,
+        packageStatus,
+        changes,
+        reviews,
+      }),
+    },
+  };
+}
+
+function mobileMarketPresentation(market) {
+  const summary = safeJsonObject(market.summary || {});
+  const sections = safeJsonObject(market.sections || {});
+  const regime = safeJsonObject(sections.regime || market.regime || {});
+  const capital = safeJsonObject(sections.capital_flow || market.capital_flow || {});
+  const rawBrief = firstText(summary.brief);
+  const phaseMatch = rawBrief.match(/phase=([^|\s]+)/i);
+  const scoreMatch = rawBrief.match(/score=([0-9.]+)/i);
+  const directionMatch = rawBrief.match(/(?:capital_direction|direction)=([^|\s]+)/i);
+  const phaseRaw = firstText(regime.phase_label, regime.market_phase, regime.phase, phaseMatch && phaseMatch[1]);
+  const phase = mobileMarketPhaseLabel(phaseRaw);
+  const score = firstNumber(regime.market_score, summary.score, scoreMatch && scoreMatch[1], null);
+  const mainNet = firstNumber(capital.main_net, capital.net_amount, capital.net_inflow, null);
+  const directionRaw = firstText(capital.direction, directionMatch && directionMatch[1]);
+  const flow = mainNet !== null
+    ? mainNet >= 0 ? "资金整体偏流入" : "资金整体偏流出"
+    : /outflow|流出/i.test(directionRaw)
+      ? "资金整体偏流出"
+      : /inflow|流入/i.test(directionRaw)
+        ? "资金整体偏流入"
+        : "资金方向仍待确认";
+  const riskLabel = mobileRiskLabel(firstText(regime.risk_level, summary.risk_level));
+  const title = phase === "观察阶段" ? "市场以震荡观察为主" : `市场处于${phase}`;
+  const detailParts = [];
+  if (score !== null) detailParts.push(`市场活跃度 ${Math.round(score)} 分`);
+  detailParts.push(flow);
+  if (riskLabel !== "待评估") detailParts.push(`整体风险${riskLabel}`);
+  const curatedBrief = mobileUserText(rawBrief, "");
+  const curatedTitle = mobileUserText(summary.title, "");
+  const titleIsTechnical = /overview|云端|缓存|上下文|analysis/i.test(curatedTitle);
+  const briefIsTechnical = /云端|缓存|已发布|上下文|analysis|cache/i.test(curatedBrief);
+  return {
+    title: curatedTitle && !titleIsTechnical
+      ? curatedTitle
+      : title,
+    detail: curatedBrief && !briefIsTechnical
+      ? curatedBrief
+      : score === null && flow === "资金方向仍待确认"
+        ? "市场状态正在更新，当前资金方向仍待确认。"
+        : `${detailParts.join("，")}。`,
+  };
+}
+
+function mobileMarketPhaseLabel(value) {
+  const text = String(value || "").toLowerCase();
+  if (/启动|startup|launch/.test(text)) return "启动阶段";
+  if (/发酵|ferment/.test(text)) return "发酵阶段";
+  if (/高潮|climax|overheat/.test(text)) return "高位阶段";
+  if (/退潮|decline|cool/.test(text)) return "降温阶段";
+  if (/修复|recover/.test(text)) return "修复阶段";
+  if (/震荡|sideways|neutral|watch/.test(text)) return "观察阶段";
+  return "观察阶段";
+}
+
+function mobileRisk(portfolio, positionCount = null) {
+  const summary = safeJsonObject(portfolio.summary || {});
+  const assessment = safeJsonObject(portfolio.risk_assessment || {});
+  const total = positionCount === null ? Number(summary.total_count || 0) : Number(positionCount || 0);
+  if (total <= 0) {
+    return {
+      state: "empty",
+      score: 0,
+      label: "待同步",
+      detail: "同步或添加持仓后可生成组合风险分析",
+    };
+  }
+  const rawLevel = firstText(assessment.level, summary.risk_level, "unknown").toLowerCase();
+  const explicit = firstNumber(assessment.score, assessment.risk_score, summary.risk_score, null);
+  const score = explicit === null
+    ? ({ low: 30, medium: 60, high: 85, critical: 95 }[rawLevel] || 0)
+    : Math.round(Math.max(0, Math.min(100, explicit)));
+  const label = ({ low: "较低", medium: "中等", high: "较高", critical: "严重", unknown: "待评估" })[rawLevel]
+    || rawLevel
+    || "待评估";
+  const warnings = Array.isArray(assessment.warnings) ? assessment.warnings : [];
+  return {
+    state: explicit === null ? "provisional" : "ready",
+    score,
+    label,
+    detail: firstText(warnings[0], summary.brief, "正式服务端尚未返回风险明细"),
+  };
+}
+
+function mobileReviews(portfolio) {
+  const assessment = safeJsonObject(portfolio.risk_assessment || {});
+  const warnings = Array.isArray(assessment.warnings) ? assessment.warnings : [];
+  const actions = Array.isArray(portfolio.next_actions) ? portfolio.next_actions : [];
+  return [...warnings, ...actions].filter(Boolean).slice(0, 4).map((text, index) => ({
+    title: index === 0 ? "组合风险复核" : `复核事项 ${index + 1}`,
+    badge: index === 0 ? "风险复核" : "建议关注",
+    detail: safeText(text, 240),
+    tone: mobileTone(text),
+  }));
+}
+
+function rankMobileSamplePoolItems(rows, strategy) {
+  return rows
+    .map((row, index) => mobileSamplePoolItem(row, strategy, index))
+    .sort((left, right) => right.score - left.score || left.code.localeCompare(right.code))
+    .map((item, index) => ({ ...item, rank: index + 1 }));
+}
+
+function mobileEditionLabel(value) {
+  const edition = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  return ({
+    personal_standard: "个人标准版",
+    personal_pro: "个人专业版",
+    team: "团队版",
+    enterprise: "企业版",
+  })[edition] || "标准版";
+}
+
+function mobileChanges(market) {
+  const items = Array.isArray(market.items) ? market.items : [];
+  return items.slice(0, 5).map((item, index) => {
+    const code = firstText(item.code, item.symbol, item.index_code, `MARKET-${index + 1}`);
+    const name = firstText(item.name, item.index_name, item.title, code);
+    const change = firstNumber(item.change_pct, item.pct_chg, item.change, null);
+    const status = change === null ? firstText(item.status, item.rating, "市场更新") : mobilePercent(change);
+    const detail = firstText(item.reason, item.brief, item.detail, item.industry_name, "正式云端数据");
+    return {
+      code,
+      name,
+      status,
+      detail,
+      tone: mobileTone(`${status} ${detail}`),
+      sparkline: mobileItemSeries(item),
+    };
+  });
+}
+
+function mobileItemSeries(item) {
+  for (const key of ["series", "prices", "closes", "values"]) {
+    if (Array.isArray(item[key])) {
+      return item[key].map(Number).filter(Number.isFinite).slice(-20);
+    }
+  }
+  return [];
+}
+
+function mobileMarketSeries(market) {
+  const items = Array.isArray(market.items) ? market.items : [];
+  const values = items
+    .map((item) => firstNumber(item.close, item.price, item.value, item.score, null))
+    .filter((value) => value !== null)
+    .slice(-20);
+  return values.length > 1 ? values : [];
+}
+
+function mobileBriefingEvents(options) {
+  const events = [
+    {
+      time: mobileTime(options.generatedAt),
+      title: "市场状态更新",
+      detail: `${options.marketTitle} · ${options.marketDetail}`,
+      tone: "primary",
+    },
+    {
+      time: mobileTime(options.generatedAt),
+      title: "数据准备完成",
+      detail: options.packageStatus,
+      tone: "success",
+    },
+  ];
+  for (const review of options.reviews.slice(0, 2)) {
+    events.push({
+      time: mobileTime(options.generatedAt),
+      title: review.title,
+      detail: review.detail,
+      tone: review.tone,
+    });
+  }
+  for (const change of options.changes.slice(0, Math.max(0, 5 - events.length))) {
+    events.push({
+      time: mobileTime(options.generatedAt),
+      title: `${change.code} ${change.name}`,
+      detail: `${change.status} · ${change.detail}`,
+      tone: change.tone,
+    });
+  }
+  return events;
+}
+
+function mobileTone(value) {
+  const text = String(value || "").toLowerCase();
+  if (/严重|高风险|下降|流出|亏损|负|danger|critical/.test(text)) return "danger";
+  if (/警告|偏高|中等|注意|warning|medium/.test(text)) return "warning";
+  if (/可信|正常|完成|改善|上涨|正|success|ready/.test(text)) return "success";
+  return "primary";
+}
+
+function mobilePercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function mobileFreshnessLabel(value) {
+  const text = String(value || "");
+  if (!text) return "云端数据已连接 · 正式";
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `数据更新至 ${parsed.toISOString().slice(5, 16).replace("T", " ")} · 正式`;
+  }
+  return `数据更新至 ${safeText(text, 32)} · 正式`;
+}
+
+function mobileTime(value) {
+  const parsed = new Date(value || nowIso());
+  return Number.isNaN(parsed.getTime()) ? "--:--" : parsed.toISOString().slice(11, 16);
+}
 
 route("POST", "/v1/scorpio_v1_admin/activation-codes", async (ctx) => {
   requireAdmin(ctx);
@@ -1319,6 +3518,8 @@ route("POST", "/v1/scorpio_v1_admin/activation-codes", async (ctx) => {
 route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
   requireAdmin(ctx);
   const today = todayIso();
+  const reportingDate = chinaTodayIso();
+  const reportingStart = chinaDayStartIso(reportingDate);
   const expiringBefore = addDays(today, 30);
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -1344,31 +3545,40 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status IN ('active', 'issued') THEN 1 ELSE 0 END) AS active,
                 SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
-                SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) AS suspended
+                SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) AS suspended,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS created_today
          FROM customers`
-      ).first(),
+      ).bind(reportingStart).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
                 SUM(CASE WHEN status = 'assigned' THEN 1 ELSE 0 END) AS assigned,
                 SUM(CASE WHEN status = 'used' THEN 1 ELSE 0 END) AS used,
-                SUM(CASE WHEN status = 'revoked' THEN 1 ELSE 0 END) AS revoked
+                SUM(CASE WHEN status = 'revoked' THEN 1 ELSE 0 END) AS revoked,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS created_today
          FROM activation_codes`
-      ).first(),
+      ).bind(reportingStart).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN is_active = 1 AND revoked = 0 THEN 1 ELSE 0 END) AS active,
                 SUM(CASE WHEN approval_status = 'pending' THEN 1 ELSE 0 END) AS pending,
                 SUM(CASE WHEN revoked = 1 THEN 1 ELSE 0 END) AS revoked,
+                SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS issued_today,
                 SUM(CASE WHEN revoked = 0 AND expires_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS expiring_soon
          FROM licenses`
-      ).bind(today, expiringBefore).first(),
+      ).bind(reportingStart, today, expiringBefore).first(),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 MAX(released_at) AS latest_released_at,
                 SUM(COALESCE(download_count, 0)) AS download_count
          FROM release_versions`
-      ).first(),
+      ).bind(reportingStart).first(),
+      ctx.env.DB.prepare(
+        `SELECT COUNT(*) AS visits_total,
+                SUM(CASE WHEN event_date = ? THEN 1 ELSE 0 END) AS visits_today,
+                COUNT(DISTINCT CASE WHEN event_date = ? THEN visitor_hash END) AS unique_visitors_today
+         FROM site_visit_events`
+      ).bind(reportingDate, reportingDate).first(),
       ctx.env.DB.prepare(
         `SELECT COALESCE(SUM(download_count), 0) AS total_24h
          FROM release_download_daily
@@ -1992,9 +4202,13 @@ route("GET", "/v1/scorpio_v1_admin/licenses", async (ctx) => {
      ${filter}`
   ).bind(...params).first();
   const rows = await ctx.env.DB.prepare(
-    `SELECT l.id, l.license_id, l.edition, u.email, u.username, ac.code AS activation_code,
+    `SELECT l.id, l.license_id, l.edition, u.id AS user_id, u.email, u.username, ac.code AS activation_code,
+            ac.max_devices AS activation_max_devices,
             l.machine_fingerprint, l.expires_at, l.is_active, l.revoked, l.revoke_reason,
-            l.approval_status, l.last_online_check, l.created_at
+            l.approval_status, l.last_online_check, l.created_at,
+            (SELECT COUNT(*)
+             FROM mobile_device_bindings mb
+             WHERE mb.user_id = u.id AND mb.revoked = 0) AS active_mobile_devices
      FROM licenses l
      JOIN users u ON u.id = l.user_id
      LEFT JOIN activation_codes ac ON ac.id = l.activation_code_id
@@ -2002,7 +4216,52 @@ route("GET", "/v1/scorpio_v1_admin/licenses", async (ctx) => {
      ORDER BY l.id DESC
      LIMIT ? OFFSET ?`
   ).bind(...params, options.limit, options.offset).all();
-  return json(pageResponse(rows.results || [], total, options));
+  const defaultMobileDeviceLimit = Math.max(1, intEnv(ctx.env.MOBILE_MAX_COMPANION_DEVICES, 2));
+  const results = (rows.results || []).map((row) => ({
+    ...row,
+    active_mobile_devices: Number(row.active_mobile_devices || 0),
+    mobile_device_limit: Number(row.activation_max_devices) > 0
+      ? Math.max(1, Math.floor(Number(row.activation_max_devices)))
+      : defaultMobileDeviceLimit,
+  }));
+  return json(pageResponse(results, total, options));
+});
+
+route("POST", "/v1/scorpio_v1_admin/mobile-devices/reset", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const userId = Number(body.user_id || 0);
+  const email = normalizeEmail(body.email);
+  if ((!Number.isInteger(userId) || userId <= 0) && !isEmail(email)) {
+    return json({ error: "mobile_device_account_required" }, 400);
+  }
+
+  const user = Number.isInteger(userId) && userId > 0
+    ? await ctx.env.DB.prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1").bind(userId).first()
+    : await ctx.env.DB.prepare("SELECT id, email FROM users WHERE lower(email) = ? LIMIT 1").bind(email).first();
+  if (!user) {
+    return json({ error: "user_not_found" }, 404);
+  }
+  if (email && normalizeEmail(user.email) !== email) {
+    return json({ error: "mobile_device_account_mismatch" }, 409);
+  }
+
+  const result = await ctx.env.DB.prepare(
+    "UPDATE mobile_device_bindings SET revoked = 1 WHERE user_id = ? AND revoked = 0"
+  ).bind(user.id).run();
+  const revokedDevices = Number(result?.meta?.changes || 0);
+  await audit(ctx.env, "mobile_devices_reset", ctx.adminActor || "admin_api", {
+    user_id: user.id,
+    email: user.email,
+    revoked_devices: revokedDevices,
+  });
+  return json({
+    ok: true,
+    user_id: user.id,
+    email: user.email,
+    revoked_devices: revokedDevices,
+    active_mobile_devices: 0,
+  });
 });
 
 route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
@@ -2411,6 +4670,7 @@ function cors(request, env) {
     "access-control-allow-origin": allowOrigin,
     "access-control-allow-methods": "GET,HEAD,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "authorization,content-type,x-admin-token,x-scorpio-timestamp,x-scorpio-nonce,x-scorpio-signature",
+    "access-control-expose-headers": "content-length,content-disposition,x-scorpio-release-version,x-scorpio-release-edition,x-scorpio-sha256",
     "access-control-max-age": "86400",
     vary: "Origin",
   };
@@ -2467,14 +4727,25 @@ function numberField(row, key) {
   return Number((row && row[key]) || 0);
 }
 
-async function readJson(request) {
+async function readJson(request, maxBytes = 0) {
   try {
-    return await request.json();
-  } catch {
-    const error = new Error("invalid_json");
-    error.status = 400;
-    error.publicMessage = "invalid_json";
-    throw error;
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (maxBytes && Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      throwHttp(413, "request_body_too_large");
+    }
+    const text = await request.text();
+    if (maxBytes && new TextEncoder().encode(text).byteLength > maxBytes) {
+      throwHttp(413, "request_body_too_large");
+    }
+    return JSON.parse(text);
+  } catch (error) {
+    if (error && error.status) {
+      throw error;
+    }
+    const invalidJson = new Error("invalid_json");
+    invalidJson.status = 400;
+    invalidJson.publicMessage = "invalid_json";
+    throw invalidJson;
   }
 }
 
@@ -2498,14 +4769,110 @@ async function requireUser(ctx) {
 
 function requireAdmin(ctx) {
   const configured = String(ctx.env.ADMIN_API_TOKEN || "");
+  const previous = String(ctx.env.ADMIN_API_TOKEN_PREVIOUS || "");
   const provided = String(ctx.request.headers.get("X-Admin-Token") || "");
-  if (!configured || !timingSafeEqual(provided, configured)) {
+  if (configured && timingSafeEqual(provided, configured)) {
+    ctx.adminActor = String(ctx.env.ADMIN_API_TOKEN_ID || "admin_token_current");
+    return;
+  }
+  if (previous && timingSafeEqual(provided, previous)) {
+    ctx.adminActor = String(ctx.env.ADMIN_API_TOKEN_PREVIOUS_ID || "admin_token_previous");
+    return;
+  }
+  if (!configured) {
     throwHttp(403, "admin_token_required");
+  }
+  throwHttp(403, "admin_token_required");
+}
+
+async function recordAdminRequest(ctx, status, error = "") {
+  if (!ctx || !ctx.env || !ctx.request) {
+    return;
+  }
+  const path = normalizePath(new URL(ctx.request.url).pathname);
+  if (!path.startsWith("/v1/scorpio_v1_admin/")) {
+    return;
+  }
+  const successful = Number(status) >= 200 && Number(status) < 400;
+  if (!successful && Number(status) !== 403) {
+    return;
+  }
+  try {
+    await audit(
+      ctx.env,
+      successful ? "admin_request_authorized" : "admin_request_denied",
+      ctx.adminActor || "admin_token_unknown",
+      {
+        method: ctx.request.method,
+        path,
+        status: Number(status),
+        error: safeText(error, 120),
+        client_ip: clientIp(ctx.request),
+      }
+    );
+  } catch {
+    // Auditing must not change the result of an administrative request.
+  }
+}
+
+async function runAdminRequest(ctx, handler) {
+  try {
+    const result = await handler(ctx);
+    await recordAdminRequest(ctx, result.status);
+    return result;
+  } catch (error) {
+    await recordAdminRequest(ctx, error?.status || 500, error?.publicMessage || "internal_server_error");
+    if (error && typeof error === "object") {
+      error.adminAuditLogged = true;
+    }
+    throw error;
+  }
+}
+
+async function verifyFeedbackTurnstile(env, body, clientAddress) {
+  const secret = String(env.FEEDBACK_TURNSTILE_SECRET || "").trim();
+  if (!secret) {
+    return;
+  }
+  const token = safeText(body.turnstile_token || body.cf_turnstile_response || "", 2048);
+  if (!token) {
+    throwHttp(403, "turnstile_token_required");
+  }
+  const form = new URLSearchParams({ secret, response: token });
+  if (clientAddress && clientAddress !== "unknown") {
+    form.set("remoteip", clientAddress);
+  }
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    body: form,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.success) {
+    throwHttp(403, "turnstile_verification_failed");
   }
 }
 
 function analysisComputeConfigured(env) {
   return Boolean(String(env.ANALYSIS_COMPUTE_URL || "").trim());
+}
+
+async function mobileAnalysisComputeAvailable(env) {
+  if (!analysisComputeConfigured(env)) return false;
+  if (!env.DB) return true;
+  try {
+    const state = await env.DB.prepare(
+      "SELECT compute_ok, checked_at FROM analysis_monitor_state WHERE id = 1 LIMIT 1"
+    ).first();
+    if (!state || !state.checked_at) return true;
+    const checkedAt = new Date(state.checked_at).getTime();
+    if (!Number.isFinite(checkedAt) || Date.now() - checkedAt > 10 * 60 * 1000) return true;
+    return Number(state.compute_ok) === 1;
+  } catch (error) {
+    console.error("analysis_monitor_state_read_failed", {
+      error: safeText(error && error.message ? error.message : String(error), 300),
+    });
+    return true;
+  }
 }
 
 async function analysisComputeHealth(env) {
@@ -2514,7 +4881,7 @@ async function analysisComputeHealth(env) {
       configured: false,
       ok: false,
       mode: "not_configured",
-      message: "Analysis Compute is not configured; contract fallback is active.",
+      message: "analysis_compute_not_configured_cache_fallback_available_when_data_is_published",
     };
   }
   const baseUrl = String(env.ANALYSIS_COMPUTE_URL || "").replace(/\/+$/, "");
@@ -2563,12 +4930,135 @@ function sanitizeComputeHealthObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+async function runAnalysisMonitor(env) {
+  const [compute, cache] = await Promise.all([
+    analysisComputeHealth(env),
+    analysisCacheHealth(env),
+  ]);
+  const mode = compute.ok ? "compute_proxy" : cache.ready ? "cache_fallback" : "degraded";
+  const message = safeText(compute.message || compute.error || cache.message || "", 240);
+  const checkedAt = nowIso();
+
+  await env.DB.prepare(
+    `INSERT INTO analysis_monitor_state
+       (id, checked_at, compute_ok, cache_ready, mode, message, last_alert_at)
+     VALUES (1, ?, ?, ?, ?, ?, NULL)
+     ON CONFLICT(id) DO UPDATE SET
+       checked_at = excluded.checked_at,
+       compute_ok = excluded.compute_ok,
+       cache_ready = excluded.cache_ready,
+       mode = excluded.mode,
+       message = excluded.message`
+  )
+    .bind(checkedAt, compute.ok ? 1 : 0, cache.ready ? 1 : 0, mode, message)
+    .run();
+
+  const shouldAlert = (compute.configured && !compute.ok) || !cache.ready;
+  if (shouldAlert) {
+    await sendAnalysisAlert(env, { compute, cache, mode, message, checkedAt });
+  }
+}
+
+async function runScheduledMaintenance(env) {
+  await Promise.all([
+    runAnalysisMonitor(env),
+    cleanupStaleProductionUploads(env),
+  ]);
+}
+
+async function cleanupStaleProductionUploads(env) {
+  const ttlHours = Math.max(1, Math.min(intEnv(env.PRODUCTION_UPLOAD_STALE_TTL_HOURS, 24), 168));
+  const limit = Math.max(1, Math.min(intEnv(env.PRODUCTION_UPLOAD_CLEANUP_LIMIT, 25), 100));
+  const cutoff = new Date(Date.now() - ttlHours * 60 * 60 * 1000).toISOString();
+  const stale = await env.DB.prepare(
+    `SELECT batch_id
+       FROM production_upload_batches
+      WHERE status IN ('created', 'receiving')
+        AND updated_at < ?
+      ORDER BY updated_at ASC
+      LIMIT ?`
+  ).bind(cutoff, limit).all();
+  const batches = stale.results || [];
+  if (!batches.length) {
+    return { cleaned_batches: 0, cutoff };
+  }
+
+  const now = nowIso();
+  const reason = `stale_upload_ttl_expired_after_${ttlHours}h`;
+  const statements = [];
+  for (const row of batches) {
+    const batchId = safeText(row.batch_id || "", 96);
+    if (!batchId) continue;
+    const staleGuard = `EXISTS (
+      SELECT 1 FROM production_upload_batches
+       WHERE batch_id = ?
+         AND status IN ('created', 'receiving')
+         AND updated_at < ?
+    )`;
+    statements.push(
+      env.DB.prepare(
+        `DELETE FROM production_upload_staging_rows
+          WHERE batch_id = ? AND ${staleGuard}`
+      ).bind(batchId, batchId, cutoff),
+      env.DB.prepare(
+        `DELETE FROM production_upload_chunks
+          WHERE batch_id = ? AND ${staleGuard}`
+      ).bind(batchId, batchId, cutoff),
+      env.DB.prepare(
+        `UPDATE production_upload_batches
+            SET status = 'aborted', error_message = ?, updated_at = ?
+          WHERE batch_id = ?
+            AND status IN ('created', 'receiving')
+            AND updated_at < ?`
+      ).bind(reason, now, batchId, cutoff)
+    );
+  }
+  if (statements.length) {
+    await env.DB.batch(statements);
+  }
+  return { cleaned_batches: Math.floor(statements.length / 3), cutoff };
+}
+
+async function sendAnalysisAlert(env, monitor) {
+  const webhookUrl = String(env.ANALYSIS_ALERT_WEBHOOK_URL || "").trim();
+  if (!webhookUrl) {
+    return;
+  }
+  const state = await env.DB.prepare("SELECT last_alert_at FROM analysis_monitor_state WHERE id = 1").first();
+  const cooldownMs = intEnv(env.ANALYSIS_ALERT_COOLDOWN_SECONDS, 900) * 1000;
+  if (state?.last_alert_at && Date.now() - Date.parse(state.last_alert_at) < cooldownMs) {
+    return;
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      service: "scorpio-license-api",
+      event: "analysis_monitor_unhealthy",
+      severity: monitor.mode === "degraded" ? "critical" : "warning",
+      checked_at: monitor.checkedAt,
+      mode: monitor.mode,
+      message: monitor.message,
+      compute: { configured: monitor.compute.configured, ok: monitor.compute.ok, mode: monitor.compute.mode },
+      cache: { ready: monitor.cache.ready },
+    }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (response.ok) {
+    await env.DB.prepare("UPDATE analysis_monitor_state SET last_alert_at = ? WHERE id = 1")
+      .bind(nowIso())
+      .run();
+  }
+}
+
 function analysisSecurityStatus(env) {
   return {
     require_request_signature: boolEnv(env.ANALYSIS_REQUIRE_REQUEST_SIGNATURE, false),
     require_license_id: boolEnv(env.ANALYSIS_REQUIRE_LICENSE_ID, false),
     rate_limit_per_minute: intEnv(env.ANALYSIS_RATE_LIMIT_PER_MINUTE, 120),
     replay_window_seconds: intEnv(env.ANALYSIS_REPLAY_WINDOW_SECONDS, 300),
+    replay_nonce_scope: "user",
   };
 }
 
@@ -2597,7 +5087,15 @@ function normalizePortfolioRequest(body) {
   const positions = rawPositions.slice(0, 200).map((item) => ({
     asset_type: normalizeAssetType(item.asset_type || item.type || "stock"),
     code: normalizeAssetCode(item.code || item.symbol || item.asset_code),
+    name: safeText(item.name || "", 128),
+    quantity: clampNumber(item.quantity || item.shares || 0, 0, 1000000000000, 0),
+    cost_price: clampNumber(item.cost_price || item.cost || item.cost_nav || 0, 0, 1000000000, 0),
+    current_price: clampNumber(item.current_price || item.price || item.nav || item.latest_nav || 0, 0, 1000000000, 0),
+    target_profit_pct: clampNumber(item.target_profit_pct || 0, -100, 1000, 0),
+    stop_loss_pct: clampNumber(item.stop_loss_pct || 0, -100, 1000, 0),
     weight: clampNumber(item.weight, 0, 1, 0),
+    price_as_of: safeText(item.price_as_of || "", 32),
+    price_source: safeText(item.price_source || "", 64),
   })).filter((item) => item.code);
   return {
     license_id: safeText(body.license_id || "", 96),
@@ -2649,13 +5147,17 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(Math.max(parsed, min), max);
 }
 
-async function verifyAnalysisLicense(env, user, licenseId) {
+async function verifyAnalysisLicense(env, user, licenseId, machineFingerprint) {
   const normalizedLicenseId = safeText(licenseId || "", 96);
   if (!normalizedLicenseId) {
     return null;
   }
+  const normalizedMachineFingerprint = safeText(machineFingerprint || "", 160);
+  if (!normalizedMachineFingerprint) {
+    throwHttp(403, "analysis_machine_fingerprint_required");
+  }
   const license = await env.DB.prepare(
-    `SELECT license_id, edition, expires_at, is_active, revoked
+    `SELECT license_id, edition, machine_fingerprint, expires_at, is_active, revoked
      FROM licenses
      WHERE user_id = ? AND license_id = ?
      LIMIT 1`
@@ -2670,6 +5172,9 @@ async function verifyAnalysisLicense(env, user, licenseId) {
   }
   if (license.expires_at && license.expires_at < todayIso()) {
     throwHttp(403, "license_expired");
+  }
+  if (!license.machine_fingerprint || license.machine_fingerprint !== normalizedMachineFingerprint) {
+    throwHttp(403, "device_not_bound_to_license");
   }
   return license;
 }
@@ -2821,19 +5326,27 @@ async function verifyAnalysisRequestSignature(ctx, options) {
 async function recordAnalysisNonce(env, options) {
   try {
     await env.DB.prepare(
-      `INSERT INTO analysis_replay_nonces (nonce, user_id, request_hash, expires_at, created_at)
+      `INSERT INTO analysis_replay_nonces (user_id, nonce, request_hash, expires_at, created_at)
        VALUES (?, ?, ?, ?, ?)`
     )
-      .bind(options.nonce, options.userId, options.requestHash, options.expiresAt, nowIso())
+      .bind(options.userId, options.nonce, options.requestHash, options.expiresAt, nowIso())
       .run();
-  } catch {
-    throwHttp(409, "analysis_replay_detected");
+  } catch (error) {
+    if (isConstraintError(error)) {
+      throwHttp(409, "analysis_replay_detected");
+    }
+    throwHttp(500, "analysis_replay_store_unavailable");
   }
   if (Math.random() < 0.02) {
     await env.DB.prepare("DELETE FROM analysis_replay_nonces WHERE expires_at < ?")
       .bind(nowIso())
       .run();
   }
+}
+
+function isConstraintError(error) {
+  const message = String((error && error.message) || error || "").toLowerCase();
+  return message.includes("constraint") || message.includes("unique") || message.includes("primary key");
 }
 
 function bearerToken(request) {
@@ -2888,14 +5401,19 @@ async function proxyAnalysisCompute(ctx, options) {
   }
   let response;
   try {
+    const timeoutMs = Math.max(
+      1000,
+      Math.min(Number(options.timeoutMs || intEnv(ctx.env.ANALYSIS_COMPUTE_REQUEST_TIMEOUT_MS, 20000)), 60000),
+    );
     response = await fetch(`${baseUrl}${options.endpoint}`, {
       method: "POST",
       headers,
       body: JSON.stringify(options.body),
-      signal: AbortSignal.timeout(intEnv(ctx.env.ANALYSIS_COMPUTE_REQUEST_TIMEOUT_MS, 20000)),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const payload = analysisComputeFetchErrorPayload(error, options.endpoint);
+    const fallback = await maybeAnalysisFallback(options, "compute_unreachable");
     await recordAnalysisRequest(ctx.env, {
       user: options.user,
       license: options.license,
@@ -2904,9 +5422,12 @@ async function proxyAnalysisCompute(ctx, options) {
       assetCode: options.body.code || "",
       request: options.body,
       clientIp: clientIp(ctx.request),
-      status: "compute_unreachable",
+      status: fallback ? fallback.status : "compute_unreachable",
       latencyMs: Date.now() - options.startedAt,
     });
+    if (fallback) {
+      return json(annotateAnalysisFallback(fallback, payload, "compute_unreachable"));
+    }
     return json(payload, 503);
   }
   const text = await response.text();
@@ -2915,6 +5436,8 @@ async function proxyAnalysisCompute(ctx, options) {
   if (!contentType.includes("application/json")) {
     payload = JSON.stringify(analysisComputeErrorPayload(response.status, text, options.endpoint));
   }
+  const parsedPayload = contentType.includes("application/json") ? parseJson(text, null) : null;
+  const qualityIssue = response.ok ? analysisComputeQualityIssue(parsedPayload, options.endpoint) : "";
   await recordAnalysisRequest(ctx.env, {
     user: options.user,
     license: options.license,
@@ -2923,13 +5446,86 @@ async function proxyAnalysisCompute(ctx, options) {
     assetCode: options.body.code || "",
     request: options.body,
     clientIp: clientIp(ctx.request),
-    status: response.ok ? "compute_proxy" : "compute_error",
+    status: qualityIssue ? "compute_quality_rejected" : response.ok ? "compute_proxy" : "compute_error",
     latencyMs: Date.now() - options.startedAt,
   });
+  if (qualityIssue) {
+    const fallback = await maybeAnalysisFallback(options, qualityIssue);
+    if (fallback) {
+      return json(annotateAnalysisFallback(fallback, parsedPayload || {}, qualityIssue));
+    }
+    return json(analysisComputeErrorPayload(502, qualityIssue, options.endpoint), 502);
+  }
+  if (!response.ok || !contentType.includes("application/json")) {
+    const fallback = await maybeAnalysisFallback(options, "compute_error");
+    if (fallback) {
+      return json(annotateAnalysisFallback(fallback, parseJson(payload, {}), "compute_error"));
+    }
+  }
   return new Response(payload, {
     status: response.status,
     headers: JSON_HEADERS,
   });
+}
+
+function analysisComputeQualityIssue(payload, endpoint) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const text = JSON.stringify(payload).toLowerCase();
+  if (text.includes("test:") || text.includes("mock") || text.includes("fixture") || text.includes("demo-only") || text.includes("demo_only")) {
+    return "compute_rejected_test_source";
+  }
+  if (endpoint === "/v1/analysis/industry/overview") {
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    if (payload.status === "computed" && items.length < 50) {
+      return "compute_rejected_insufficient_industry_rows";
+    }
+  }
+  if (endpoint === "/v1/analysis/capital/flow") {
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const flow = payload.capital_flow && typeof payload.capital_flow === "object" ? payload.capital_flow : {};
+    const hasMarketNet = Number.isFinite(Number(flow.main_net)) || Number.isFinite(Number(flow.main_net_amount));
+    if (payload.status === "computed" && (items.length < 50 || !hasMarketNet)) {
+      return "compute_rejected_incomplete_capital_flow";
+    }
+  }
+  return "";
+}
+
+async function maybeAnalysisFallback(options, reason) {
+  if (typeof options.fallback !== "function") {
+    return null;
+  }
+  try {
+    return await options.fallback(reason);
+  } catch (error) {
+    console.error("analysis_fallback_failed", {
+      reason,
+      endpoint: options.endpoint || "",
+      error: safeText(error && error.message ? error.message : String(error), 500),
+    });
+    return null;
+  }
+}
+
+function annotateAnalysisFallback(fallback, computeError, reason) {
+  const dataQuality = fallback.data_quality && typeof fallback.data_quality === "object" ? { ...fallback.data_quality } : {};
+  const missing = Array.isArray(dataQuality.missing) ? [...dataQuality.missing] : [];
+  if (!missing.includes("analysis_compute_service")) {
+    missing.push("analysis_compute_service");
+  }
+  return {
+    ...fallback,
+    status: fallback.status || "partial",
+    data_quality: {
+      ...dataQuality,
+      level: dataQuality.level || "cache_fallback",
+      missing,
+      fallback_reason: reason,
+    },
+    compute_error: sanitizeComputeHealthObject(computeError),
+  };
 }
 
 function analysisComputeFetchErrorPayload(error, endpoint) {
@@ -2985,7 +5581,7 @@ async function handleStockAnalysisPost(ctx, options) {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
@@ -2995,15 +5591,21 @@ async function handleStockAnalysisPost(ctx, options) {
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackStockBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: options.endpoint,
+        feature: options.feature,
+      }, reason),
     });
   }
 
-  const response = contractFeatureBundle(request, {
+  const response = await analysisFallbackStockBundle(ctx.env, request, {
     user,
     license,
     endpoint: options.endpoint,
     feature: options.feature,
-  });
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
@@ -3027,8 +5629,9 @@ async function handleSharedAnalysisGet(ctx, options) {
     market,
     client_version: safeText(ctx.url.searchParams.get("client_version") || "", 64),
     license_id: safeText(ctx.url.searchParams.get("license_id") || "", 96),
+    machine_fingerprint: safeText(ctx.url.searchParams.get("machine_fingerprint") || "", 160),
   };
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: request, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
@@ -3038,15 +5641,23 @@ async function handleSharedAnalysisGet(ctx, options) {
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackSharedBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: options.endpoint,
+        feature: options.feature,
+        assetType: options.assetType,
+      }, reason),
     });
   }
 
-  const response = contractFeatureBundle({ code: market, market, ...request }, {
+  const response = await analysisFallbackSharedBundle(ctx.env, request, {
     user,
     license,
     endpoint: options.endpoint,
     feature: options.feature,
-  });
+    assetType: options.assetType,
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
@@ -3075,8 +5686,9 @@ async function handleAssetAnalysisGet(ctx, options) {
     market,
     client_version: safeText(ctx.url.searchParams.get("client_version") || "", 64),
     license_id: safeText(ctx.url.searchParams.get("license_id") || "", 96),
+    machine_fingerprint: safeText(ctx.url.searchParams.get("machine_fingerprint") || "", 160),
   };
-  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id);
+  const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: request, endpoint: options.endpoint });
 
   if (analysisComputeConfigured(ctx.env)) {
@@ -3086,15 +5698,23 @@ async function handleAssetAnalysisGet(ctx, options) {
       user,
       license,
       startedAt,
+      fallback: (reason) => analysisFallbackAssetBundle(ctx.env, request, {
+        user,
+        license,
+        endpoint: options.endpoint,
+        feature: options.feature,
+        assetType: options.assetType,
+      }, reason),
     });
   }
 
-  const response = contractFeatureBundle(request, {
+  const response = await analysisFallbackAssetBundle(ctx.env, request, {
     user,
     license,
     endpoint: options.endpoint,
     feature: options.feature,
-  });
+    assetType: options.assetType,
+  }, "compute_not_configured");
   await recordAnalysisRequest(ctx.env, {
     user,
     license,
@@ -3107,6 +5727,825 @@ async function handleAssetAnalysisGet(ctx, options) {
     latencyMs: Date.now() - startedAt,
   });
   return json(response);
+}
+
+async function analysisCacheHealth(env) {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT COUNT(*) AS row_count, MAX(r.updated_at) AS updated_at
+       FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+       WHERE b.status = 'committed'`
+    ).first();
+    const rowCount = numberField(row, "row_count");
+    return {
+      ready: rowCount > 0,
+      row_count: rowCount,
+      updated_at: row && row.updated_at ? row.updated_at : "",
+      source: "production_table_rows",
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      row_count: 0,
+      error: safeText(error && error.message ? error.message : String(error), 240),
+      source: "production_table_rows",
+    };
+  }
+}
+
+async function analysisFallbackStockBundle(env, request, options, reason = "cache_fallback") {
+  const [financialRows, dailyRows, infoRows, ohlcvRows, riskRows] = await Promise.all([
+    publishedRowsForCode(env, "stock_financial_metrics", options.license, request.code, 1),
+    publishedRowsForCode(env, "stock_daily_latest", options.license, request.code, 1),
+    publishedRowsForCode(env, "stock_info", options.license, request.code, 1),
+    publishedRowsForCode(env, "stock_daily_ohlcv", options.license, request.code, 60),
+    publishedRowsForCode(env, "stock_risk_metrics", options.license, request.code, 1),
+  ]);
+  const financial = financialRows[0] || {};
+  const daily = dailyRows[0] || {};
+  const info = infoRows[0] || {};
+  const riskMetrics = riskRows[0] || {};
+  const stockName = firstText(
+    daily.stock_name,
+    daily.name,
+    info.stock_name,
+    info.name,
+    financial.stock_name,
+    financial.name,
+    request.code
+  );
+  const quote = compactObject({
+    code: request.code,
+    stock_name: stockName,
+    name: stockName,
+    latest_price: firstNumber(daily.latest_price, daily.close, daily.close_price, daily.price, financial.latest_price),
+    price: firstNumber(daily.latest_price, daily.close, daily.close_price, daily.price, financial.latest_price),
+    change_percent: firstNumber(daily.change_percent, daily.pct_chg, daily.pct_change),
+    pct_change: firstNumber(daily.change_percent, daily.pct_chg, daily.pct_change),
+    trade_date: firstText(daily.trade_date, daily.date, financial.trade_date),
+    industry: firstText(daily.industry, info.industry, financial.industry),
+    data_source: firstText(daily.data_source, info.data_source, "production_table_rows"),
+  });
+  const fundamental = compactObject({
+    code: request.code,
+    name: stockName,
+    pe: firstNumber(financial.pe, financial.pe_ttm, daily.pe, daily.pe_ttm),
+    pb: firstNumber(financial.pb, daily.pb),
+    roe: firstNumber(financial.roe, financial.roe_weighted),
+    total_market_cap: firstNumber(financial.total_market_cap, financial.market_cap, daily.total_market_cap, daily.market_cap),
+    circulating_market_cap: firstNumber(financial.circulating_market_cap, daily.circulating_market_cap),
+    revenue_growth: firstNumber(financial.revenue_growth, financial.or_yoy, financial.operating_revenue_yoy),
+    profit_growth: firstNumber(financial.profit_growth, financial.net_profit_yoy, financial.parent_net_profit_yoy),
+    report_date: firstText(financial.report_date),
+    data_source: firstText(financial.data_source, "production_table_rows"),
+  });
+  const financialSection = compactObject({
+    code: request.code,
+    name: stockName,
+    report_date: firstText(financial.report_date),
+    report_type: firstText(financial.report_type),
+    eps: firstNumber(financial.eps, financial.basic_eps),
+    roe: firstNumber(financial.roe, financial.roe_weighted),
+    revenue: firstNumber(financial.revenue, financial.operating_revenue, financial.total_revenue),
+    net_profit: firstNumber(financial.net_profit, financial.parent_net_profit),
+    revenue_growth: firstNumber(financial.revenue_growth, financial.or_yoy, financial.operating_revenue_yoy),
+    profit_growth: firstNumber(financial.profit_growth, financial.net_profit_yoy, financial.parent_net_profit_yoy),
+    report_publish_date: firstText(financial.report_publish_date, financial.ann_date),
+    data_available_date: firstText(financial.data_available_date, financial.updated_at),
+    data_source: firstText(financial.data_source, "production_table_rows"),
+  });
+  const missing = [];
+  if (!financialRows.length) missing.push("stock_financial_metrics");
+  if (!dailyRows.length) missing.push("stock_daily_latest");
+  if (!ohlcvRows.length && options.feature === "price_technical") missing.push("stock_daily_ohlcv");
+  const freshness = maxText([
+    financial._data_date,
+    daily._data_date,
+    info._data_date,
+    ...ohlcvRows.slice(0, 3).map((row) => row._data_date),
+  ]);
+  return {
+    status: "partial",
+    feature: options.feature || "stock_bundle",
+    code: request.code,
+    market: request.market,
+    as_of: nowIso(),
+    data_quality: {
+      level: missing.length ? "partial_cache" : "cache",
+      freshness,
+      missing,
+      fallback_reason: reason,
+    },
+    summary: {
+      score: null,
+      rating: missing.length ? "partial" : "ready",
+      risk_level: "unknown",
+      title: `${stockName} 云端缓存分析`,
+      brief: missing.length
+        ? "云端已返回可用缓存数据，部分指标仍待补齐。"
+        : "当前研究结果已更新，请结合趋势和风险项复核。",
+    },
+    sections: {
+      quote,
+      price: { ohlcv: normalizeOhlcvRows(ohlcvRows) },
+      price_technical: { ohlcv: normalizeOhlcvRows(ohlcvRows), source: "production_table_rows" },
+      technical: { ohlcv: normalizeOhlcvRows(ohlcvRows), source: "production_table_rows" },
+      risk_metrics: compactObject({
+        volatility_20: firstNumber(riskMetrics.volatility_20),
+        volatility_60: firstNumber(riskMetrics.volatility_60),
+        max_drawdown_20: firstNumber(riskMetrics.max_drawdown_20),
+        max_drawdown_60: firstNumber(riskMetrics.max_drawdown_60),
+        risk_score: firstNumber(riskMetrics.risk_score),
+        trade_date: firstText(riskMetrics.trade_date, riskMetrics._data_date),
+      }),
+      fundamental,
+      financial: financialSection,
+      news: { items: [] },
+      reason: { summary: "", factors: [], next_actions: [] },
+      conclusion: {},
+    },
+    risk_flags: missing.length ? [`missing:${missing.join(",")}`] : [],
+    next_actions: missing.length ? ["请刷新在线数据，或稍后重试完整分析。"] : [],
+    source: safeAnalysisSource(options.endpoint, options.user, options.license),
+  };
+}
+
+async function analysisFallbackSharedBundle(env, request, options, reason = "cache_fallback") {
+  if (options.feature === "industry_overview") {
+    const rows = latestDateRows(await publishedRows(env, "industry_fund_flow_cache", options.license, { limit: 200 }));
+    return sharedFallbackPayload(request, options, reason, {
+      items: rows.map((row, index) => compactObject({
+        name: firstText(row.name, row.sector_name, row.industry_name, row.sector_code, `sector-${index + 1}`),
+        sector_name: firstText(row.sector_name, row.industry_name, row.name),
+        industry_name: firstText(row.industry_name, row.sector_name, row.name),
+        pct_change: firstNumber(row.pct_change, row.change_pct, row.change_percent),
+        net_amount: firstNumber(row.net_amount, row.net_inflow, row.main_net),
+        amount_unit: firstText(row.amount_unit, row.net_amount_unit, row.unit, "亿元"),
+        lead_stock: firstText(row.lead_stock, row.leader),
+        trade_date: firstText(row.trade_date, row.date, row._data_date),
+        rank: firstNumber(row.rank, index + 1),
+        source: firstText(row.data_source, "industry_fund_flow_cache"),
+      })),
+      missing: rows.length ? [] : ["industry_fund_flow_cache"],
+      sections: {},
+    });
+  }
+  if (options.feature === "capital_flow") {
+    const marketRows = latestDateRows(await publishedRows(env, "market_fund_flow_cache", options.license, { limit: 20 }));
+    const sectorRows = latestDateRows(await publishedRows(env, "industry_fund_flow_cache", options.license, { limit: 200 }));
+    const marketFlow = marketRows[0] || {};
+    return sharedFallbackPayload(request, options, reason, {
+      items: sectorRows.map((row, index) => compactObject({
+        name: firstText(row.industry_name, row.sector_name, row.name, `industry-${index + 1}`),
+        industry_name: firstText(row.industry_name, row.sector_name, row.name),
+        net_amount: firstNumber(row.net_amount, row.net_inflow, row.main_net),
+        pct_change: firstNumber(row.pct_change, row.change_pct, row.change_percent),
+        trade_date: firstText(row.trade_date, row.date, row._data_date),
+        source: firstText(row.data_source, "industry_fund_flow_cache"),
+      })),
+      missing: [
+        ...(marketRows.length ? [] : ["market_fund_flow_cache"]),
+        ...(sectorRows.length ? [] : ["industry_fund_flow_cache"]),
+      ],
+      sections: {
+        capital_flow: compactObject({
+          date: firstText(marketFlow.trade_date, marketFlow.date, marketFlow._data_date),
+          main_net: firstNumber(marketFlow.main_net, marketFlow.net_inflow, marketFlow.net_amount),
+          super_net: firstNumber(marketFlow.super_net, marketFlow.super_net_amount),
+          big_net: firstNumber(marketFlow.big_net, marketFlow.big_net_amount),
+          sh_pct: firstNumber(marketFlow.sh_pct, marketFlow.index_pct_change, marketFlow.pct_change),
+        }),
+      },
+    });
+  }
+  const marketScoreRows = latestDateRows(await publishedRows(env, "market_score_daily", options.license, { limit: 20 }));
+  const marketScore = preferredMarketScoreRow(marketScoreRows);
+  const marketScoreReady = marketScore && String(marketScore.score_status || "").toLowerCase() === "ready";
+  const sentimentRows = latestDateRows(await publishedRows(env, "market_sentiment_daily", options.license, { limit: 10 }));
+  const flowRows = latestDateRows(await publishedRows(env, "market_fund_flow_cache", options.license, { limit: 10 }));
+  const sentiment = sentimentRows[0] || {};
+  const flow = flowRows[0] || {};
+  return sharedFallbackPayload(request, options, reason, {
+    items: [],
+    missing: [
+      ...(marketScoreReady ? [] : ["market_score_daily"]),
+      ...(!marketScoreReady && !sentimentRows.length ? ["market_sentiment_daily"] : []),
+      ...(flowRows.length ? [] : ["market_fund_flow_cache"]),
+    ],
+    sections: {
+      regime: compactObject({
+        market_score: firstNumber(
+          marketScoreReady ? marketScore.market_score : null,
+          sentiment.market_score,
+          sentiment.sentiment_score,
+          sentiment.score,
+          50
+        ),
+        phase: firstText(
+          marketScoreReady ? marketScore.market_phase : null,
+          sentiment.phase,
+          sentiment.phase_key,
+          sentiment.market_phase,
+          "watch"
+        ),
+        phase_label: firstText(
+          marketScoreReady ? marketScore.market_phase : null,
+          sentiment.phase_label,
+          sentiment.market_phase,
+          "观察"
+        ),
+        risk_level: firstText(marketScoreReady ? marketScore.risk_level : null, sentiment.risk_level, "unknown"),
+        effective_trade_date: firstText(
+          marketScoreReady ? marketScore.trade_date : null,
+          sentiment.trade_date,
+          sentiment._data_date,
+          marketScore.trade_date
+        ),
+        score_version: marketScoreReady ? firstText(marketScore.score_version, "unknown") : "market-sentiment.fallback",
+        score_status: marketScoreReady ? "ready" : "fallback",
+        formal_score_version: firstText(marketScore.score_version, "missing"),
+        formal_score_status: firstText(marketScore.score_status, "missing"),
+        score_source: marketScoreReady ? "market_score_daily" : "market_sentiment_daily",
+        score_breakdown: safeJsonObject(marketScore.score_breakdown_json),
+        score_input_quality: safeJsonObject(marketScore.input_quality_json),
+        score_evidence: safeJsonObject(marketScore.evidence_json),
+      }),
+      capital_flow: compactObject({
+        date: firstText(flow.trade_date, flow.date, flow._data_date),
+        main_net: firstNumber(flow.main_net, flow.net_inflow, flow.net_amount),
+        super_net: firstNumber(flow.super_net, flow.super_net_amount),
+        big_net: firstNumber(flow.big_net, flow.big_net_amount),
+        sh_pct: firstNumber(flow.sh_pct, flow.index_pct_change, flow.pct_change),
+      }),
+      indices: [],
+    },
+  });
+}
+
+function sharedFallbackPayload(request, options, reason, payload) {
+  const missing = payload.missing || [];
+  return {
+    status: "partial",
+    feature: options.feature,
+    asset_type: options.assetType || request.asset_type || "market",
+    code: request.code || request.market || "CN",
+    market: request.market || "CN",
+    as_of: nowIso(),
+    data_quality: {
+      level: missing.length ? "partial_cache" : "cache",
+      freshness: maxText([
+        ...(payload.items || []).map((row) => row.trade_date || row.date || ""),
+        payload.sections && payload.sections.regime ? payload.sections.regime.effective_trade_date : "",
+        payload.sections && payload.sections.capital_flow ? payload.sections.capital_flow.date : "",
+      ]),
+      missing,
+      fallback_reason: reason,
+    },
+    summary: {
+      score: firstNumber(payload.sections && payload.sections.regime ? payload.sections.regime.market_score : null, null),
+      rating: missing.length ? "partial" : "ready",
+      risk_level: payload.sections && payload.sections.regime ? payload.sections.regime.risk_level || "unknown" : "unknown",
+      title: `${analysisFeatureLabel(options.feature)}云端缓存`,
+      brief: missing.length
+        ? "云端已返回可用市场缓存，部分指标仍待补齐。"
+        : "市场数据已更新，当前状态可供继续观察。",
+    },
+    sections: payload.sections || {},
+    items: payload.items || [],
+    risk_flags: missing.length ? [`missing:${missing.join(",")}`] : [],
+    next_actions: missing.length ? ["请刷新在线市场数据，或稍后重试完整分析。"] : [],
+    source: safeAnalysisSource(options.endpoint, options.user, options.license),
+  };
+}
+
+function analysisFeatureLabel(feature) {
+  return {
+    market_overview: "大盘分析",
+    industry_overview: "行业概况",
+    capital_flow: "主力资金",
+    stock_bundle: "个股分析",
+    price_technical: "行情图",
+    fundamental: "基本面",
+    financial: "财报分析",
+    news: "资讯分析",
+    reason: "研究结论",
+  }[String(feature || "")] || "云端分析";
+}
+
+async function analysisFallbackAssetBundle(env, request, options, reason = "cache_fallback") {
+  {
+    const isFund = options.assetType === "fund";
+    const code = safeText(request.code || "", 32);
+    const profileTable = isFund ? "fund_profiles" : "bond_profiles";
+    const dailyTable = isFund ? "fund_nav_daily" : "bond_daily_snapshot";
+    const profileRows = await publishedRowsForCode(env, profileTable, options.license, code, 1);
+    const dailyRows = await publishedRowsForCode(env, dailyTable, options.license, code, isFund ? 120 : 1);
+    const profile = profileRows[0] || {};
+    const latestDaily = dailyRows[0] || {};
+
+    if (isFund) {
+      const performanceRows = await publishedRowsForCode(
+        env,
+        "fund_performance_snapshots",
+        options.license,
+        code,
+        1
+      );
+      const exposureRows = await publishedRowsForCode(
+        env,
+        "fund_exposure_profiles",
+        options.license,
+        code,
+        1
+      );
+      const performanceRow = performanceRows[0] || {};
+      const exposureRow = exposureRows[0] || {};
+      const performance = compactObject({
+        ...performanceRow,
+        return_1m: firstNumber(performanceRow.return_1m, performanceRow.return_1m_pct),
+        return_3m: firstNumber(performanceRow.return_3m, performanceRow.return_3m_pct),
+        return_6m: firstNumber(performanceRow.return_6m, performanceRow.return_6m_pct),
+        return_1y: firstNumber(performanceRow.return_1y, performanceRow.return_1y_pct),
+        return_3y: firstNumber(performanceRow.return_3y, performanceRow.return_3y_pct),
+        risk_metrics: parseJson(performanceRow.risk_metrics_json, {}),
+        returns: parseJson(performanceRow.returns_json, {}),
+      });
+      const exposure = compactObject({
+        ...exposureRow,
+        holdings: parseJson(exposureRow.holdings_json, []),
+        industry: parseJson(exposureRow.industry_json, []),
+        risk_factor_tags: parseJson(exposureRow.risk_factor_tags_json, []),
+        asset_allocation: {
+          stock_ratio: firstNumber(exposureRow.equity_exposure_pct, 0),
+          bond_ratio: firstNumber(exposureRow.bond_exposure_pct, 0),
+          cash_ratio: firstNumber(exposureRow.cash_exposure_pct, 0),
+        },
+      });
+      const missing = [
+        ...(profileRows.length ? [] : ["fund_profiles"]),
+        ...(dailyRows.length ? [] : ["fund_nav_daily"]),
+        ...(performanceRows.length ? [] : ["fund_performance_snapshots"]),
+        ...(exposureRows.length ? [] : ["fund_exposure_profiles"]),
+      ];
+      const score = firstNumber(performance.score, 0);
+      const name = firstText(profile.fund_name, profile.name, code);
+      return {
+        status: missing.length ? "partial" : "ready",
+        feature: options.feature,
+        asset_type: "fund",
+        code,
+        market: request.market,
+        as_of: nowIso(),
+        data_quality: {
+          level: missing.length ? "partial_cache" : "cache",
+          freshness: firstText(
+            performance.snapshot_date,
+            latestDaily.nav_date,
+            exposure.profile_date,
+            profile.updated_at
+          ),
+          missing,
+          fallback_reason: reason,
+        },
+        summary: {
+          score,
+          rating: firstText(performance.rating, "watch"),
+          rating_color: firstText(performance.rating_color),
+          risk_level: firstText(profile.risk_level, "unknown"),
+          title: `${name} fund analysis`,
+          brief: `Cloud fund profile and ${dailyRows.length} NAV rows are available.`,
+        },
+        sections: {
+          profile,
+          performance,
+          exposure,
+          nav: dailyRows.slice().reverse(),
+          peers: [],
+        },
+        items: [],
+        risk_flags: missing.map((item) => `missing:${item}`),
+        next_actions: missing.length ? ["Sync the missing fund tables and retry."] : [],
+        source: safeAnalysisSource(options.endpoint, options.user, options.license),
+      };
+    }
+
+    const scoreRows = await publishedRowsForCode(env, "score_history", options.license, code, 10);
+    const scoreRow = scoreRows.find((row) => firstText(row.asset_type).toLowerCase() === "bond") || {};
+    const missing = [
+      ...(profileRows.length ? [] : ["bond_profiles"]),
+      ...(dailyRows.length ? [] : ["bond_daily_snapshot"]),
+    ];
+    const totalScore = firstNumber(scoreRow.total_score, scoreRow.score, 0);
+    const detail = compactObject({
+      ...profile,
+      ...latestDaily,
+      bond_code: firstText(profile.bond_code, latestDaily.bond_code, code),
+      bond_name: firstText(profile.bond_name, code),
+      bond_price: firstNumber(latestDaily.bond_price, latestDaily.price),
+      premium_rate: firstNumber(latestDaily.premium_rate),
+      convert_value: firstNumber(latestDaily.convert_value),
+    });
+    return {
+      status: missing.length ? "partial" : "ready",
+      feature: options.feature,
+      asset_type: "bond",
+      code,
+      market: request.market,
+      as_of: nowIso(),
+      data_quality: {
+        level: missing.length ? "partial_cache" : "cache",
+        freshness: firstText(latestDaily.trade_date, profile.updated_at),
+        missing,
+        fallback_reason: reason,
+      },
+      summary: {
+        score: totalScore,
+        rating: firstText(scoreRow.rating, scoreRow.level, "watch"),
+        risk_level: "unknown",
+        title: `${firstText(detail.bond_name, code)} bond analysis`,
+        brief: missing.length
+          ? "Cloud bond data is incomplete."
+          : "Cloud bond profile and latest market snapshot are available.",
+      },
+      sections: {
+        detail,
+        scores: {
+          total_score: totalScore,
+          rating: firstText(scoreRow.rating, scoreRow.level, "watch"),
+        },
+        advice: firstText(scoreRow.advice),
+      },
+      items: [],
+      risk_flags: missing.map((item) => `missing:${item}`),
+      next_actions: missing.length ? ["Sync the missing bond tables and retry."] : [],
+      source: safeAnalysisSource(options.endpoint, options.user, options.license),
+    };
+  }
+  /* Legacy route-ready placeholder retained in source history.
+  const missing = options.assetType === "fund" ? ["fund_bundle_cache"] : ["bond_bundle_cache"];
+  return {
+    status: "partial",
+    feature: options.feature,
+    asset_type: options.assetType,
+    code: request.code,
+    market: request.market,
+    as_of: nowIso(),
+    data_quality: {
+      level: "route_ready_data_missing",
+      freshness: "",
+      missing,
+      fallback_reason: reason,
+    },
+    summary: {
+      score: 0,
+      rating: "watch",
+      risk_level: "unknown",
+      title: `${options.assetType === "fund" ? "基金" : "债券"}云端接口已接入`,
+      brief: "云端接口已可访问，但该资产类型的分析缓存尚未发布。",
+    },
+    sections: {
+      profile: { code: request.code, name: request.code },
+      detail: { bond_code: request.code, bond_name: request.code },
+      performance: {},
+      exposure: {},
+      scores: {},
+    },
+    items: [],
+    risk_flags: [`missing:${missing.join(",")}`],
+    next_actions: ["请发布对应资产类型的云端缓存数据，或稍后重试完整分析。"],
+    source: safeAnalysisSource(options.endpoint, options.user, options.license),
+  };
+}
+
+  */
+}
+
+function analysisFallbackPortfolioBundle(request, options, reason = "cache_fallback") {
+  const items = request.positions.map((item) => portfolioSnapshotItem(item));
+  if (!items.length) {
+    return {
+      status: "empty",
+      feature: options.feature,
+      as_of: nowIso(),
+      analysis_time: nowIso(),
+      data_quality: {
+        level: "waiting_for_positions",
+        freshness: nowIso(),
+        missing: ["portfolio_positions"],
+        fallback_reason: reason,
+      },
+      summary: {
+        title: "尚未同步组合持仓",
+        brief: "同步商业客户端持仓，或在组合页面添加持仓后，即可生成组合分析。",
+        risk_level: "unknown",
+        total_count: 0,
+        stock_count: 0,
+        fund_count: 0,
+        total_cost: 0,
+        total_market_value: 0,
+        total_pnl: 0,
+        total_pnl_pct: 0,
+        profit_count: 0,
+        loss_count: 0,
+      },
+      portfolio: { position_count: 0, uploaded_fields: [] },
+      items: [],
+      risk_assessment: { level: "unknown", avg_score: 0, warnings: [] },
+      market_impact: { available: false, notes: [] },
+      risk_flags: [],
+      next_actions: [],
+      source: safeAnalysisSource(options.endpoint, options.user, options.license),
+    };
+  }
+  const totalCost = items.reduce((total, item) => total + Number(item.cost_total || 0), 0);
+  const totalMarketValue = items.reduce((total, item) => total + Number(item.market_value || 0), 0);
+  const totalPnl = totalMarketValue - totalCost;
+  const totalPnlPct = totalCost ? (totalPnl / totalCost) * 100 : 0;
+  const stockCount = items.filter((item) => item.asset_type === "stock").length;
+  const fundCount = items.filter((item) => item.asset_type === "fund").length;
+  const maxWeight = totalMarketValue
+    ? Math.max(...items.map((item) => Number(item.market_value || 0) / totalMarketValue))
+    : 0;
+  const missingPriceCount = request.positions.filter((item) => Number(item.current_price || 0) <= 0).length;
+  const riskScore = Math.round(Math.max(0, Math.min(100,
+    20 + maxWeight * 55 + Math.max(0, -totalPnlPct) * 1.5 + missingPriceCount * 10
+  )));
+  const riskLevel = riskScore >= 75 ? "high" : riskScore >= 45 ? "medium" : "low";
+  const warnings = [];
+  if (maxWeight >= 0.5) warnings.push(`单一持仓占比约 ${(maxWeight * 100).toFixed(0)}%，组合集中度较高。`);
+  if (totalPnlPct <= -10) warnings.push(`组合累计浮亏约 ${Math.abs(totalPnlPct).toFixed(1)}%，建议复核风险承受范围。`);
+  if (missingPriceCount) warnings.push(`${missingPriceCount} 项持仓暂未取得最新价格，估值使用成本或上次价格。`);
+  if (!warnings.length) warnings.push("组合持仓结构与盈亏已完成基础复核，暂未发现突出集中风险。");
+  return {
+    status: "partial",
+    feature: options.feature,
+    as_of: nowIso(),
+    analysis_time: nowIso(),
+    data_quality: {
+      level: "edge_snapshot",
+      freshness: nowIso(),
+      missing: ["portfolio_deep_scoring"],
+      fallback_reason: reason,
+    },
+    summary: {
+      title: "组合概览已更新",
+      brief: `已汇总 ${items.length} 项持仓的收益表现，部分风险指标正在完善。`,
+      risk_level: riskLevel,
+      risk_score: riskScore,
+      total_count: items.length,
+      stock_count: stockCount,
+      fund_count: fundCount,
+      total_cost: totalCost,
+      total_market_value: totalMarketValue,
+      total_pnl: totalPnl,
+      total_pnl_pct: totalPnlPct,
+      profit_count: items.filter((item) => Number(item.pnl_amount || 0) > 0).length,
+      loss_count: items.filter((item) => Number(item.pnl_amount || 0) < 0).length,
+      model_resonance: { aligned: 0, total: 0, ratio: 0 },
+    },
+    portfolio: {
+      position_count: request.positions.length,
+      uploaded_fields: ["asset_type", "code", "name", "quantity", "cost_price", "current_price", "weight"],
+    },
+    items,
+    risk_assessment: {
+      level: riskLevel,
+      score: riskScore,
+      avg_score: riskScore,
+      warnings,
+    },
+    market_impact: {
+      available: true,
+      notes: ["持仓收益概览已更新。"],
+    },
+    risk_flags: ["missing:portfolio_deep_scoring"],
+    next_actions: [],
+    source: safeAnalysisSource(options.endpoint, options.user, options.license),
+  };
+}
+
+function portfolioSnapshotItem(item) {
+  const quantity = firstNumber(item.quantity, 0);
+  const costPrice = firstNumber(item.cost_price, 0);
+  const observedPrice = firstNumber(item.current_price, item.price, item.nav, item.latest_nav, null);
+  const currentPrice = observedPrice && observedPrice > 0 ? observedPrice : costPrice;
+  const costTotal = quantity * costPrice;
+  const marketValue = quantity * currentPrice;
+  const pnlAmount = marketValue - costTotal;
+  const pnlPct = costTotal ? (pnlAmount / costTotal) * 100 : 0;
+  return {
+    asset_type: item.asset_type,
+    code: item.code,
+    name: item.name || item.code,
+    quantity,
+    cost_price: costPrice,
+    current_price: currentPrice,
+    cost_total: costTotal,
+    market_value: marketValue,
+    pnl_amount: pnlAmount,
+    pnl_pct: pnlPct,
+    weight: firstNumber(item.weight, 0),
+    price_as_of: firstText(item.price_as_of),
+    price_source: firstText(item.price_source),
+    total_score: 0,
+    rating: "cloud_snapshot",
+    advice: {
+      action: "watch",
+      reason: "云端轻量快照，深度因子分析暂未返回。",
+    },
+    score_details: {},
+  };
+}
+
+async function publishedRowsForCode(env, tableName, license, code, limit = 1) {
+  return publishedRows(env, tableName, license, { asset_codes: assetCodeCandidates(code), limit });
+}
+
+async function publishedRows(env, tableName, license, options = {}) {
+  if (!PRODUCTION_UPLOAD_TABLES.has(tableName)) {
+    return [];
+  }
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const scopePriority = scopes
+    .map((scope, index) => `WHEN ? THEN ${index}`)
+    .join(" ");
+  const where = [
+    "r.table_name = ?",
+    `r.edition_scope IN (${scopePlaceholders})`,
+    "b.status = 'committed'",
+  ];
+  const params = [tableName, ...scopes];
+  const module = PRODUCTION_UPLOAD_TABLES.get(tableName);
+  if (module) {
+    where.push("r.module = ?");
+    params.push(module);
+  }
+  const codePatterns = Array.isArray(options.code_patterns) ? options.code_patterns.filter(Boolean) : [];
+  const assetCodes = Array.isArray(options.asset_codes) ? options.asset_codes.filter(Boolean) : [];
+  if (assetCodes.length) {
+    where.push(`UPPER(CASE
+      WHEN json_valid(r.row_json) THEN COALESCE(
+        json_extract(r.row_json, '$.code'),
+        json_extract(r.row_json, '$.stock_code'),
+        json_extract(r.row_json, '$.symbol'),
+        json_extract(r.row_json, '$.ts_code'),
+        json_extract(r.row_json, '$.asset_code'),
+        json_extract(r.row_json, '$.fund_code'),
+        json_extract(r.row_json, '$.bond_code'),
+        ''
+      ) ELSE '' END) IN (${assetCodes.map(() => "?").join(", ")})`);
+    params.push(...assetCodes);
+  } else if (codePatterns.length) {
+    where.push(`(${codePatterns.map(() => "r.row_json LIKE ?").join(" OR ")})`);
+    for (const pattern of codePatterns) {
+      params.push(`%${pattern}%`);
+    }
+  }
+  const limit = Math.max(1, Math.min(Number(options.limit || 50), 500));
+  const rows = await env.DB.prepare(
+    `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+            r.edition_scope, r.module, r.batch_id, r.updated_at
+      FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY r.data_date DESC,
+               CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+               r.updated_at DESC,
+               r.row_key ASC
+      LIMIT ?`
+  ).bind(...params, ...scopes, limit).all();
+  return (rows.results || []).map((row) => {
+    const payload = dataSyncRowPayload(row);
+    return {
+      ...(payload.row || {}),
+      _data_date: payload.data_date || "",
+      _updated_at: payload.updated_at || "",
+      _table_name: payload.table_name || tableName,
+      _edition_scope: payload.edition_scope || "",
+    };
+  });
+}
+
+function assetCodeCandidates(code) {
+  const raw = safeText(code || "", 32).toUpperCase();
+  const short = raw.replace(/\.(SH|SZ|BJ)$/i, "").replace(/^(SH|SZ|BJ)/i, "");
+  return uniqueStrings([
+    raw,
+    short,
+    short ? `SH${short}` : "",
+    short ? `SZ${short}` : "",
+    short ? `BJ${short}` : "",
+    short ? `${short}.SH` : "",
+    short ? `${short}.SZ` : "",
+    short ? `${short}.BJ` : "",
+  ]).map((item) => item.toUpperCase());
+}
+
+function codeJsonPatterns(code) {
+  const raw = safeText(code || "", 32).toUpperCase();
+  const short = raw.replace(/\.(SH|SZ|BJ)$/i, "").replace(/^(SH|SZ|BJ)/i, "");
+  const symbols = uniqueStrings([
+    raw,
+    short,
+    short ? `SH${short}` : "",
+    short ? `SZ${short}` : "",
+    short ? `BJ${short}` : "",
+    short ? `sh${short}` : "",
+    short ? `sz${short}` : "",
+    short ? `${short}.SH` : "",
+    short ? `${short}.SZ` : "",
+    short ? `${short}.BJ` : "",
+  ]);
+  const keys = ["code", "symbol", "ts_code", "asset_code", "fund_code", "bond_code"];
+  const patterns = [];
+  for (const key of keys) {
+    for (const symbol of symbols) {
+      patterns.push(`"${key}":"${symbol}"`);
+      patterns.push(`"${key}": "${symbol}"`);
+    }
+  }
+  return uniqueStrings(patterns);
+}
+
+function latestDateRows(rows) {
+  const latest = maxText(rows.map((row) => row.trade_date || row.date || row._data_date || ""));
+  if (!latest) {
+    return rows;
+  }
+  return rows.filter((row) => String(row.trade_date || row.date || row._data_date || "") === latest);
+}
+
+function preferredMarketScoreRow(rows) {
+  return rows
+    .slice()
+    .sort((left, right) => {
+      const versionDelta = marketScoreVersionRank(right.score_version) - marketScoreVersionRank(left.score_version);
+      if (versionDelta) {
+        return versionDelta;
+      }
+      return String(right.updated_at || right._updated_at || "").localeCompare(
+        String(left.updated_at || left._updated_at || "")
+      );
+    })[0] || {};
+}
+
+function marketScoreVersionRank(value) {
+  const match = String(value || "").match(/\.v(\d+)$/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function normalizeOhlcvRows(rows) {
+  return rows
+    .slice()
+    .reverse()
+    .map((row) => compactObject({
+      date: firstText(row.trade_date, row.date, row._data_date),
+      trade_date: firstText(row.trade_date, row.date, row._data_date),
+      open: firstNumber(row.open, row.open_price),
+      high: firstNumber(row.high, row.high_price),
+      low: firstNumber(row.low, row.low_price),
+      close: firstNumber(row.close, row.close_price),
+      volume: firstNumber(row.volume, row.vol),
+      amount: firstNumber(row.amount),
+    }));
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value);
+    }
+  }
+  return "";
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function compactObject(value) {
+  const result = {};
+  for (const [key, item] of Object.entries(value || {})) {
+    if (item !== undefined && item !== null && item !== "") {
+      result[key] = item;
+    }
+  }
+  return result;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))];
 }
 
 function contractStockBundle(request, options) {
@@ -3312,7 +6751,7 @@ async function issueLicensePayload(env, options) {
   const expiresAt = options.expiresAt || addDays(issuedAt, Math.max(Number(options.days || 365), 1));
   const licenseId =
     options.licenseId ||
-    `LIC-${edition.replaceAll("_", "-").toUpperCase()}-${issuedAt.replaceAll("-", "")}-${timeCompact()}`;
+    `LIC-${edition.replaceAll("_", "-").toUpperCase()}-${issuedAt.replaceAll("-", "")}-${timeCompact()}-${randomToken(4)}`;
   const payload = {
     license_id: licenseId,
     customer_name: String(options.customerName || "Licensed User").trim(),
@@ -3797,14 +7236,7 @@ async function verifyDataPackageLicense(env, user, request) {
 
 function licenseMachineMatches(license, machineFingerprint) {
   const current = safeText(license.machine_fingerprint || "", 160);
-  if (current && current === machineFingerprint) {
-    return true;
-  }
-  const history = parseJson(license.machine_fingerprint_history || "[]", []);
-  return Array.isArray(history) && history.some((item) => {
-    if (typeof item === "string") return item === machineFingerprint;
-    return safeText(item && item.fingerprint, 160) === machineFingerprint;
-  });
+  return Boolean(current) && current === machineFingerprint;
 }
 
 async function latestDataPackage(env, edition, channel, clientVersion) {
@@ -4238,14 +7670,17 @@ function dataSyncRowPayload(row) {
 
 function dataSyncEditionScopes(edition) {
   const normalized = normalizeEdition(edition);
+  if (normalized === "self_use") {
+    return ["internal"];
+  }
   if (normalized === "personal_standard") {
-    return ["standard_pro", "standard"];
+    return ["standard", "standard_pro"];
   }
   if (normalized === "personal_pro") {
-    return ["standard_pro", "standard", "pro"];
+    return ["pro", "standard_pro", "standard"];
   }
   if (["team", "enterprise"].includes(normalized)) {
-    return ["standard_pro", "standard", "pro"];
+    return ["pro", "standard_pro", "standard"];
   }
   return ["standard_pro"];
 }
@@ -4392,6 +7827,7 @@ const PRODUCTION_UPLOAD_TABLES = new Map([
   ["market_fund_flow_cache", "market_context"],
   ["industry_fund_flow_cache", "market_context"],
   ["market_sentiment_daily", "market_context"],
+  ["market_score_daily", "market_context"],
 ]);
 
 function normalizeProductionUploadBatch(body) {
@@ -4704,6 +8140,7 @@ async function downloadReleaseFile(ctx) {
     object.writeHttpMetadata(headers);
     headers.set("content-type", row.content_type || headers.get("content-type") || "application/octet-stream");
     headers.set("content-disposition", `attachment; filename="${fileName}"`);
+    if (object.size) headers.set("content-length", String(object.size));
     headers.set("cache-control", "private, no-store");
     headers.set("x-scorpio-release-version", row.version);
     headers.set("x-scorpio-release-edition", row.edition);
@@ -5155,7 +8592,7 @@ function safeDownloadFileName(value) {
 }
 
 function releasePayload(row) {
-  const downloadEndpoint = row.id ? `/v1/releases/download/${row.id}` : "";
+  const downloadEndpoint = row.id ? `/releases/download/${row.id}` : "";
   return {
     id: row.id || null,
     latest_version: row.version,
@@ -5414,11 +8851,26 @@ function normalizeCustomerStatus(value) {
 }
 
 function clientIp(request) {
-  return (
-    request.headers.get("CF-Connecting-IP") ||
-    (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() ||
-    ""
-  );
+  return request.headers.get("CF-Connecting-IP") || "";
+}
+
+async function allowRateLimit(env, scope, subject, limit, windowMs) {
+  const windowStartedAt = new Date(Math.floor(Date.now() / windowMs) * windowMs).toISOString();
+  const row = await env.DB.prepare(
+    `INSERT INTO api_rate_limits (scope, subject, window_started_at, request_count)
+     VALUES (?, ?, ?, 1)
+     ON CONFLICT(scope, subject) DO UPDATE SET
+       request_count = CASE
+         WHEN api_rate_limits.window_started_at = excluded.window_started_at
+           THEN api_rate_limits.request_count + 1
+         ELSE 1
+       END,
+       window_started_at = excluded.window_started_at
+     RETURNING request_count`
+  )
+    .bind(scope, subject, windowStartedAt)
+    .first();
+  return Number(row?.request_count || 0) <= limit;
 }
 
 function listEnv(value, fallback) {
@@ -5457,6 +8909,14 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function chinaTodayIso() {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function chinaDayStartIso(dateText = chinaTodayIso()) {
+  return new Date(`${dateText}T00:00:00+08:00`).toISOString();
+}
+
 function addDays(dateText, days) {
   const date = new Date(`${dateText}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -5479,11 +8939,62 @@ function nullableText(value) {
 }
 
 function parseJson(value, fallback = {}) {
+  const source = String(value || "");
   try {
-    return JSON.parse(value || "");
+    return JSON.parse(source);
   } catch {
-    return fallback;
+    // Python research payloads can contain bare NaN/Infinity values. D1's
+    // JSON functions accept them, while JSON.parse rejects the whole object.
+    // Preserve the usable presentation fields and treat only non-finite
+    // numeric values as missing.
+    try {
+      return JSON.parse(normalizeNonFiniteJsonNumbers(source));
+    } catch {
+      return fallback;
+    }
   }
+}
+
+function normalizeNonFiniteJsonNumbers(value) {
+  const source = String(value || "");
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < source.length;) {
+    const char = source[index];
+    if (inString) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      result += char;
+      index += 1;
+      continue;
+    }
+    const token = ["-Infinity", "+Infinity", "Infinity", "NaN"].find((candidate) =>
+      source.startsWith(candidate, index)
+      && isJsonValueBoundary(source[index - 1], true)
+      && isJsonValueBoundary(source[index + candidate.length], false)
+    );
+    if (token) {
+      result += "null";
+      index += token.length;
+      continue;
+    }
+    result += char;
+    index += 1;
+  }
+  return result;
+}
+
+function isJsonValueBoundary(char, before) {
+  if (char === undefined) return true;
+  return before ? /[\s\[,{:]/.test(char) : /[\s\]},]/.test(char);
 }
 
 function randomToken(byteLength) {
