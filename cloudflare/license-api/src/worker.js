@@ -3946,20 +3946,21 @@ route("POST", "/v1/scorpio_v1_admin/activation-codes", async (ctx) => {
 route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
   requireAdmin(ctx);
   const today = todayIso();
-  const reportingDate = chinaTodayIso();
-  const reportingStart = chinaDayStartIso(reportingDate);
+  const reportingStart = chinaDayStartIso(chinaTodayIso());
   const expiringBefore = addDays(today, 30);
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  const [users, licensedUsers, customers, codes, licenses, releases, downloads, visits, analysis, recentAudits, recentLicenses, expiringLicenses] =
-    await Promise.all([
+  // Keep the website admin overview within Cloudflare's per-invocation D1
+  // connection limit. D1 batch executes these reads in order through one
+  // binding operation instead of opening more than six concurrent requests.
+  const overviewResults = await ctx.env.DB.batch([
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN email_verified = 1 THEN 1 ELSE 0 END) AS verified,
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS registered_24h
          FROM users u
          WHERE ${REAL_USER_SQL_FILTER}`
-      ).bind(since24h).first(),
+      ).bind(since24h),
       ctx.env.DB.prepare(
         `SELECT COUNT(DISTINCT l.user_id) AS total,
                 COUNT(DISTINCT CASE WHEN l.is_active = 1 AND l.revoked = 0 THEN l.user_id END) AS active,
@@ -3968,7 +3969,7 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
          FROM licenses l
          JOIN users u ON u.id = l.user_id
          WHERE ${REAL_USER_SQL_FILTER}`
-      ).bind(since24h).first(),
+      ).bind(since24h),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status IN ('active', 'issued') THEN 1 ELSE 0 END) AS active,
@@ -3976,7 +3977,7 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
                 SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) AS suspended,
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS created_today
          FROM customers`
-      ).bind(reportingStart).first(),
+      ).bind(reportingStart),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
@@ -3985,7 +3986,7 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
                 SUM(CASE WHEN status = 'revoked' THEN 1 ELSE 0 END) AS revoked,
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS created_today
          FROM activation_codes`
-      ).bind(reportingStart).first(),
+      ).bind(reportingStart),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN is_active = 1 AND revoked = 0 THEN 1 ELSE 0 END) AS active,
@@ -3994,44 +3995,38 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
                 SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS issued_today,
                 SUM(CASE WHEN revoked = 0 AND expires_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS expiring_soon
          FROM licenses`
-      ).bind(reportingStart, today, expiringBefore).first(),
+      ).bind(reportingStart, today, expiringBefore),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 MAX(released_at) AS latest_released_at,
                 SUM(COALESCE(download_count, 0)) AS download_count
          FROM release_versions`
-      ).bind(reportingStart).first(),
-      ctx.env.DB.prepare(
-        `SELECT COUNT(*) AS visits_total,
-                SUM(CASE WHEN event_date = ? THEN 1 ELSE 0 END) AS visits_today,
-                COUNT(DISTINCT CASE WHEN event_date = ? THEN visitor_hash END) AS unique_visitors_today
-         FROM site_visit_events`
-      ).bind(reportingDate, reportingDate).first(),
+      ).bind(reportingStart),
       ctx.env.DB.prepare(
         `SELECT COALESCE(SUM(download_count), 0) AS total_24h
          FROM release_download_daily
          WHERE event_date >= ?`
-      ).bind(today).first(),
+      ).bind(today),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS visits_total,
                 COUNT(DISTINCT visitor_hash) AS unique_visitors_total,
                 SUM(CASE WHEN event_date = ? THEN 1 ELSE 0 END) AS visits_today,
                 COUNT(DISTINCT CASE WHEN event_date = ? THEN visitor_hash END) AS unique_visitors_today
          FROM site_visit_events`
-      ).bind(today, today).first(),
+      ).bind(today, today),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total_24h,
                 SUM(CASE WHEN status IN ('ok', 'contract_ready', 'compute_proxy') THEN 0 ELSE 1 END) AS exceptions_24h,
                 AVG(latency_ms) AS avg_latency_ms_24h
          FROM analysis_requests
          WHERE created_at >= ?`
-      ).bind(since24h).first(),
+      ).bind(since24h),
       ctx.env.DB.prepare(
         `SELECT id, action, actor, payload, created_at
          FROM admin_audit_events
          ORDER BY id DESC
          LIMIT 10`
-      ).all(),
+      ),
       ctx.env.DB.prepare(
         `SELECT l.license_id, l.edition, u.email, u.username, l.expires_at, l.is_active,
                 l.revoked, l.approval_status, l.created_at
@@ -4039,7 +4034,7 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
          JOIN users u ON u.id = l.user_id
          ORDER BY l.id DESC
          LIMIT 10`
-      ).all(),
+      ),
       ctx.env.DB.prepare(
         `SELECT l.license_id, l.edition, u.email, u.username, l.expires_at, l.is_active,
                 l.revoked, l.approval_status
@@ -4048,8 +4043,31 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
          WHERE l.revoked = 0 AND l.expires_at BETWEEN ? AND ?
          ORDER BY l.expires_at ASC
          LIMIT 10`
-      ).bind(today, expiringBefore).all(),
+      ).bind(today, expiringBefore),
     ]);
+  const [
+    usersResult,
+    licensedUsersResult,
+    customersResult,
+    codesResult,
+    licensesResult,
+    releasesResult,
+    downloadsResult,
+    visitsResult,
+    analysisResult,
+    recentAudits,
+    recentLicenses,
+    expiringLicenses,
+  ] = overviewResults;
+  const users = firstBatchRow(usersResult);
+  const licensedUsers = firstBatchRow(licensedUsersResult);
+  const customers = firstBatchRow(customersResult);
+  const codes = firstBatchRow(codesResult);
+  const licenses = firstBatchRow(licensesResult);
+  const releases = firstBatchRow(releasesResult);
+  const downloads = firstBatchRow(downloadsResult);
+  const visits = firstBatchRow(visitsResult);
+  const analysis = firstBatchRow(analysisResult);
 
   const nextActions = [];
   if (numberField(licenses, "pending") > 0) {
@@ -5154,6 +5172,10 @@ function pageResponse(results, totalRow, options) {
 
 function compactCounts(row, keys) {
   return Object.fromEntries(keys.map((key) => [key, numberField(row, key)]));
+}
+
+function firstBatchRow(result) {
+  return result && Array.isArray(result.results) ? result.results[0] || null : null;
 }
 
 function numberField(row, key) {

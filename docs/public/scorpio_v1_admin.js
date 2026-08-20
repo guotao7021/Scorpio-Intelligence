@@ -259,22 +259,38 @@
     }
     try {
       setMessage("正在读取运营数据...", "loading");
-      await Promise.all([
-        loadOverview(),
-        loadSigningHealth(),
-        loadCustomers(),
-        loadCodes(),
-        loadLicenses(),
-        loadReleases(),
-        loadAuditEvents(),
-        loadUsageReports(),
-        loadAnalysisRequests(),
-      ]);
+      const modules = [
+        ["运营总览", loadOverview],
+        ["签名健康", loadSigningHealth],
+        ["客户台账", loadCustomers],
+        ["激活码", loadCodes],
+        ["授权记录", loadLicenses],
+        ["发行版本", loadReleases],
+        ["审计事件", loadAuditEvents],
+        ["用量报告", loadUsageReports],
+        ["分析请求", loadAnalysisRequests],
+      ];
+      const results = await Promise.allSettled(modules.map(([, loader]) => loader()));
+      const failures = results
+        .map((result, index) => ({ result, label: modules[index][0] }))
+        .filter(({ result }) => result.status === "rejected");
+      const authFailure = failures.find(({ result }) => Number(result.reason && result.reason.status) === 403);
+      const successfulCount = results.length - failures.length;
+      if (authFailure || successfulCount === 0) {
+        throw (authFailure || failures[0]).result.reason;
+      }
       renderStatus(true);
       renderAllTables();
       renderMetrics();
       renderCustomerOptions();
-      setMessage("运营数据已刷新。", "success");
+      if (failures.length) {
+        const details = failures
+          .map(({ label, result }) => `${label}：${result.reason && result.reason.message ? result.reason.message : "加载失败"}`)
+          .join("；");
+        setMessage(`管理员身份已验证，但部分模块加载失败。${details}`, "warn");
+      } else {
+        setMessage("运营数据已刷新。", "success");
+      }
       return true;
     } catch (error) {
       renderStatus(false);
@@ -867,7 +883,12 @@
     const text = await response.text();
     const data = text ? parseJson(text) : {};
     if (!response.ok) {
-      throw new Error(errorLabel(data.error || response.statusText));
+      const detail = errorLabel(data.error || response.statusText);
+      const error = new Error(`${detail}（HTTP ${response.status} · ${path}）`);
+      error.status = response.status;
+      error.path = path;
+      error.code = data.error || "";
+      throw error;
     }
     return data;
   }
@@ -1007,6 +1028,8 @@
   function errorLabel(value) {
     return {
       unauthorized: "管理员 Token 无效或已过期。",
+      admin_token_required: "管理员 Token 无效或已过期。",
+      internal_server_error: "服务器处理请求失败。",
       not_found: "当前 API 版本还没有部署对应接口，请先重新部署 Cloudflare Worker。",
       customer_has_activation_codes: "该客户已有授权码或授权记录，已改为归档处理。",
       used_activation_code_cannot_be_deleted_revoke_license_instead: "已使用授权码不能删除，请撤销对应授权记录。",
