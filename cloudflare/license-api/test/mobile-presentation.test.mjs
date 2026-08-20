@@ -42,7 +42,8 @@ test("mobile bootstrap turns raw market diagnostics into customer copy", () => {
   assert.equal(payload.home.market_state, "市场处于启动阶段");
   assert.match(payload.home.market_detail, /市场活跃度 55 分/);
   assert.match(payload.home.market_detail, /资金整体偏流出/);
-  assert.equal(payload.home.freshness, "云端数据已更新");
+  assert.equal(payload.home.freshness, "数据日期待更新");
+  assert.equal(payload.home.data_date, "");
   assert.equal(payload.license.edition_label, "个人专业版");
   assert.equal(payload.portfolio.risk_state, "empty");
   assert.equal(payload.portfolio.cloud_status, "尚未同步组合持仓");
@@ -70,12 +71,27 @@ test("mobile compliance copy is versioned and records acceptance state", () => {
 
 test("market center presents breadth, capital, and sector rotation together", () => {
   const market = presentation.mobileMarketCenterPayload({
-    scoreRows: [{ trade_date: "2026-08-18", market_score: 68, market_phase: "startup", risk_level: "medium" }],
+    scoreRows: [{
+      trade_date: "2026-08-18",
+      market_score: 68,
+      market_phase: "startup",
+      risk_level: "medium",
+      evidence_json: JSON.stringify({
+        indices: [
+          { name: "上证指数", close: 3742.1, pct_today: 0.62, pct_5d: 1.4, pct_20d: 3.8, trend: "震荡偏强" },
+          { name: "深证成指", close: 11890.2, pct_today: -0.21, pct_5d: 0.8, pct_20d: 2.1, trend: "震荡" },
+        ],
+      }),
+    }],
     sentimentRows: [{ trade_date: "2026-08-18", total_count: 5000, up_count: 3200, down_count: 1700, flat_count: 100, limit_up_count: 76, limit_down_count: 4, total_amount: 1800000000000 }],
     flowRows: [{ trade_date: "2026-08-18", main_net: -12988000000, super_net: 2988000000, big_net: -15976000000, sh_pct: 0.6, sz_pct: 0.8 }],
     sectorRows: [
       { trade_date: "2026-08-18", sector_name: "半导体", pct_change: 4.85, hot_score: 90, amount: 32238000000 },
       { trade_date: "2026-08-18", sector_name: "消费电子", pct_change: 2.85, hot_score: 80, amount: 5392000000 },
+    ],
+    industryRows: [
+      { trade_date: "2026-08-18", industry_name: "半导体", pct_change: 4.85, net_amount: 322.38, source: "industry_fund_flow_cache", lead_stock: "中芯国际" },
+      { trade_date: "2026-08-18", industry_name: "煤炭", pct_change: -2.1, net_amount: -18.2, source: "industry_fund_flow_cache", lead_stock: "中国神华" },
     ],
   });
 
@@ -83,7 +99,58 @@ test("market center presents breadth, capital, and sector rotation together", ()
   assert.equal(market.breadth.up_ratio, "64.0%");
   assert.equal(market.breadth.total_amount, "1.80 万亿元");
   assert.equal(market.capital.main_net, "-129.88 亿元");
+  assert.equal(market.freshness, "数据日期 2026-08-18");
   assert.deepEqual(market.sectors.map((item) => item.name), ["半导体", "消费电子"]);
+  assert.deepEqual(market.indices.map((item) => item.name), ["上证指数", "深证成指"]);
+  assert.equal(market.leaders[0].name, "半导体");
+  assert.equal(market.laggards[0].name, "煤炭");
+  assert.match(market.overview.dominant_style, /结构强化/);
+  assert.doesNotMatch(market.advice, /买入|卖出|仓位|建议|积极参与/);
+});
+
+test("fund presentation keeps missing scores partial and uses unsigned allocation ratios", () => {
+  const fund = presentation.mobileFundPayload({
+    status: "partial",
+    as_of: "2026-08-20T02:00:00.000Z",
+    data_quality: { freshness: "2026-08-18" },
+    summary: {},
+    sections: {
+      profile: { fund_code: "000001", fund_name: "测试基金" },
+      performance: {},
+      exposure: {
+        asset_allocation: { stock_ratio: 80, bond_ratio: 15, cash_ratio: 5 },
+        holdings: [{ name: "样本持仓", pct: 9.5 }],
+      },
+    },
+  }, { code: "000001", market: "CN" });
+
+  assert.equal(fund.state, "partial");
+  assert.equal(fund.header.score, null);
+  assert.equal(fund.header.score_label, "待评估");
+  assert.equal(fund.as_of, "数据日期 2026-08-18");
+  assert.deepEqual(fund.allocation.map((item) => item.value), ["80.00%", "15.00%", "5.00%"]);
+  assert.equal(fund.holdings[0].pct, "9.50%");
+  assert.doesNotMatch(fund.conclusion.summary, /Cloud|cache|fallback/i);
+});
+
+test("bond presentation does not fabricate component scores or request-time data dates", () => {
+  const bond = presentation.mobileBondPayload({
+    status: "partial",
+    as_of: "2026-08-20T02:00:00.000Z",
+    data_quality: { freshness: "2026-08-18" },
+    summary: {},
+    sections: {
+      detail: { bond_code: "113009", bond_name: "测试转债", credit_rating: "AA" },
+      scores: {},
+    },
+  }, { code: "113009", market: "CN" });
+
+  assert.equal(bond.state, "partial");
+  assert.equal(bond.header.score, null);
+  assert.equal(bond.header.score_label, "待评估");
+  assert.equal(bond.as_of, "数据日期 2026-08-18");
+  assert.deepEqual(bond.scores, []);
+  assert.doesNotMatch(bond.linkage.summary, /Cloud|cache|fallback/i);
 });
 
 test("configured test account has unlimited mobile deep analysis", () => {
@@ -150,6 +217,8 @@ test("mobile bootstrap hides cache implementation copy from customers", () => {
 
   assert.equal(payload.home.market_state, "市场以震荡观察为主");
   assert.equal(payload.home.market_detail, "市场状态正在更新，当前资金方向仍待确认。");
+  assert.equal(payload.home.data_date, "2026-08-17");
+  assert.equal(payload.briefing.data_date, "2026-08-17");
   assert.doesNotMatch(JSON.stringify(payload.home), /云端|缓存|上下文/);
 });
 

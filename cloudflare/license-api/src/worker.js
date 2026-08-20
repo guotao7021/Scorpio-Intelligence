@@ -36,6 +36,8 @@ export const __mobilePresentationTest = {
   mobileStockResearchUnavailablePayload,
   mobileAnalysisComputeAvailable,
   mobileCompliancePayload,
+  mobileFundPayload,
+  mobileBondPayload,
   mobileMarketCenterPayload,
   mobileDeepAnalysisQuotaPayload,
   mergeMobilePortfolioPositions,
@@ -1559,6 +1561,28 @@ route("POST", "/v1/mobile/stock/search", async (ctx) => {
   return json({ ok: true, keyword, items, result_count: items.length, source: "cloudflare_d1" });
 });
 
+route("POST", "/v1/mobile/asset/search", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/asset/search",
+  });
+  const assetType = String(body.asset_type || "stock").trim().toLowerCase();
+  if (!["stock", "fund", "bond"].includes(assetType)) throwHttp(400, "asset_search_type_invalid");
+  const keyword = safeText(body.keyword || body.query || "", 64).toUpperCase();
+  if (!keyword) throwHttp(400, "asset_search_keyword_required");
+  const rows = await searchPublishedAssetRows(ctx.env, license, assetType, keyword, 60);
+  const items = rows.map((row) => mobileAssetSearchItem(row, assetType)).filter((item) =>
+    `${item.code} ${item.name}`.toUpperCase().includes(keyword)
+  ).slice(0, 30);
+  return json({ ok: true, asset_type: assetType, keyword, items, result_count: items.length, source: "cloudflare_d1" });
+});
+
 route("POST", "/v1/mobile/sample-pool", async (ctx) => {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
@@ -1697,6 +1721,56 @@ route("POST", "/v1/mobile/industry", async (ctx) => {
     industry: mobileIndustryPayload(result),
     result,
     source: "cloudflare_worker",
+  });
+});
+
+route("POST", "/v1/mobile/fund/bundle", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeAnalysisRequest(body, "fund");
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/fund/bundle",
+  });
+  const bundle = await analysisFallbackAssetBundle(ctx.env, request, {
+    user,
+    license,
+    endpoint: "/v1/mobile/fund/bundle",
+    feature: "fund_bundle",
+    assetType: "fund",
+  }, "published_mobile_data");
+  return json({
+    ok: true,
+    fund: mobileFundPayload(bundle, request),
+    source: "published_data_fallback",
+  });
+});
+
+route("POST", "/v1/mobile/bond/bundle", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeAnalysisRequest(body, "bond");
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/bond/bundle",
+  });
+  const bundle = await analysisFallbackAssetBundle(ctx.env, request, {
+    user,
+    license,
+    endpoint: "/v1/mobile/bond/bundle",
+    feature: "bond_bundle",
+    assetType: "bond",
+  }, "published_mobile_data");
+  return json({
+    ok: true,
+    bond: mobileBondPayload(bundle, request),
+    source: "published_data_fallback",
   });
 });
 
@@ -2134,7 +2208,7 @@ function normalizeMobileWatchlist(value) {
     market: normalizeMarket(item.market || "CN"),
   })).filter((item) => {
     const key = `${item.asset_type}:${item.market}:${item.code}`;
-    if (!item.code || seen.has(key)) return false;
+    if (!["stock", "fund", "bond"].includes(item.asset_type) || !item.code || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
@@ -2183,17 +2257,74 @@ async function searchPublishedStockRows(env, license, keyword, limit = 100) {
        AND r.module = 'target_research'
        AND r.edition_scope IN (${scopePlaceholders})
        AND b.status = 'committed'
-       AND UPPER(r.row_json) LIKE ?
+       AND UPPER(r.row_json) LIKE ? ESCAPE '!'
      ORDER BY r.data_date DESC,
               CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
               r.updated_at DESC,
               r.row_key ASC
      LIMIT ?`
-  ).bind(...scopes, `%${keyword}%`, ...scopes, Math.max(1, Math.min(Number(limit || 100), 500))).all();
+  ).bind(...scopes, sqlLikeContains(keyword), ...scopes, Math.max(1, Math.min(Number(limit || 100), 500))).all();
   return (rows.results || []).map((row) => ({
     ...(dataSyncRowPayload(row).row || {}),
     _data_date: row.data_date || "",
   }));
+}
+
+async function searchPublishedAssetRows(env, license, assetType, keyword, limit = 60) {
+  const tableName = assetType === "fund" ? "fund_profiles" : assetType === "bond" ? "bond_profiles" : "stock_info";
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
+  const rows = await env.DB.prepare(
+    `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+            r.edition_scope, r.module, r.batch_id, r.updated_at
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE r.table_name = ?
+       AND r.module = 'target_research'
+       AND r.edition_scope IN (${scopePlaceholders})
+       AND b.status = 'committed'
+       AND UPPER(r.row_json) LIKE ? ESCAPE '!'
+     ORDER BY r.data_date DESC,
+              CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+              r.updated_at DESC,
+              r.row_key ASC
+     LIMIT ?`
+  ).bind(tableName, ...scopes, sqlLikeContains(keyword), ...scopes, Math.max(1, Math.min(Number(limit || 60), 500))).all();
+  return (rows.results || []).map((row) => ({
+    ...(dataSyncRowPayload(row).row || {}),
+    _data_date: row.data_date || "",
+  }));
+}
+
+function sqlLikeContains(value) {
+  return `%${String(value || "").replaceAll("!", "!!").replaceAll("%", "!%").replaceAll("_", "!_")}%`;
+}
+
+function mobileAssetSearchItem(row, assetType) {
+  if (assetType === "fund") {
+    return {
+      asset_type: "fund",
+      code: firstText(row.fund_code, row.code, row.symbol),
+      name: firstText(row.fund_name, row.name, row.fund_code, row.code),
+      market: "CN",
+    };
+  }
+  if (assetType === "bond") {
+    return {
+      asset_type: "bond",
+      code: firstText(row.bond_code, row.code, row.symbol),
+      name: firstText(row.bond_name, row.name, row.bond_code, row.code),
+      market: "CN",
+    };
+  }
+  return {
+    asset_type: "stock",
+    code: firstText(row.code, row.ts_code, row.stock_code, row.symbol),
+    name: firstText(row.name, row.stock_name, row.code, row.ts_code),
+    industry: firstText(row.industry, row.industry_name, row.sector),
+    market: firstText(row.market, row.exchange, "CN"),
+  };
 }
 
 function normalizeMobileSamplePoolRequest(body) {
@@ -2535,6 +2666,169 @@ function mobileResearchFactor(title, detail, tone) {
   return { title, detail, tone: ["success", "warning", "danger", "primary"].includes(tone) ? tone : "primary" };
 }
 
+function mobileFundPayload(bundle, request) {
+  const summary = safeJsonObject(bundle.summary || {});
+  const sections = safeJsonObject(bundle.sections || {});
+  const profile = safeJsonObject(sections.profile || {});
+  const performance = safeJsonObject(sections.performance || {});
+  const exposure = safeJsonObject(sections.exposure || {});
+  const riskMetrics = safeJsonObject(performance.risk_metrics || {});
+  const returns = safeJsonObject(performance.returns || {});
+  const score = firstNumber(performance.score, summary.score, null);
+  const name = firstText(profile.fund_name, profile.name, summary.title, request.code);
+  const riskLevel = mobileRiskLabel(firstText(profile.risk_level, summary.risk_level, "unknown"));
+  const rating = mobileRatingLabel(firstText(performance.rating, summary.rating, "watch"), score);
+  const holdings = Array.isArray(exposure.holdings) ? exposure.holdings.slice(0, 10) : [];
+  const industry = Array.isArray(exposure.industry) ? exposure.industry.slice(0, 8) : [];
+  const peers = Array.isArray(sections.peers) ? sections.peers.slice(0, 5) : [];
+  const riskTags = Array.isArray(exposure.risk_factor_tags)
+    ? exposure.risk_factor_tags.map((item) => mobileUserText(item, "")).filter(Boolean)
+    : [];
+  const returnRows = [
+    ["近1月", firstNumber(performance.return_1m, returns["1m"], null)],
+    ["近3月", firstNumber(performance.return_3m, returns["3m"], null)],
+    ["近6月", firstNumber(performance.return_6m, returns["6m"], null)],
+    ["近1年", firstNumber(performance.return_1y, returns["1y"], null)],
+    ["近3年", firstNumber(performance.return_3y, returns["3y"], null)],
+    ["年初至今", firstNumber(performance.return_ytd, returns.ytd, null)],
+  ].map(([label, value]) => ({
+    label,
+    value: mobilePercent(value),
+    tone: value === null ? "primary" : value >= 0 ? "success" : "danger",
+  }));
+  const riskRows = [
+    ["年化波动", firstNumber(riskMetrics.annual_volatility, null)],
+    ["最大回撤", firstNumber(riskMetrics.max_drawdown, null)],
+    ["夏普比率", firstNumber(riskMetrics.sharpe_ratio, null)],
+  ].map(([label, value]) => ({
+    label,
+    value: label === "夏普比率" ? mobileNumberLabel(value) : mobilePercent(value),
+    tone: "primary",
+  }));
+  const assetAllocation = safeJsonObject(exposure.asset_allocation || {});
+  const allocationRows = [
+    ["股票", firstNumber(assetAllocation.stock_ratio, null)],
+    ["债券", firstNumber(assetAllocation.bond_ratio, null)],
+    ["现金", firstNumber(assetAllocation.cash_ratio, null)],
+  ].map(([label, value]) => ({ label, value: mobileUnsignedPercent(value), tone: "primary" }));
+  const holdingRows = holdings.map((item) => ({
+    name: firstText(item.name, item.stock_name, "--"),
+    pct: mobileUnsignedPercent(firstNumber(item.pct, item.weight, item.ratio, null)),
+  }));
+  const industryRows = industry.map((item) => ({
+    name: firstText(item.name, item.industry, item.sector, "--"),
+    pct: mobileUnsignedPercent(firstNumber(item.pct, item.weight, item.ratio, null)),
+  }));
+  const peerRows = peers.map((item) => ({
+    code: firstText(item.code, item.fund_code, "--"),
+    name: firstText(item.name, item.fund_name, "--"),
+    return_1y: mobilePercent(firstNumber(item.return_1y, item.one_year_return, null)),
+    score: firstNumber(item.score, null),
+  }));
+  const state = bundle.status === "ready" ? "ready" : "partial";
+  return {
+    code: firstText(profile.fund_code, profile.code, request.code),
+    name,
+    market: firstText(request.market, "CN"),
+    state,
+    state_message: mobileResearchStateMessage(state),
+    as_of: mobileDateLabel(firstText(
+      performance.snapshot_date,
+      summary.score_snapshot_date,
+      bundle.data_quality && bundle.data_quality.freshness
+    )),
+    header: {
+      score: score === null ? null : Number(score.toFixed(1)),
+      score_label: score === null ? "待评估" : `${Number(score.toFixed(1))} 分`,
+      rating,
+      risk_label: riskLevel,
+      tone: mobileResearchTone(score, riskLevel),
+    },
+    returns: returnRows,
+    risk: riskRows,
+    allocation: allocationRows,
+    holdings: holdingRows,
+    industry: industryRows,
+    risk_tags: riskTags,
+    peers: peerRows,
+    conclusion: {
+      title: rating,
+      summary: mobileUserText(
+        profile.research_summary,
+        score === null ? "云端暂未形成完整基金研究结论。" : `${rating}，综合评分 ${Number(score.toFixed(1))} 分。`
+      ),
+      cautions: ["基金研究结果仅供复核，不构成投资建议。"],
+    },
+  };
+}
+
+function mobileBondPayload(bundle, request) {
+  const summary = safeJsonObject(bundle.summary || {});
+  const sections = safeJsonObject(bundle.sections || {});
+  const detail = safeJsonObject(sections.detail || {});
+  const scores = safeJsonObject(sections.scores || {});
+  const score = firstNumber(summary.score, scores.total_score, null);
+  const name = firstText(detail.bond_name, detail.name, request.code);
+  const rating = mobileRatingLabel(firstText(summary.rating, scores.rating, "watch"), score);
+  const premium = firstNumber(detail.premium_rate, null);
+  const price = firstNumber(detail.bond_price, detail.price, null);
+  const changePct = firstNumber(detail.change_pct, detail.change_percent, null);
+  const snapshotRows = [
+    ["债券价格", price === null ? "--" : `${Number(price.toFixed(3))} ${changePct === null ? "" : mobilePercent(changePct)}`.trim(), changePct === null ? "primary" : changePct >= 0 ? "success" : "danger"],
+    ["转股溢价率", mobilePercent(premium), premium !== null && premium > 20 ? "danger" : "primary"],
+    ["正股价格", mobileNumberLabel(firstNumber(detail.stock_price, null)), "primary"],
+    ["转股价值", mobileNumberLabel(firstNumber(detail.convert_value, null)), "primary"],
+    ["信用评级", firstText(detail.credit_rating, "--").replace(/sti$/i, "").trim(), "warning"],
+    ["发行规模", firstNumber(detail.issue_size, null) === null ? "--" : `${Number(firstNumber(detail.issue_size, null)).toFixed(2)} 亿`, "primary"],
+  ].map(([label, value, tone]) => ({ label, value, tone }));
+  const scoreRows = [
+    ["价格安全", "30%", firstNumber(scores.price, null), "价格与债底保护"],
+    ["转股溢价", "25%", firstNumber(scores.premium, null), "估值弹性与溢价约束"],
+    ["信用评级", "20%", firstNumber(scores.rating, null), "信用资质与违约风险"],
+    ["转股价值", "25%", firstNumber(scores.convert_value, null), "股性驱动与转换价值"],
+  ].map(([label, weight, value, hint]) => ({
+    label,
+    weight,
+    value: value === null ? null : Math.max(0, Math.min(100, Number(value))),
+    hint,
+  })).filter((item) => item.value !== null);
+  const terms = [
+    ["债券代码", firstText(detail.bond_code, request.code)],
+    ["正股", firstText(detail.stock_name, "--") + (firstText(detail.stock_code) ? ` (${firstText(detail.stock_code)})` : "")],
+    ["转股价", mobileNumberLabel(firstNumber(detail.convert_price, null))],
+    ["转股价值", mobileNumberLabel(firstNumber(detail.convert_value, null))],
+    ["转股溢价率", mobilePercent(premium)],
+    ["信用评级", firstText(detail.credit_rating, "--").replace(/sti$/i, "").trim()],
+    ["发行规模", firstNumber(detail.issue_size, null) === null ? "--" : `${Number(firstNumber(detail.issue_size, null)).toFixed(2)} 亿`],
+  ];
+  const advice = mobileUserText(sections.advice, "");
+  const state = bundle.status === "ready" ? "ready" : "partial";
+  return {
+    code: firstText(detail.bond_code, request.code),
+    name,
+    market: firstText(request.market, "CN"),
+    state,
+    state_message: mobileResearchStateMessage(state),
+    as_of: mobileDateLabel(firstText(
+      detail.trade_date,
+      bundle.data_quality && bundle.data_quality.freshness
+    )),
+    header: {
+      score: score === null ? null : Number(score.toFixed(1)),
+      score_label: score === null ? "待评估" : `${Number(score.toFixed(1))} 分`,
+      rating,
+      tone: mobileResearchTone(score, "unknown"),
+    },
+    snapshot: snapshotRows,
+    scores: scoreRows,
+    terms,
+    linkage: {
+      title: "正股联动",
+      summary: advice || "转债走势需与正股、溢价率和当日市场环境共同理解。",
+    },
+  };
+}
+
 function mobileResearchOhlcv(technical, sections) {
   const candidates = [
     technical.ohlcv,
@@ -2606,17 +2900,19 @@ function mobileResearchMetrics(values) {
 }
 
 async function loadMobileMarketCenter(env, license) {
-  const [scoreRows, sentimentRows, flowRows, sectorRows] = await Promise.all([
+  const [scoreRows, sentimentRows, flowRows, sectorRows, industryRows] = await Promise.all([
     publishedRows(env, "market_score_daily", license, { limit: 20 }),
     publishedRows(env, "market_sentiment_daily", license, { limit: 20 }),
     publishedRows(env, "market_fund_flow_cache", license, { limit: 20 }),
     publishedRows(env, "sector_rotation_daily", license, { limit: 240 }),
+    publishedRows(env, "industry_fund_flow_cache", license, { limit: 240 }),
   ]);
   return mobileMarketCenterPayload({
     scoreRows: latestDateRows(scoreRows),
     sentimentRows: latestDateRows(sentimentRows),
     flowRows: latestDateRows(flowRows),
     sectorRows: latestDateRows(sectorRows),
+    industryRows: latestDateRows(industryRows),
   });
 }
 
@@ -2647,11 +2943,44 @@ function mobileMarketCenterPayload(values) {
     .sort((left, right) => (right.hot_score || 0) - (left.hot_score || 0))
     .slice(0, 12)
     .map((row, index) => ({ ...row, rank: index + 1 }));
+  const evidence = parseJson(score.evidence_json, {});
+  const evidenceIndices = Array.isArray(evidence.indices) ? evidence.indices : [];
+  const indices = evidenceIndices.map((row) => ({
+    name: firstText(row.name, "--"),
+    close: firstNumber(row.close, null),
+    pct_today: firstNumber(row.pct_today, null),
+    pct_5d: firstNumber(row.pct_5d, null),
+    pct_20d: firstNumber(row.pct_20d, null),
+    trend: firstText(row.trend, "--"),
+  })).filter((row) => row.name && row.name !== "--").slice(0, 3);
+  const industryFlows = (values.industryRows || []).map((row) => ({
+    name: firstText(row.industry_name, row.name, row.sector_name, "--"),
+    change: firstNumber(row.pct_change, row.change_pct, row.change_percent, null),
+    net: firstNumber(row.net_amount, row.net_inflow, row.main_net, null),
+    lead_stock: firstText(row.lead_stock, row.leader, "--"),
+    company_count: firstNumber(row.company_count, null),
+    amount_unit: firstText(row.amount_unit, row.net_amount_unit, row.unit),
+    source: firstText(row.source, row.data_source, "industry_fund_flow_cache"),
+  })).filter((row) => row.name && row.name !== "--");
+  const sortedByChange = industryFlows.slice().sort((left, right) => (right.change || 0) - (left.change || 0));
+  const sectorFlowItem = (row) => ({
+    name: row.name,
+    change: mobilePercent(row.change),
+    net: mobileIndustryMoneyAmount(row, row.net),
+    lead_stock: row.lead_stock === "--" ? "" : row.lead_stock,
+    company_count: row.company_count,
+    tone: row.change === null ? "primary" : row.change >= 0 ? "success" : "danger",
+  });
+  const leaders = sortedByChange.slice(0, 3).map(sectorFlowItem);
+  const laggards = sortedByChange.slice(-3).reverse().map(sectorFlowItem);
+  const dominantStyle = mobileDominantStyle(marketScore, mainNet);
+  const advice = mobileMarketAdvice(marketScore);
   const freshness = maxText([
     score.trade_date,
     sentiment.trade_date,
     flow.trade_date,
     ...(values.sectorRows || []).slice(0, 3).map((row) => row.trade_date || row._data_date),
+    ...(values.industryRows || []).slice(0, 3).map((row) => row.trade_date || row._data_date),
   ]);
   const ready = marketScore !== null || totalCount !== null || mainNet !== null || sectors.length > 0;
   return {
@@ -2668,6 +2997,7 @@ function mobileMarketCenterPayload(values) {
       phase,
       risk_label: riskLabel,
       sh_change: mobilePercent(firstNumber(flow.sh_pct, null)),
+      dominant_style: dominantStyle,
     },
     breadth: {
       up_count: upCount === null ? null : Math.round(upCount),
@@ -2687,7 +3017,29 @@ function mobileMarketCenterPayload(values) {
       sz_change: mobilePercent(firstNumber(flow.sz_pct, null)),
     },
     sectors: sectors.map(({ hot_score, ...row }) => row),
+    indices,
+    leaders,
+    laggards,
+    advice,
   };
+}
+
+function mobileDominantStyle(marketScore, mainNet) {
+  if (marketScore === null) return "风格待确认";
+  const flowDirection = mainNet === null ? "中性" : mainNet >= 0 ? "偏多" : "偏空";
+  if (marketScore >= 70) return `趋势延续 · 资金${flowDirection}`;
+  if (marketScore >= 55) return `结构强化 · 资金${flowDirection}`;
+  if (marketScore >= 40) return `震荡防御 · 资金${flowDirection}`;
+  return `弱势观察 · 资金${flowDirection}`;
+}
+
+function mobileMarketAdvice(marketScore) {
+  if (marketScore === null) return "";
+  if (marketScore >= 75) return "趋势强度较高，重点复核量能延续、交易拥挤与回撤风险。";
+  if (marketScore >= 60) return "市场震荡偏强，重点观察主线持续性与资金确认情况。";
+  if (marketScore >= 45) return "市场处于震荡分化阶段，重点比较行业强弱与风险收益结构。";
+  if (marketScore >= 30) return "市场表现偏弱，重点等待企稳证据并持续跟踪风险变化。";
+  return "市场处于弱势环境，当前应重点监测系统性风险与右侧确认信号。";
 }
 
 function mobileIndustryPayload(result) {
@@ -2834,16 +3186,18 @@ function mobileNumberLabel(value) {
 }
 
 function mobileDateLabel(value) {
+  const dataDate = mobileDataDate(value);
+  return dataDate ? `数据日期 ${dataDate}` : "数据日期待更新";
+}
+
+function mobileDataDate(value) {
   const text = String(value || "").trim();
-  if (!text || text === "latest_available") return "云端数据已更新";
-  const parsed = new Date(text.includes("T") ? text : `${text.replace(" ", "T")}Z`);
-  if (!Number.isNaN(parsed.getTime())) {
-    const year = parsed.getUTCFullYear();
-    const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(parsed.getUTCDate()).padStart(2, "0");
-    return `更新至 ${year}-${month}-${day}`;
-  }
-  return "云端数据已更新";
+  if (!text || text === "latest_available") return "";
+  const match = text.match(/(^|\D)(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:日)?/);
+  if (!match) return "";
+  const month = String(match[3]).padStart(2, "0");
+  const day = String(match[4]).padStart(2, "0");
+  return `${match[2]}-${month}-${day}`;
 }
 
 async function mobileStockAnalysis(ctx, options) {
@@ -3149,9 +3503,12 @@ function mobileBootstrapPayload(options) {
     : null;
   const freshness = firstText(
     options.market.data_quality && options.market.data_quality.freshness,
-    options.market.as_of,
-    generatedAt
+    options.market.sections && options.market.sections.regime && options.market.sections.regime.effective_trade_date,
+    options.market.sections && options.market.sections.capital_flow && options.market.sections.capital_flow.date,
+    options.market.as_of === "latest_available" ? "" : options.market.as_of
   );
+  const dataDate = mobileDataDate(freshness);
+  const portfolioDataDate = mobileDataDate(maxText(portfolioItems.map((item) => item.price_as_of))) || dataDate;
   const marketPresentation = mobileMarketPresentation(options.market);
   const marketTitle = marketPresentation.title;
   const marketDetail = marketPresentation.detail;
@@ -3195,6 +3552,7 @@ function mobileBootstrapPayload(options) {
     compliance: options.compliance || mobileCompliancePayload(false),
     home: {
       freshness: mobileDateLabel(freshness),
+      data_date: dataDate,
       market_state: marketTitle,
       market_detail: marketDetail,
       portfolio_risk: risk.label,
@@ -3207,6 +3565,7 @@ function mobileBootstrapPayload(options) {
       cloud_status: positionCount > 0
         ? `组合数据已同步 · ${mobileTime(generatedAt)}`
         : "尚未同步组合持仓",
+      data_date: portfolioDataDate,
       risk_state: risk.state,
       risk_score: risk.score,
       risk_label: risk.label,
@@ -3227,6 +3586,7 @@ function mobileBootstrapPayload(options) {
     },
     briefing: {
       package_status: packageStatus,
+      data_date: dataDate,
       headline,
       summary: headlineSummary,
       events: mobileBriefingEvents({
@@ -3436,6 +3796,12 @@ function mobilePercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "--";
   return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function mobileUnsignedPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number.toFixed(2)}%`;
 }
 
 function mobileFreshnessLabel(value) {
