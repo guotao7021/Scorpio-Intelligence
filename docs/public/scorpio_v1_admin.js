@@ -169,7 +169,7 @@
         await apiPost(`${ADMIN_PATH}/releases`, payload);
         await loadReleases();
         renderMetrics();
-        setMessage("发行记录已保存，用户中心会读取最新 stable 记录。", "success");
+        setMessage("发行记录已保存，对应平台客户端会读取匹配通道的最新记录。", "success");
       });
     });
 
@@ -489,10 +489,11 @@
   }
 
   function renderReleases() {
-    renderTable(els.releasesTable, ["版本", "通道", "平台/版本", "来源", "文件", "大小", "下载", "状态", "发布时间"], state.releases.map((row) => [
+    renderTable(els.releasesTable, ["版本", "平台", "通道", "版本类型", "来源", "文件", "大小", "下载", "状态", "发布时间"], state.releases.map((row) => [
       `v${String(row.version || "").replace(/^v/i, "")}`,
+      row.platform || "desktop",
       row.channel || "-",
-      row.edition === "android" ? "Android APK" : (row.edition || "-"),
+      row.edition || "-",
       shortText(row.r2_key || row.hk_download_url || row.download_url || "-", 46),
       shortText(row.file_name || "-", 28),
       formatBytes(row.file_size_bytes),

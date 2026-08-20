@@ -235,15 +235,20 @@
                 <option value="beta">beta</option>
               </select>
             </label>
+            <label>客户端平台
+              <select name="platform">
+                <option value="desktop">desktop</option>
+                <option value="android">android</option>
+              </select>
+            </label>
             <label>版本
               <select name="edition">
                 <option value="personal_pro">personal_pro</option>
                 <option value="personal_standard">personal_standard</option>
-                <option value="android">android（APK 移动端）</option>
                 <option value="all">all</option>
               </select>
             </label>
-            <label class="wide">R2 对象 Key<input name="r2_key" type="text" placeholder="releases/personal_pro/stable/1.0.0/Scorpio-Setup.exe"></label>
+            <label class="wide">R2 对象 Key<input name="r2_key" type="text" placeholder="releases/android/personal_pro/beta/0.3.0/Scorpio-Mobile.apk"></label>
             <label>文件名<input name="file_name" type="text" placeholder="Scorpio-Setup.exe"></label>
             <label>Content-Type<input name="content_type" type="text" value="application/octet-stream"></label>
             <label class="wide">备用 HTTPS 下载地址<input name="download_url" type="url" placeholder="可选，R2 未配置时使用"></label>

@@ -48,6 +48,11 @@ export const __productionUploadMaintenanceTest = {
   cleanupStaleProductionUploads,
 };
 
+export const __releaseTest = {
+  versionGreater,
+  normalizeReleasePlatform,
+};
+
 export default {
   async fetch(request, env) {
     const corsHeaders = cors(request, env);
@@ -1027,7 +1032,8 @@ route("GET", "/v1/releases/latest", async (ctx) => {
   const user = await requireUser(ctx);
   const edition = ctx.url.searchParams.get("edition") || "personal_pro";
   const channel = ctx.url.searchParams.get("channel") || "stable";
-  const latest = await latestRelease(ctx.env, edition, channel);
+  const platform = normalizeReleasePlatform(ctx.url.searchParams.get("platform") || "desktop");
+  const latest = await latestRelease(ctx.env, edition, channel, platform);
   if (!latest) {
     return json({ error: "release_not_found" }, 404);
   }
@@ -1040,7 +1046,8 @@ route("GET", "/v1/releases/check", async (ctx) => {
   const current = ctx.url.searchParams.get("version") || "";
   const edition = ctx.url.searchParams.get("edition") || "personal_pro";
   const channel = ctx.url.searchParams.get("channel") || "stable";
-  const latest = await latestRelease(ctx.env, edition, channel);
+  const platform = normalizeReleasePlatform(ctx.url.searchParams.get("platform") || "desktop");
+  const latest = await latestRelease(ctx.env, edition, channel, platform);
   if (!latest) {
     return json({ has_update: false, message: "release_not_found" });
   }
@@ -4699,10 +4706,14 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
     where.push("channel = ?");
     params.push(options.channel);
   }
+  if (ctx.url.searchParams.get("platform")) {
+    where.push("platform = ?");
+    params.push(normalizeReleasePlatform(ctx.url.searchParams.get("platform")));
+  }
   const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM release_versions ${filter}`).bind(...params).first();
   const rows = await ctx.env.DB.prepare(
-    `SELECT id, version, channel, edition, release_notes, download_url, hk_download_url, r2_key, file_name,
+    `SELECT id, version, channel, edition, platform, release_notes, download_url, hk_download_url, r2_key, file_name,
             content_type, file_hash_sha256, file_size_bytes, is_required, released_at,
             uploaded_at, download_count, is_active
      FROM release_versions
@@ -4850,6 +4861,7 @@ route("POST", "/v1/scorpio_v1_admin/releases", async (ctx) => {
     version: record.version,
     channel: record.channel,
     edition: record.edition,
+    platform: record.platform,
     r2_key: record.r2_key,
   });
   return json({
@@ -7536,6 +7548,7 @@ async function updateAdminRelease(ctx) {
     version: existing.version,
     channel: existing.channel,
     edition: existing.edition,
+    platform: existing.platform,
   });
   await ctx.env.DB.prepare(
     `UPDATE release_versions
@@ -8912,6 +8925,7 @@ function normalizeAdminRelease(body) {
   const version = safeText(body.version || "", 80).replace(/^v/i, "");
   const channel = normalizePackageChannel(body.channel || "stable");
   const edition = normalizeEdition(body.edition || "personal_pro");
+  const platform = normalizeReleasePlatform(body.platform || "desktop");
   const downloadUrl = safeText(body.download_url || "", 2048);
   const hkDownloadUrl = safeText(body.hk_download_url || "", 2048);
   const r2Key = normalizeR2Key(body.r2_key || "");
@@ -8927,6 +8941,7 @@ function normalizeAdminRelease(body) {
     version,
     channel,
     edition,
+    platform,
     release_notes: safeText(body.release_notes || "", 4000),
     download_url: downloadUrl,
     hk_download_url: hkDownloadUrl,
@@ -8945,11 +8960,11 @@ function normalizeAdminRelease(body) {
 async function upsertRelease(env, record) {
   await env.DB.prepare(
     `INSERT INTO release_versions
-       (version, channel, edition, release_notes, download_url, hk_download_url, r2_key, file_name,
+       (version, channel, edition, platform, release_notes, download_url, hk_download_url, r2_key, file_name,
         content_type, file_hash_sha256, file_size_bytes, is_required, is_active,
         released_at, uploaded_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(version, channel, edition) DO UPDATE SET
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(version, channel, edition, platform) DO UPDATE SET
        release_notes = excluded.release_notes,
        download_url = excluded.download_url,
        hk_download_url = excluded.hk_download_url,
@@ -8967,6 +8982,7 @@ async function upsertRelease(env, record) {
       record.version,
       record.channel,
       record.edition,
+      record.platform,
       record.release_notes,
       record.download_url,
       record.hk_download_url,
@@ -8983,15 +8999,21 @@ async function upsertRelease(env, record) {
     .run();
 }
 
-async function latestRelease(env, edition, channel) {
+async function latestRelease(env, edition, channel, platform = "desktop") {
   return env.DB.prepare(
     `SELECT * FROM release_versions
-     WHERE channel = ? AND (edition = ? OR edition = 'all') AND COALESCE(is_active, 1) = 1
+     WHERE channel = ? AND platform = ? AND (edition = ? OR edition = 'all') AND COALESCE(is_active, 1) = 1
      ORDER BY released_at DESC
      LIMIT 1`
   )
-    .bind(channel, edition)
+    .bind(channel, normalizeReleasePlatform(platform), edition)
     .first();
+}
+
+function normalizeReleasePlatform(value) {
+  const platform = safeText(value || "desktop", 32).toLowerCase().replaceAll("_", "-");
+  if (["desktop", "android"].includes(platform)) return platform;
+  throwHttp(400, "release_platform_invalid");
 }
 
 function normalizeR2Key(value) {
@@ -9013,13 +9035,14 @@ function safeDownloadFileName(value) {
 }
 
 function releasePayload(row) {
-  const downloadEndpoint = row.id ? `/releases/download/${row.id}` : "";
+  const downloadEndpoint = row.id ? `/v1/releases/download/${row.id}` : "";
   return {
     id: row.id || null,
     latest_version: row.version,
     version: row.version,
     channel: row.channel,
     edition: row.edition,
+    platform: row.platform || "desktop",
     release_date: row.released_at,
     release_notes: row.release_notes || "",
     download_url: row.r2_key ? "" : (row.download_url || ""),
@@ -9034,14 +9057,31 @@ function releasePayload(row) {
 
 function versionGreater(next, current) {
   if (!current) return true;
-  const a = String(next).split(".").map((part) => Number.parseInt(part, 10));
-  const b = String(current).split(".").map((part) => Number.parseInt(part, 10));
+  const tokenize = (value) => String(value || "")
+    .trim()
+    .replace(/^v/i, "")
+    .toLowerCase()
+    .split(/[.+_-]/)
+    .flatMap((part) => part.match(/\d+|[a-z]+/g) || [])
+    .map((part) => (/^\d+$/.test(part) ? Number(part) : part));
+  const a = tokenize(next);
+  const b = tokenize(current);
   const length = Math.max(a.length, b.length);
-  for (let i = 0; i < length; i += 1) {
-    const diff = (a[i] || 0) - (b[i] || 0);
-    if (diff !== 0) return diff > 0;
+  for (let index = 0; index < length; index += 1) {
+    const left = a[index];
+    const right = b[index];
+    if (left === right) continue;
+    if (left === undefined) return false;
+    if (right === undefined) return typeof left === "number";
+    if (typeof left === "number" && typeof right === "number") return left > right;
+    if (typeof left === "number") return true;
+    if (typeof right === "number") return false;
+    const order = { alpha: 0, beta: 1, rc: 2 };
+    const leftOrder = order[left] ?? 3;
+    const rightOrder = order[right] ?? 3;
+    return leftOrder === rightOrder ? left > right : leftOrder > rightOrder;
   }
-  return String(next) !== String(current);
+  return false;
 }
 
 async function audit(env, action, actor, payload) {

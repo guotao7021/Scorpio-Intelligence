@@ -7,6 +7,7 @@ const args = parseArgs(process.argv.slice(2));
 const file = requiredArg(args, "file");
 const edition = normalize(args.edition || "personal_pro");
 const channel = normalize(args.channel || "stable");
+const platform = normalize(args.platform || "desktop");
 const version = String(requiredArg(args, "version")).replace(/^v/i, "");
 const bucket = args.bucket || "scorpio-releases";
 const apiBase = (args.api || "").replace(/\/+$/, "");
@@ -14,7 +15,7 @@ const adminToken = args.adminToken || process.env.SCORPIO_ADMIN_API_TOKEN || "";
 const notes = args.notes || "";
 const contentType = args.contentType || "application/octet-stream";
 const fileName = args.fileName || basename(file);
-const r2Key = args.key || `releases/${edition}/${channel}/${version}/${fileName}`;
+const r2Key = args.key || `releases/${platform}/${edition}/${channel}/${version}/${fileName}`;
 const fileInfo = statSync(file);
 const sha256 = await sha256File(file);
 
@@ -44,6 +45,7 @@ if (apiBase) {
       version,
       channel,
       edition,
+      platform,
       release_notes: notes,
       r2_key: r2Key,
       file_name: fileName,
@@ -63,6 +65,7 @@ if (apiBase) {
     version,
     channel,
     edition,
+    platform,
     r2_key: r2Key,
     file_name: fileName,
     content_type: contentType,
