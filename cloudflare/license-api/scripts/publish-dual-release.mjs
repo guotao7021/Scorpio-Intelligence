@@ -23,9 +23,9 @@ const dryRun = Boolean(args.dryRun);
 const allowReplace = Boolean(args.allowReplace);
 
 const releases = await Promise.all([
-  proFile ? buildRelease("personal_pro", proFile, notes || `Scorpio Intelligence Pro v${version} release.`) : null,
-  standardFile ? buildRelease("personal_standard", standardFile, notes || `Scorpio Intelligence Standard v${version} release.`) : null,
-  apkFile ? buildRelease("android", apkFile, notes || `Scorpio Intelligence Android v${version} release.`) : null,
+  proFile ? buildRelease("personal_pro", "desktop", proFile, notes || `Scorpio Intelligence Pro v${version} release.`) : null,
+  standardFile ? buildRelease("personal_standard", "desktop", standardFile, notes || `Scorpio Intelligence Standard v${version} release.`) : null,
+  apkFile ? buildRelease("android", "android", apkFile, notes || `Scorpio Intelligence Android v${version} release.`) : null,
 ].filter(Boolean));
 
 for (const release of releases) {
@@ -47,7 +47,7 @@ console.log(JSON.stringify({
   releases: releases.map(publicRelease),
 }, null, 2));
 
-async function buildRelease(edition, file, releaseNotes) {
+async function buildRelease(edition, platform, file, releaseNotes) {
   const info = statSync(file);
   if (!info.isFile() || info.size < 1) throw new Error(`Release file is empty or invalid: ${file}`);
   const fileName = basename(file);
@@ -57,6 +57,7 @@ async function buildRelease(edition, file, releaseNotes) {
   const ossKey = `releases/v${version}/${fileName}`;
   return {
     edition,
+    platform,
     file,
     fileName,
     fileSizeBytes: info.size,
@@ -71,7 +72,7 @@ async function buildRelease(edition, file, releaseNotes) {
 
 async function ensureReleaseIsNew(release) {
   if (allowReplace) return;
-  const sql = `SELECT id FROM release_versions WHERE version = ${sqlText(version)} AND channel = ${sqlText(channel)} AND edition = ${sqlText(release.edition)} LIMIT 1;`;
+  const sql = `SELECT id FROM release_versions WHERE version = ${sqlText(version)} AND channel = ${sqlText(channel)} AND edition = ${sqlText(release.edition)} AND platform = ${sqlText(release.platform)} LIMIT 1;`;
   const result = run("npx.cmd", ["wrangler", "d1", "execute", "scorpio-license-db", "--remote", "--command", sql], { capture: true });
   if (/"id"\s*:\s*\d+/.test(result.stdout || "")) {
     throw new Error(`Release ${version}/${channel}/${release.edition} already exists. Use a new version or pass --allow-replace deliberately.`);
@@ -121,9 +122,9 @@ function verifyOss(release) {
 }
 
 function registerRelease(release) {
-  const sql = `INSERT INTO release_versions (version, channel, edition, release_notes, download_url, hk_download_url, r2_key, file_name, content_type, file_hash_sha256, file_size_bytes, is_required, is_active, released_at, uploaded_at)
-VALUES (${sqlText(version)}, ${sqlText(channel)}, ${sqlText(release.edition)}, ${sqlText(release.releaseNotes)}, '', ${sqlText(release.hkDownloadUrl)}, ${sqlText(release.r2Key)}, ${sqlText(release.fileName)}, ${sqlText(release.contentType)}, ${sqlText(release.sha256)}, ${release.fileSizeBytes}, 0, 1, ${sqlText(releasedAt)}, ${sqlText(new Date().toISOString())})
-ON CONFLICT(version, channel, edition) DO UPDATE SET
+  const sql = `INSERT INTO release_versions (version, channel, edition, platform, release_notes, download_url, hk_download_url, r2_key, file_name, content_type, file_hash_sha256, file_size_bytes, is_required, is_active, released_at, uploaded_at)
+VALUES (${sqlText(version)}, ${sqlText(channel)}, ${sqlText(release.edition)}, ${sqlText(release.platform)}, ${sqlText(release.releaseNotes)}, '', ${sqlText(release.hkDownloadUrl)}, ${sqlText(release.r2Key)}, ${sqlText(release.fileName)}, ${sqlText(release.contentType)}, ${sqlText(release.sha256)}, ${release.fileSizeBytes}, 0, 1, ${sqlText(releasedAt)}, ${sqlText(new Date().toISOString())})
+ON CONFLICT(version, channel, edition, platform) DO UPDATE SET
 release_notes = excluded.release_notes, hk_download_url = excluded.hk_download_url, r2_key = excluded.r2_key, file_name = excluded.file_name, content_type = excluded.content_type, file_hash_sha256 = excluded.file_hash_sha256, file_size_bytes = excluded.file_size_bytes, is_active = excluded.is_active, released_at = excluded.released_at, uploaded_at = excluded.uploaded_at;`;
   run("npx.cmd", ["wrangler", "d1", "execute", "scorpio-license-db", "--remote", "--command", sql]);
 }
@@ -183,6 +184,7 @@ function sqlText(value) {
 function publicRelease(release) {
   return {
     edition: release.edition,
+    platform: release.platform,
     file_name: release.fileName,
     file_size_bytes: release.fileSizeBytes,
     sha256: release.sha256,

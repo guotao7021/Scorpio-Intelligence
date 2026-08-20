@@ -348,6 +348,20 @@ test("industry presentation preserves the published 亿元 unit", () => {
   assert.equal(payload.items[1].flow, "+39.85 亿元");
 });
 
+test("industry presentation converts production CNY snapshots instead of treating source names as units", () => {
+  const payload = presentation.mobileMarketCenterPayload({
+    industryRows: [
+      { trade_date: "2026-08-19", industry_name: "银行", net_amount: 2630000000, data_source: "sina", pct_change: 0.24 },
+      { trade_date: "2026-08-19", industry_name: "半导体", net_amount: -15260000000, data_source: "sina", pct_change: -0.50 },
+    ],
+  });
+
+  assert.equal(payload.inflows[0].net, "+26.30 亿元");
+  assert.equal(payload.outflows[0].net, "-152.60 亿元");
+  assert.equal(payload.industry_overview.total_net, "-126.30 亿元");
+  assert.equal(payload.capital.sector_total_net, "-126.30 亿元");
+});
+
 test("mobile analysis bypasses a recently unhealthy compute origin", async () => {
   const env = {
     ANALYSIS_COMPUTE_URL: "https://compute.example.invalid",

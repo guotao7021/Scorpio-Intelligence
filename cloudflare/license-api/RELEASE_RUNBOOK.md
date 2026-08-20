@@ -41,7 +41,7 @@ npm run release:publish-dual -- `
   --notes "Scorpio Intelligence Android v1.0.12 release."
 ```
 
-The Android record uses edition `android`, R2 path `releases/android/...`, and MIME type `application/vnd.android.package-archive`. A signed-in user with an active Personal Standard or Personal Pro entitlement can download it.
+The Android record uses edition `android`, platform `android`, R2 path `releases/android/...`, and MIME type `application/vnd.android.package-archive`. The account page reads the active Android `beta` channel and mounts its authorized download endpoint automatically. A signed-in user with an active Personal Standard or Personal Pro entitlement can download it.
 
 The command refuses to replace an existing `version + channel + edition`. Pass `--allow-replace` only for a deliberate correction.
 

@@ -3266,14 +3266,15 @@ function mobileIndustryMoneyAmount(row, value) {
   const absolute = Math.abs(number);
   const sign = number > 0 ? "+" : number < 0 ? "-" : "";
   const unit = firstText(row.amount_unit, row.net_amount_unit, row.unit).toLowerCase();
-  const source = firstText(row.source, row.data_source).toLowerCase();
-  if (/亿|100m|hundred.?million/.test(unit) || /sina|industry_fund_flow_cache/.test(source)) {
+  if (/亿|100m|hundred.?million/.test(unit)) {
     return `${sign}${absolute.toFixed(2)} 亿元`;
   }
   if (/万|10k/.test(unit)) return `${sign}${absolute.toFixed(2)} 万元`;
   if (/元|cny|rmb|yuan/.test(unit)) return mobileMoneyAmount(number);
-  // The published industry flow dataset uses 亿元. Large unlabelled values from
-  // other compute providers are treated as base CNY for backwards compatibility.
+  // Current production snapshots store base CNY even when the upstream source
+  // is Sina or industry_fund_flow_cache. Only an explicit unit may override the
+  // numeric scale; source names are lineage, not unit metadata. Small legacy
+  // values remain compatible with historical snapshots that were stored in 亿.
   return absolute < 10000
     ? `${sign}${absolute.toFixed(2)} 亿元`
     : mobileMoneyAmount(number);

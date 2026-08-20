@@ -2,7 +2,10 @@
   const API_BASE = "https://api.scorpio-intelligence.tech/v1";
   const TOKEN_KEY = "scorpio_user_auth";
   const LICENSE_KEY = "scorpio_user_license";
-  const RELEASE_CHANNEL = "stable";
+  const RELEASE_CHANNELS = Object.freeze({
+    desktop: "stable",
+    android: "beta",
+  });
   const WINDOWS_RELEASE_EDITIONS = ["personal_pro", "personal_standard"];
   const RELEASE_EDITIONS = [...WINDOWS_RELEASE_EDITIONS, "android"];
 
@@ -422,7 +425,9 @@
   }
 
   async function fetchLatestRelease(edition) {
-    const data = await request(`/releases/latest?edition=${encodeURIComponent(edition)}&channel=${RELEASE_CHANNEL}`, {
+    const platform = edition === "android" ? "android" : "desktop";
+    const channel = RELEASE_CHANNELS[platform];
+    const data = await request(`/releases/latest?edition=${encodeURIComponent(edition)}&channel=${encodeURIComponent(channel)}&platform=${encodeURIComponent(platform)}`, {
       method: "GET",
       auth: true,
     });
