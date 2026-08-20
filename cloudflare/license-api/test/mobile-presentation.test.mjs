@@ -28,7 +28,18 @@ test("mobile bootstrap turns raw market diagnostics into customer copy", () => {
         title: "Market overview",
         brief: "phase=启动 | score=55.0 | capital_direction=capital_outflow",
       },
-      sections: { regime: { phase: "launch", market_score: 55 }, capital_flow: { main_net: -12880000000 } },
+      sections: {
+        regime: {
+          phase: "launch",
+          market_score: 55,
+          score_evidence: {
+            indices: [
+              { name: "上证指数", close: 3903.72, pct_today: 0.24, pct_5d: 1.1, pct_20d: 3.2, trend: "震荡整理" },
+            ],
+          },
+        },
+        capital_flow: { main_net: -12880000000 },
+      },
       items: [],
     },
     portfolio: { status: "ready", summary: {}, risk_assessment: {}, next_actions: [] },
@@ -51,6 +62,8 @@ test("mobile bootstrap turns raw market diagnostics into customer copy", () => {
   assert.equal(payload.briefing.events.some((item) => item.title === "组合风险复核"), false);
   assert.equal(payload.home.watchlist[0].code, "300750");
   assert.equal(payload.home.samples[0].code, "600498");
+  assert.equal(payload.home.indices[0].name, "上证指数");
+  assert.equal(payload.home.indices[0].close, 3903.72);
   assert.equal(payload.compliance.required, true);
   assert.equal(payload.compliance.accepted, false);
   assert.match(payload.compliance.data_delay_notice, /T\+1/);
@@ -104,6 +117,13 @@ test("market center presents breadth, capital, and sector rotation together", ()
   assert.deepEqual(market.indices.map((item) => item.name), ["上证指数", "深证成指"]);
   assert.equal(market.leaders[0].name, "半导体");
   assert.equal(market.laggards[0].name, "煤炭");
+  assert.equal(market.industries.length, 2);
+  assert.equal(market.inflows[0].name, "半导体");
+  assert.equal(market.outflows[0].name, "煤炭");
+  assert.equal(market.industry_overview.mood, "多空均衡");
+  assert.equal(market.industry_overview.total_net, "+304.18 亿元");
+  assert.equal(market.capital.inflow_count, 1);
+  assert.equal(market.capital.outflow_count, 1);
   assert.match(market.overview.dominant_style, /结构强化/);
   assert.doesNotMatch(market.advice, /买入|卖出|仓位|建议|积极参与/);
 });

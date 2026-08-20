@@ -3031,10 +3031,41 @@ function mobileMarketCenterPayload(values) {
     net: mobileIndustryMoneyAmount(row, row.net),
     lead_stock: row.lead_stock === "--" ? "" : row.lead_stock,
     company_count: row.company_count,
-    tone: row.change === null ? "primary" : row.change >= 0 ? "success" : "danger",
+    tone: row.change === null ? "primary" : row.change >= 0 ? "danger" : "success",
   });
   const leaders = sortedByChange.slice(0, 3).map(sectorFlowItem);
   const laggards = sortedByChange.slice(-3).reverse().map(sectorFlowItem);
+  const industries = sortedByChange.slice(0, 20).map(sectorFlowItem);
+  const inflows = industryFlows.slice()
+    .filter((row) => row.net !== null && row.net > 0)
+    .sort((left, right) => right.net - left.net)
+    .slice(0, 8)
+    .map(sectorFlowItem);
+  const outflows = industryFlows.slice()
+    .filter((row) => row.net !== null && row.net < 0)
+    .sort((left, right) => left.net - right.net)
+    .slice(0, 8)
+    .map(sectorFlowItem);
+  const industryChanges = industryFlows.map((row) => row.change).filter((value) => value !== null);
+  const riseCount = industryChanges.filter((value) => value > 0).length;
+  const fallCount = industryChanges.filter((value) => value < 0).length;
+  const flatCount = Math.max(0, industryChanges.length - riseCount - fallCount);
+  const averageChange = industryChanges.length
+    ? industryChanges.reduce((total, value) => total + value, 0) / industryChanges.length
+    : null;
+  const totalIndustryNet = industryFlows
+    .map((row) => row.net)
+    .filter((value) => value !== null)
+    .reduce((total, value) => total + value, 0);
+  const industryInflowCount = industryFlows.filter((row) => row.net !== null && row.net > 0).length;
+  const industryOutflowCount = industryFlows.filter((row) => row.net !== null && row.net < 0).length;
+  const riseRatio = industryChanges.length ? riseCount / industryChanges.length * 100 : null;
+  const industryMood = riseRatio === null
+    ? "涨跌待确认"
+    : riseRatio >= 70 ? "强势普涨"
+      : riseRatio >= 55 ? "偏强震荡"
+        : riseRatio >= 45 ? "多空均衡"
+          : riseRatio >= 30 ? "偏弱调整" : "弱势普跌";
   const dominantStyle = mobileDominantStyle(marketScore, mainNet);
   const advice = mobileMarketAdvice(marketScore);
   const freshness = maxText([
@@ -3077,11 +3108,30 @@ function mobileMarketCenterPayload(values) {
       big_net: mobileMoneyAmount(firstNumber(flow.big_net, null)),
       sh_change: mobilePercent(firstNumber(flow.sh_pct, null)),
       sz_change: mobilePercent(firstNumber(flow.sz_pct, null)),
+      sector_total_net: industryFlows.length
+        ? mobileIndustryMoneyAmount({ source: "industry_fund_flow_cache" }, totalIndustryNet)
+        : "--",
+      inflow_count: industryInflowCount,
+      outflow_count: industryOutflowCount,
+    },
+    industry_overview: {
+      mood: industryMood,
+      rise_count: riseCount,
+      flat_count: flatCount,
+      fall_count: fallCount,
+      average_change: averageChange === null ? "--" : mobilePercent(averageChange),
+      total_net: industryFlows.length
+        ? mobileIndustryMoneyAmount({ source: "industry_fund_flow_cache" }, totalIndustryNet)
+        : "--",
+      sample_count: industryFlows.length,
     },
     sectors: sectors.map(({ hot_score, ...row }) => row),
     indices,
     leaders,
     laggards,
+    industries,
+    inflows,
+    outflows,
     advice,
   };
 }
@@ -3572,6 +3622,7 @@ function mobileBootstrapPayload(options) {
   const dataDate = mobileDataDate(freshness);
   const portfolioDataDate = mobileDataDate(maxText(portfolioItems.map((item) => item.price_as_of))) || dataDate;
   const marketPresentation = mobileMarketPresentation(options.market);
+  const homeIndices = mobileMarketIndicesFromAnalysis(options.market);
   const marketTitle = marketPresentation.title;
   const marketDetail = marketPresentation.detail;
   const packageStatus = packagePayload
@@ -3620,6 +3671,7 @@ function mobileBootstrapPayload(options) {
       portfolio_risk: risk.label,
       review_count: reviews.length,
       changes,
+      indices: homeIndices,
       watchlist: Array.isArray(options.watchlist) ? options.watchlist : [],
       samples: Array.isArray(options.sampleItems) ? options.sampleItems : [],
     },
@@ -3661,6 +3713,31 @@ function mobileBootstrapPayload(options) {
       }),
     },
   };
+}
+
+function mobileMarketIndicesFromAnalysis(market) {
+  const source = safeJsonObject(market || {});
+  const sections = safeJsonObject(source.sections);
+  const regime = safeJsonObject(sections.regime || source.regime);
+  const scoreEvidence = safeJsonObject(regime.score_evidence || regime.evidence || source.score_evidence);
+  const candidates = [
+    ...(Array.isArray(scoreEvidence.indices) ? scoreEvidence.indices : []),
+    ...(Array.isArray(sections.indices) ? sections.indices : []),
+    ...(Array.isArray(source.indices) ? source.indices : []),
+  ];
+  const seen = new Set();
+  return candidates.map((row) => ({
+    name: firstText(row && row.name, "--"),
+    close: firstNumber(row && row.close, null),
+    pct_today: firstNumber(row && row.pct_today, row && row.pct_change, null),
+    pct_5d: firstNumber(row && row.pct_5d, null),
+    pct_20d: firstNumber(row && row.pct_20d, null),
+    trend: firstText(row && row.trend, "--"),
+  })).filter((row) => {
+    if (!row.name || row.name === "--" || seen.has(row.name)) return false;
+    seen.add(row.name);
+    return row.close !== null || row.pct_today !== null || row.trend !== "--";
+  }).slice(0, 3);
 }
 
 function mobileMarketPresentation(market) {
