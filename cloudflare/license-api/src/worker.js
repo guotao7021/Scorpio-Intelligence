@@ -42,6 +42,7 @@ export const __mobilePresentationTest = {
   mobileDeepAnalysisQuotaPayload,
   mergeMobilePortfolioPositions,
   analysisFallbackPortfolioBundle,
+  mobileAssetSearchKeyword,
 };
 
 export const __productionUploadMaintenanceTest = {
@@ -1583,11 +1584,12 @@ route("POST", "/v1/mobile/asset/search", async (ctx) => {
   if (!["stock", "fund", "bond"].includes(assetType)) throwHttp(400, "asset_search_type_invalid");
   const keyword = safeText(body.keyword || body.query || "", 64).toUpperCase();
   if (!keyword) throwHttp(400, "asset_search_keyword_required");
-  const rows = await searchPublishedAssetRows(ctx.env, license, assetType, keyword, 60);
+  const lookupKeyword = mobileAssetSearchKeyword(assetType, keyword);
+  const rows = await searchPublishedAssetRows(ctx.env, license, assetType, lookupKeyword, 60);
   const items = rows.map((row) => mobileAssetSearchItem(row, assetType)).filter((item) =>
-    `${item.code} ${item.name}`.toUpperCase().includes(keyword)
+    `${item.code} ${item.name}`.toUpperCase().includes(lookupKeyword)
   ).slice(0, 30);
-  return json({ ok: true, asset_type: assetType, keyword, items, result_count: items.length, source: "cloudflare_d1" });
+  return json({ ok: true, asset_type: assetType, keyword, normalized_keyword: lookupKeyword, items, result_count: items.length, source: "cloudflare_d1" });
 });
 
 route("POST", "/v1/mobile/sample-pool", async (ctx) => {
@@ -2282,6 +2284,20 @@ async function searchPublishedAssetRows(env, license, assetType, keyword, limit 
   const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
   const scopePlaceholders = scopes.map(() => "?").join(", ");
   const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
+  const exactCodeSearch = /^\d{6}$/.test(keyword);
+  const searchClause = exactCodeSearch
+    ? `UPPER(CASE
+         WHEN json_valid(r.row_json) THEN COALESCE(
+           json_extract(r.row_json, '$.code'),
+           json_extract(r.row_json, '$.stock_code'),
+           json_extract(r.row_json, '$.symbol'),
+           json_extract(r.row_json, '$.ts_code'),
+           json_extract(r.row_json, '$.asset_code'),
+           json_extract(r.row_json, '$.fund_code'),
+           json_extract(r.row_json, '$.bond_code'),
+           ''
+         ) ELSE '' END) = ?`
+    : `UPPER(r.row_json) LIKE ? ESCAPE '!'`;
   const rows = await env.DB.prepare(
     `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
             r.edition_scope, r.module, r.batch_id, r.updated_at
@@ -2291,17 +2307,30 @@ async function searchPublishedAssetRows(env, license, assetType, keyword, limit 
        AND r.module = 'target_research'
        AND r.edition_scope IN (${scopePlaceholders})
        AND b.status = 'committed'
-       AND UPPER(r.row_json) LIKE ? ESCAPE '!'
+       AND ${searchClause}
      ORDER BY r.data_date DESC,
               CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
               r.updated_at DESC,
               r.row_key ASC
      LIMIT ?`
-  ).bind(tableName, ...scopes, sqlLikeContains(keyword), ...scopes, Math.max(1, Math.min(Number(limit || 60), 500))).all();
+  ).bind(
+    tableName,
+    ...scopes,
+    exactCodeSearch ? keyword : sqlLikeContains(keyword),
+    ...scopes,
+    Math.max(1, Math.min(Number(limit || 60), 500)),
+  ).all();
   return (rows.results || []).map((row) => ({
     ...(dataSyncRowPayload(row).row || {}),
     _data_date: row.data_date || "",
   }));
+}
+
+function mobileAssetSearchKeyword(assetType, keyword) {
+  const normalized = safeText(keyword || "", 64).trim().toUpperCase();
+  if (!["fund", "bond"].includes(String(assetType || "").toLowerCase())) return normalized;
+  const codeMatch = normalized.match(/^(?:SH|SZ|BJ|OF)?(\d{6})(?:\.(?:SH|SZ|BJ|OF))?$/);
+  return codeMatch ? codeMatch[1] : normalized;
 }
 
 function sqlLikeContains(value) {

@@ -3,6 +3,13 @@ import test from "node:test";
 
 import worker, { __mobilePresentationTest as presentation } from "../src/worker.js";
 
+test("mobile fund and bond search accepts desktop exchange code formats", () => {
+  assert.equal(presentation.mobileAssetSearchKeyword("fund", "510300.SH"), "510300");
+  assert.equal(presentation.mobileAssetSearchKeyword("fund", "000001.OF"), "000001");
+  assert.equal(presentation.mobileAssetSearchKeyword("bond", "SZ123001"), "123001");
+  assert.equal(presentation.mobileAssetSearchKeyword("fund", "华夏成长"), "华夏成长");
+});
+
 test("mobile network probe is public, lightweight, and never cached", async () => {
   const response = await worker.fetch(
     new Request("https://api.example.invalid/v1/mobile/network-check"),
