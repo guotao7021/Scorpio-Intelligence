@@ -130,7 +130,36 @@ test("fund presentation keeps missing scores partial and uses unsigned allocatio
   assert.equal(fund.as_of, "数据日期 2026-08-18");
   assert.deepEqual(fund.allocation.map((item) => item.value), ["80.00%", "15.00%", "5.00%"]);
   assert.equal(fund.holdings[0].pct, "9.50%");
+  assert.equal(fund.header.data_confidence, "部分");
+  assert.equal(fund.header.risk_score, null);
   assert.doesNotMatch(fund.conclusion.summary, /Cloud|cache|fallback/i);
+});
+
+test("fund presentation exposes only available profile, role, and confidence evidence", () => {
+  const fund = presentation.mobileFundPayload({
+    status: "ready",
+    data_quality: { freshness: "2026-08-18", missing: [] },
+    summary: { score: 81 },
+    sections: {
+      profile: {
+        fund_code: "000001",
+        fund_name: "测试基金",
+        fund_subtype: "mixed",
+        asset_role: "core_equity",
+        manager: "测试经理",
+        company: "测试基金公司",
+      },
+      performance: { score: 81, risk_score: 62, role_fit_score: 74 },
+      exposure: {},
+    },
+  }, { code: "000001", market: "CN" });
+
+  assert.equal(fund.header.category_label, "混合型");
+  assert.equal(fund.header.role_label, "核心权益");
+  assert.equal(fund.header.data_confidence, "完整");
+  assert.equal(fund.header.risk_score, 62);
+  assert.equal(fund.header.role_score, 74);
+  assert.deepEqual(fund.profile.slice(0, 4).map((item) => item.value), ["混合型", "核心权益", "测试经理", "测试基金公司"]);
 });
 
 test("bond presentation does not fabricate component scores or request-time data dates", () => {

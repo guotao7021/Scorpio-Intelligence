@@ -2675,6 +2675,8 @@ function mobileFundPayload(bundle, request) {
   const riskMetrics = safeJsonObject(performance.risk_metrics || {});
   const returns = safeJsonObject(performance.returns || {});
   const score = firstNumber(performance.score, summary.score, null);
+  const riskScore = firstNumber(performance.risk_score, riskMetrics.risk_score, profile.risk_score, null);
+  const roleScore = firstNumber(performance.role_fit_score, profile.role_fit_score, profile.suitability_score, null);
   const name = firstText(profile.fund_name, profile.name, summary.title, request.code);
   const riskLevel = mobileRiskLabel(firstText(profile.risk_level, summary.risk_level, "unknown"));
   const rating = mobileRatingLabel(firstText(performance.rating, summary.rating, "watch"), score);
@@ -2725,7 +2727,18 @@ function mobileFundPayload(bundle, request) {
     return_1y: mobilePercent(firstNumber(item.return_1y, item.one_year_return, null)),
     score: firstNumber(item.score, null),
   }));
+  const profileRows = [
+    ["基金类型", mobileFundCategoryLabel(firstText(profile.fund_subtype, profile.fund_type, profile.fund_type_raw))],
+    ["组合角色", mobileFundRoleLabel(firstText(profile.asset_role_label, profile.asset_role, profile.fund_subtype))],
+    ["基金经理", firstText(profile.manager, profile.fund_manager)],
+    ["管理机构", firstText(profile.company, profile.management_company)],
+    ["成立日期", firstText(profile.inception_date, profile.established_date)],
+    ["基金规模", firstText(profile.scale_text, profile.fund_scale)],
+    ["业绩基准", firstText(profile.benchmark)],
+  ].filter(([, value]) => value && value !== "--").map(([label, value]) => ({ label, value, tone: "primary" }));
   const state = bundle.status === "ready" ? "ready" : "partial";
+  const categoryLabel = mobileFundCategoryLabel(firstText(profile.fund_subtype, profile.fund_type, profile.fund_type_raw));
+  const roleLabel = mobileFundRoleLabel(firstText(profile.asset_role_label, profile.asset_role, profile.fund_subtype));
   return {
     code: firstText(profile.fund_code, profile.code, request.code),
     name,
@@ -2743,6 +2756,11 @@ function mobileFundPayload(bundle, request) {
       rating,
       risk_label: riskLevel,
       tone: mobileResearchTone(score, riskLevel),
+      category_label: categoryLabel,
+      role_label: roleLabel,
+      data_confidence: mobileDataConfidence(bundle),
+      risk_score: riskScore === null ? null : Number(riskScore.toFixed(1)),
+      role_score: roleScore === null ? null : Number(roleScore.toFixed(1)),
     },
     returns: returnRows,
     risk: riskRows,
@@ -2751,6 +2769,7 @@ function mobileFundPayload(bundle, request) {
     industry: industryRows,
     risk_tags: riskTags,
     peers: peerRows,
+    profile: profileRows,
     conclusion: {
       title: rating,
       summary: mobileUserText(
@@ -2760,6 +2779,42 @@ function mobileFundPayload(bundle, request) {
       cautions: ["基金研究结果仅供复核，不构成投资建议。"],
     },
   };
+}
+
+function mobileFundCategoryLabel(value) {
+  const key = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  return ({
+    active_equity: "主动权益型",
+    passive_equity: "被动权益型",
+    equity: "股票型",
+    mixed: "混合型",
+    hybrid: "混合型",
+    bond: "债券型",
+    money_market: "货币型",
+    qdii: "QDII",
+    fof: "FOF",
+  })[key] || mobileUserText(value, "类型待同步");
+}
+
+function mobileFundRoleLabel(value) {
+  const key = String(value || "").trim().toLowerCase().replaceAll("-", "_");
+  return ({
+    active_equity_beta: "主动权益增强",
+    core_equity: "核心权益",
+    sector_theme_beta: "行业主题增强",
+    global_diversifier: "全球分散配置",
+    defensive_income: "防御收益",
+    cash_anchor: "现金管理",
+  })[key] || mobileUserText(value, "角色待同步");
+}
+
+function mobileDataConfidence(bundle) {
+  const quality = safeJsonObject(bundle && bundle.data_quality || {});
+  const missing = Array.isArray(quality.missing) ? quality.missing.filter(Boolean) : [];
+  if (bundle && bundle.status === "ready" && !missing.length) return "完整";
+  if (!bundle || bundle.status !== "ready") return "部分";
+  if (missing.length <= 1) return "较高";
+  return "部分";
 }
 
 function mobileBondPayload(bundle, request) {
