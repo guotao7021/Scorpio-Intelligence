@@ -4076,14 +4076,38 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS total,
                 MAX(released_at) AS latest_released_at,
+                SUM(CASE WHEN released_at >= ? THEN 1 ELSE 0 END) AS released_today,
                 SUM(COALESCE(download_count, 0)) AS download_count
          FROM release_versions`
       ).bind(reportingStart),
       ctx.env.DB.prepare(
-        `SELECT COALESCE(SUM(download_count), 0) AS total_24h
-         FROM release_download_daily
-         WHERE event_date >= ?`
-      ).bind(today),
+        `SELECT COALESCE(SUM(d.download_count), 0) AS total_downloads,
+                COALESCE(SUM(CASE WHEN d.event_date >= ? THEN d.download_count ELSE 0 END), 0) AS total_24h,
+                COALESCE(SUM(CASE
+                  WHEN LOWER(COALESCE(rv.platform, 'desktop')) = 'android'
+                    OR LOWER(COALESCE(d.file_name, '')) LIKE '%.apk'
+                  THEN d.download_count ELSE 0 END), 0) AS apk_downloads,
+                COALESCE(SUM(CASE
+                  WHEN NOT (
+                    LOWER(COALESCE(rv.platform, 'desktop')) = 'android'
+                    OR LOWER(COALESCE(d.file_name, '')) LIKE '%.apk'
+                  )
+                  THEN d.download_count ELSE 0 END), 0) AS windows_downloads,
+                COALESCE(SUM(CASE
+                  WHEN d.event_date >= ? AND (
+                    LOWER(COALESCE(rv.platform, 'desktop')) = 'android'
+                    OR LOWER(COALESCE(d.file_name, '')) LIKE '%.apk'
+                  )
+                  THEN d.download_count ELSE 0 END), 0) AS apk_downloads_24h,
+                COALESCE(SUM(CASE
+                  WHEN d.event_date >= ? AND NOT (
+                    LOWER(COALESCE(rv.platform, 'desktop')) = 'android'
+                    OR LOWER(COALESCE(d.file_name, '')) LIKE '%.apk'
+                  )
+                  THEN d.download_count ELSE 0 END), 0) AS windows_downloads_24h
+         FROM release_download_daily d
+         LEFT JOIN release_versions rv ON rv.id = d.release_id`
+      ).bind(today, today, today),
       ctx.env.DB.prepare(
         `SELECT COUNT(*) AS visits_total,
                 COUNT(DISTINCT visitor_hash) AS unique_visitors_total,
@@ -4162,14 +4186,31 @@ route("GET", "/v1/scorpio_v1_admin/overview", async (ctx) => {
 
   return json({
     generated_at: nowIso(),
-    users: compactCounts(users, ["total", "verified", "registered_24h"]),
-    licensed_users: compactCounts(licensedUsers, ["total", "active", "valid", "bound_24h"]),
-    customers: compactCounts(customers, ["total", "active", "draft", "suspended"]),
-    activation_codes: compactCounts(codes, ["total", "active", "assigned", "used", "revoked"]),
-    licenses: compactCounts(licenses, ["total", "active", "pending", "revoked", "expiring_soon"]),
+    users: {
+      ...compactCounts(users, ["total", "verified", "registered_24h"]),
+      registered_today: numberField(users, "registered_24h"),
+    },
+    licensed_users: {
+      ...compactCounts(licensedUsers, ["total", "active", "valid", "bound_24h"]),
+      bound_today: numberField(licensedUsers, "bound_24h"),
+    },
+    customers: compactCounts(customers, ["total", "active", "draft", "suspended", "created_today"]),
+    activation_codes: compactCounts(codes, ["total", "active", "assigned", "used", "revoked", "created_today"]),
+    licenses: compactCounts(licenses, ["total", "active", "pending", "revoked", "expiring_soon", "issued_today"]),
     releases: {
-      ...compactCounts(releases, ["total", "download_count"]),
+      ...compactCounts(releases, ["total", "released_today", "download_count"]),
       downloads_24h: numberField(downloads, "total_24h"),
+    },
+    downloads: {
+      total: numberField(downloads, "total_downloads"),
+      windows: {
+        total: numberField(downloads, "windows_downloads"),
+        downloads_24h: numberField(downloads, "windows_downloads_24h"),
+      },
+      apk: {
+        total: numberField(downloads, "apk_downloads"),
+        downloads_24h: numberField(downloads, "apk_downloads_24h"),
+      },
     },
     release_latest_released_at: (releases && releases.latest_released_at) || "",
     site: {

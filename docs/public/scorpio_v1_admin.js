@@ -71,6 +71,10 @@
     metricLicensesMeta: byId("metricLicensesMeta"),
     metricReleases: byId("metricReleases"),
     metricReleasesMeta: byId("metricReleasesMeta"),
+    metricWindowsDownloads: byId("metricWindowsDownloads"),
+    metricWindowsDownloadsMeta: byId("metricWindowsDownloadsMeta"),
+    metricApkDownloads: byId("metricApkDownloads"),
+    metricApkDownloadsMeta: byId("metricApkDownloadsMeta"),
     metricApi: byId("metricApi"),
   };
 
@@ -780,6 +784,9 @@
       const codes = overview.activation_codes || {};
       const licenses = overview.licenses || {};
       const releases = overview.releases || {};
+      const downloads = overview.downloads || {};
+      const windowsDownloads = downloads.windows || {};
+      const apkDownloads = downloads.apk || {};
 
       els.metricCustomers.textContent = String(customers.total || 0);
       els.metricCustomersMeta.textContent = `今日 +${customers.created_today || 0} / ${customers.active || 0} 活跃`;
@@ -795,6 +802,10 @@
       els.metricLicensesMeta.textContent = `今日 +${licenses.issued_today || 0} / ${licenses.active || 0} 有效`;
       els.metricReleases.textContent = String(releases.total || 0);
       els.metricReleasesMeta.textContent = `今日 +${releases.released_today || 0} 发布`;
+      els.metricWindowsDownloads.textContent = String(windowsDownloads.total || 0);
+      els.metricWindowsDownloadsMeta.textContent = `今日 +${windowsDownloads.downloads_24h || 0}`;
+      els.metricApkDownloads.textContent = String(apkDownloads.total || 0);
+      els.metricApkDownloadsMeta.textContent = `今日 +${apkDownloads.downloads_24h || 0}`;
       if (state.signingHealth) {
         els.metricApi.textContent = state.signingHealth.ok ? "签名正常" : "签名异常";
       }
@@ -825,6 +836,10 @@
     els.metricLicensesMeta.textContent = `${licenses.filter((row) => Number(row.is_active) && !Number(row.revoked)).length} 有效`;
     els.metricReleases.textContent = String(releases.length);
     els.metricReleasesMeta.textContent = releases[0] ? `最新 ${releases[0].version || "-"}` : "暂无发行";
+    els.metricWindowsDownloads.textContent = "-";
+    els.metricWindowsDownloadsMeta.textContent = "等待概览连接";
+    els.metricApkDownloads.textContent = "-";
+    els.metricApkDownloadsMeta.textContent = "等待概览连接";
     if (state.signingHealth) {
       els.metricApi.textContent = state.signingHealth.ok ? "签名正常" : "签名异常";
     }
