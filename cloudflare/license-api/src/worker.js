@@ -1779,6 +1779,11 @@ route("PUT", "/v1/mobile/admin/market-brief", async (ctx) => {
     license,
     requestBody: body,
     endpoint: "/v1/mobile/admin/market-brief",
+    // Publishing is an authenticated administrator action, not an on-device
+    // market calculation. Keep its request signature and replay protection,
+    // but tolerate a stale handset/emulator clock so historical briefs can be
+    // backfilled without being rejected as an expired analysis request.
+    signatureWindowSeconds: intEnv(ctx.env.MOBILE_MARKET_BRIEF_SIGNATURE_WINDOW_SECONDS, 7 * 24 * 60 * 60),
   });
   requireMobileBriefAdmin(ctx.env, user);
   const brief = normalizeMobileMarketBrief(body, user);
@@ -3461,7 +3466,8 @@ function normalizeMobileMarketBrief(body, user) {
   const tradeDate = safeText(body.trade_date, 10);
   const title = safeText(body.title, 160);
   const briefBody = safeText(body.body, 12000);
-  if (!/^20\d{2}-\d{2}-\d{2}$/.test(tradeDate)) throwHttp(400, "market_brief_trade_date_invalid");
+  if (!isMobileBriefTradeDate(tradeDate)) throwHttp(400, "market_brief_trade_date_invalid");
+  if (tradeDate > todayIso()) throwHttp(400, "market_brief_trade_date_future");
   if (!title) throwHttp(400, "market_brief_title_required");
   if (!briefBody) throwHttp(400, "market_brief_body_required");
   const now = nowIso();
@@ -3479,6 +3485,12 @@ function normalizeMobileMarketBrief(body, user) {
     created_at: now,
     updated_at: now,
   };
+}
+
+function isMobileBriefTradeDate(value) {
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 async function upsertMobileMarketBrief(env, brief) {
@@ -6340,7 +6352,10 @@ async function verifyAnalysisRequestSignature(ctx, options) {
     throwHttp(400, "analysis_signature_incomplete");
   }
   const timestampMs = parseSignatureTimestamp(timestamp);
-  const windowSeconds = intEnv(ctx.env.ANALYSIS_REPLAY_WINDOW_SECONDS, 300);
+  const defaultWindowSeconds = intEnv(ctx.env.ANALYSIS_REPLAY_WINDOW_SECONDS, 300);
+  const windowSeconds = Number.isFinite(Number(options.signatureWindowSeconds))
+    ? Math.max(defaultWindowSeconds, Math.min(Number(options.signatureWindowSeconds), 7 * 24 * 60 * 60))
+    : defaultWindowSeconds;
   if (!timestampMs || Math.abs(Date.now() - timestampMs) > windowSeconds * 1000) {
     throwHttp(401, "analysis_signature_expired");
   }
@@ -6363,7 +6378,10 @@ async function verifyAnalysisRequestSignature(ctx, options) {
     nonce,
     userId: options.user.id,
     requestHash: bodyHash,
-    expiresAt: new Date(timestampMs + windowSeconds * 1000).toISOString(),
+    // Use server time when accepting a permitted stale-clock request. This
+    // keeps the nonce protected for the full replay window rather than letting
+    // it expire immediately because the device clock was behind.
+    expiresAt: new Date(Math.max(Date.now(), timestampMs) + windowSeconds * 1000).toISOString(),
   });
 }
 

@@ -179,6 +179,21 @@ test("market brief publishing is restricted to the configured administrator", ()
   }, { email: "guotao7021@gmail.com" });
   assert.equal(brief.brief_id, "mobile-market-brief-2026-08-20");
   assert.equal(brief.source_name, "雪球公开简报");
+
+  const historical = presentation.normalizeMobileMarketBrief({
+    trade_date: "2024-02-29",
+    title: "历史市场简报",
+    body: "补发内容",
+  }, { email: "guotao7021@gmail.com" });
+  assert.equal(historical.trade_date, "2024-02-29");
+  assert.throws(
+    () => presentation.normalizeMobileMarketBrief({ trade_date: "2026-02-30", title: "无效日期", body: "内容" }, { email: "guotao7021@gmail.com" }),
+    /market_brief_trade_date_invalid/,
+  );
+  assert.throws(
+    () => presentation.normalizeMobileMarketBrief({ trade_date: "2099-01-01", title: "未来日期", body: "内容" }, { email: "guotao7021@gmail.com" }),
+    /market_brief_trade_date_future/,
+  );
 });
 
 test("mobile technical indicators are derived from published OHLCV rows", () => {
