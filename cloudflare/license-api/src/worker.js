@@ -43,6 +43,8 @@ export const __mobilePresentationTest = {
   mergeMobilePortfolioPositions,
   analysisFallbackPortfolioBundle,
   mobileAssetSearchKeyword,
+  isMobileBriefAdmin,
+  normalizeMobileMarketBrief,
 };
 
 export const __productionUploadMaintenanceTest = {
@@ -1425,7 +1427,7 @@ route("POST", "/v1/mobile/bootstrap", async (ctx) => {
     ? request.positions
     : await loadMobilePortfolioPositions(ctx.env, user.id);
   const positionsPromise = enrichMobilePortfolioPositions(ctx.env, license, rawPositions);
-  const [savedPositions, market, portfolio, latestPackageRow, watchlist, sampleRows, compliance] = await Promise.all([
+  const [savedPositions, market, portfolio, latestPackageRow, watchlist, sampleRows, compliance, marketBriefRows] = await Promise.all([
     positionsPromise,
     mobileMarketAnalysis(ctx, { user, license, request, startedAt }),
     positionsPromise.then((positions) => mobilePortfolioAnalysis(ctx, {
@@ -1443,6 +1445,7 @@ route("POST", "/v1/mobile/bootstrap", async (ctx) => {
       limit: 3,
     }).catch(() => []),
     mobileComplianceNotice(ctx.env, user, request.machine_fingerprint),
+    loadMobileMarketBriefRows(ctx.env, license, 30),
   ]);
 
   return json(mobileBootstrapPayload({
@@ -1457,6 +1460,8 @@ route("POST", "/v1/mobile/bootstrap", async (ctx) => {
     watchlist,
     sampleItems: rankMobileSamplePoolItems(sampleRows, "balanced").slice(0, 3),
     compliance,
+    marketBriefRows,
+    canPublishMarketBrief: isMobileBriefAdmin(ctx.env, user),
   }));
 });
 
@@ -1731,6 +1736,23 @@ route("POST", "/v1/mobile/industry", async (ctx) => {
     result,
     source: "cloudflare_worker",
   });
+});
+
+route("PUT", "/v1/mobile/admin/market-brief", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/admin/market-brief",
+  });
+  requireMobileBriefAdmin(ctx.env, user);
+  const brief = normalizeMobileMarketBrief(body, user);
+  await upsertMobileMarketBrief(ctx.env, brief);
+  return json({ ok: true, brief: mobileMarketBriefItems([brief])[0] });
 });
 
 route("POST", "/v1/mobile/fund/bundle", async (ctx) => {
@@ -2991,24 +3013,27 @@ function mobileResearchMetrics(values) {
 }
 
 async function loadMobileMarketCenter(env, license) {
-  const [scoreRows, sentimentRows, flowRows, sectorRows, industryRows] = await Promise.all([
-    publishedRows(env, "market_score_daily", license, { limit: 20 }),
+  const [scoreRows, sentimentRows, flowRows, sectorRows, industryRows, briefRows] = await Promise.all([
+    publishedRows(env, "market_score_daily", license, { limit: 120 }),
     publishedRows(env, "market_sentiment_daily", license, { limit: 20 }),
     publishedRows(env, "market_fund_flow_cache", license, { limit: 20 }),
     publishedRows(env, "sector_rotation_daily", license, { limit: 240 }),
     publishedRows(env, "industry_fund_flow_cache", license, { limit: 240 }),
+    loadMobileMarketBriefRows(env, license, 10),
   ]);
   return mobileMarketCenterPayload({
-    scoreRows: latestDateRows(scoreRows),
+    scoreRows,
     sentimentRows: latestDateRows(sentimentRows),
     flowRows: latestDateRows(flowRows),
     sectorRows: latestDateRows(sectorRows),
     industryRows: latestDateRows(industryRows),
+    briefRows: latestDateRows(briefRows),
   });
 }
 
 function mobileMarketCenterPayload(values) {
-  const score = preferredMarketScoreRow(values.scoreRows || []) || {};
+  const allScoreRows = values.scoreRows || [];
+  const score = preferredMarketScoreRow(latestDateRows(allScoreRows)) || {};
   const sentiment = (values.sentimentRows || [])[0] || {};
   const flow = (values.flowRows || [])[0] || {};
   const marketScore = firstNumber(score.market_score, sentiment.sentiment_score, null);
@@ -3097,6 +3122,7 @@ function mobileMarketCenterPayload(values) {
           : riseRatio >= 30 ? "偏弱调整" : "弱势普跌";
   const dominantStyle = mobileDominantStyle(marketScore, mainNet);
   const advice = mobileMarketAdvice(marketScore);
+  const scoreTrend = mobileMarketScoreSeries(allScoreRows);
   const freshness = maxText([
     score.trade_date,
     sentiment.trade_date,
@@ -3161,8 +3187,188 @@ function mobileMarketCenterPayload(values) {
     industries,
     inflows,
     outflows,
+    score_trend: scoreTrend,
+    commentary: mobileMarketCommentary(values.briefRows || [], {
+      phase,
+      marketScore,
+      advice,
+      freshness,
+      mainNet,
+    }),
     advice,
   };
+}
+
+function mobileMarketScoreSeries(rows) {
+  const byDate = new Map();
+  for (const row of rows || []) {
+    const date = firstText(row.trade_date, row.date, row._data_date);
+    const score = firstNumber(row.market_score, null);
+    if (!date || score === null) continue;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(row);
+  }
+  return [...byDate.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-30)
+    .map(([date, candidates]) => {
+      const row = preferredMarketScoreRow(candidates);
+      return {
+        date,
+        score: Number(firstNumber(row.market_score, 0).toFixed(1)),
+        phase: mobileMarketPhaseLabel(firstText(row.market_phase, "观察")),
+      };
+    });
+}
+
+function mobileMarketCommentary(rows, context) {
+  const row = (rows || [])[0] || {};
+  const body = mobilePublicBriefText(firstText(row.body, row.content, row.markdown, row.text));
+  const title = mobilePublicBriefText(firstText(row.title, row.headline));
+  if (title || body) {
+    return {
+      title: title || "今日市场行情解读",
+      summary: mobilePublicBriefText(firstText(row.summary, row.deck, row.subtitle)),
+      body,
+      source_label: firstText(row.source_name, row.source, "雪球公开简报"),
+      source_url: safeText(firstText(row.source_url, row.url), 1000),
+      published_at: mobileDateLabel(firstText(row.published_at, row.trade_date, row._data_date)),
+      external: true,
+    };
+  }
+  const scoreLabel = context.marketScore === null ? "评分待更新" : `综合评分 ${Number(context.marketScore.toFixed(1))} 分`;
+  const flowLabel = context.mainNet === null ? "资金方向待确认" : context.mainNet >= 0 ? "资金整体净流入" : "资金整体净流出";
+  return {
+    title: `${context.phase} · ${scoreLabel}`,
+    summary: `${flowLabel}。${context.advice || "请结合指数、行业与资金证据复核。"}`,
+    body: "",
+    source_label: "市场数据解读",
+    source_url: "",
+    published_at: mobileDateLabel(context.freshness),
+    external: false,
+  };
+}
+
+function mobileMarketBriefItems(rows) {
+  return (rows || []).map((row) => ({
+    id: firstText(row.brief_id, row.id, `brief-${firstText(row.trade_date, row._data_date)}`),
+    trade_date: firstText(row.trade_date, row._data_date),
+    title: mobilePublicBriefText(firstText(row.title, row.headline, "每日 A 股简报")),
+    summary: mobilePublicBriefText(firstText(row.summary, row.deck, row.subtitle)),
+    body: mobilePublicBriefText(firstText(row.body, row.content, row.markdown, row.text)),
+    author: firstText(row.author, "研究团队"),
+    source_label: firstText(row.source_name, row.source, "雪球公开简报"),
+    source_url: safeText(firstText(row.source_url, row.url), 1000),
+    published_at: firstText(row.published_at, row.trade_date, row._data_date),
+  })).filter((row) => row.title && row.body);
+}
+
+async function loadMobileMarketBriefRows(env, license, limit = 30) {
+  const bounded = Math.max(1, Math.min(Number(limit || 30), 60));
+  let direct = [];
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT brief_id, trade_date, title, summary, body, author, source_name,
+              source_url, published_at, updated_at
+       FROM mobile_market_briefs
+       WHERE is_active = 1
+       ORDER BY trade_date DESC, published_at DESC
+       LIMIT ?`
+    ).bind(bounded).all();
+    direct = rows.results || [];
+  } catch (error) {
+    console.warn("mobile_market_briefs_unavailable", safeText(error && error.message, 240));
+  }
+  if (direct.length >= bounded) return direct.slice(0, bounded);
+  const published = await publishedRows(env, "market_public_brief_daily", license, { limit: bounded });
+  const seen = new Set(direct.map((row) => firstText(row.brief_id, `${row.trade_date}:${row.title}`)));
+  return [...direct, ...published.filter((row) => {
+    const key = firstText(row.brief_id, `${row.trade_date || row._data_date}:${row.title}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })].sort((left, right) => {
+    const leftDate = firstText(left.trade_date, left._data_date, left.published_at);
+    const rightDate = firstText(right.trade_date, right._data_date, right.published_at);
+    return rightDate.localeCompare(leftDate);
+  }).slice(0, bounded);
+}
+
+function isMobileBriefAdmin(env, user) {
+  const configured = firstText(env && env.MOBILE_MARKET_BRIEF_ADMIN_EMAILS, "guotao7021@gmail.com")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  return configured.includes(String(user && user.email || "").trim().toLowerCase());
+}
+
+function requireMobileBriefAdmin(env, user) {
+  if (!isMobileBriefAdmin(env, user)) throwHttp(403, "market_brief_admin_required");
+}
+
+function normalizeMobileMarketBrief(body, user) {
+  const tradeDate = safeText(body.trade_date, 10);
+  const title = safeText(body.title, 160);
+  const briefBody = safeText(body.body, 12000);
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(tradeDate)) throwHttp(400, "market_brief_trade_date_invalid");
+  if (!title) throwHttp(400, "market_brief_title_required");
+  if (!briefBody) throwHttp(400, "market_brief_body_required");
+  const now = nowIso();
+  return {
+    brief_id: `mobile-market-brief-${tradeDate}`,
+    trade_date: tradeDate,
+    title,
+    summary: safeText(body.summary, 600),
+    body: briefBody,
+    author: safeText(body.author || user.email, 160),
+    source_name: safeText(body.source_name || "雪球公开简报", 80),
+    source_url: safeText(body.source_url, 1000),
+    published_at: safeText(body.published_at || now, 64),
+    is_active: 1,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+async function upsertMobileMarketBrief(env, brief) {
+  await env.DB.prepare(
+    `INSERT INTO mobile_market_briefs
+       (brief_id, trade_date, title, summary, body, author, source_name, source_url,
+        published_at, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+     ON CONFLICT(brief_id) DO UPDATE SET
+       title = excluded.title,
+       summary = excluded.summary,
+       body = excluded.body,
+       author = excluded.author,
+       source_name = excluded.source_name,
+       source_url = excluded.source_url,
+       published_at = excluded.published_at,
+       is_active = 1,
+       updated_at = excluded.updated_at`
+  ).bind(
+    brief.brief_id,
+    brief.trade_date,
+    brief.title,
+    brief.summary,
+    brief.body,
+    brief.author,
+    brief.source_name,
+    brief.source_url,
+    brief.published_at,
+    brief.created_at,
+    brief.updated_at
+  ).run();
+}
+
+function mobilePublicBriefText(value) {
+  return safeText(value, 6000)
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*+]\s+/gm, "• ")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function mobileDominantStyle(marketScore, mainNet) {
@@ -3675,6 +3881,7 @@ function mobileBootstrapPayload(options) {
     session: {
       user_id: options.user.id,
       email: options.user.email,
+      can_publish_market_brief: Boolean(options.canPublishMarketBrief),
     },
     license: {
       valid: true,
@@ -3704,6 +3911,7 @@ function mobileBootstrapPayload(options) {
       indices: homeIndices,
       watchlist: Array.isArray(options.watchlist) ? options.watchlist : [],
       samples: Array.isArray(options.sampleItems) ? options.sampleItems : [],
+      market_briefs: mobileMarketBriefItems(options.marketBriefRows || []),
     },
     portfolio: {
       cloud_status: positionCount > 0
@@ -8432,6 +8640,7 @@ const PRODUCTION_UPLOAD_TABLES = new Map([
   ["industry_fund_flow_cache", "market_context"],
   ["market_sentiment_daily", "market_context"],
   ["market_score_daily", "market_context"],
+  ["market_public_brief_daily", "market_context"],
 ]);
 
 function normalizeProductionUploadBatch(body) {

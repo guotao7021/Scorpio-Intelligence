@@ -102,6 +102,11 @@ test("market center presents breadth, capital, and sector rotation together", ()
           { name: "深证成指", close: 11890.2, pct_today: -0.21, pct_5d: 0.8, pct_20d: 2.1, trend: "震荡" },
         ],
       }),
+    }, {
+      trade_date: "2026-08-15",
+      market_score: 61.5,
+      market_phase: "watch",
+      score_version: "market.v1",
     }],
     sentimentRows: [{ trade_date: "2026-08-18", total_count: 5000, up_count: 3200, down_count: 1700, flat_count: 100, limit_up_count: 76, limit_down_count: 4, total_amount: 1800000000000 }],
     flowRows: [{ trade_date: "2026-08-18", main_net: -12988000000, super_net: 2988000000, big_net: -15976000000, sh_pct: 0.6, sz_pct: 0.8 }],
@@ -113,6 +118,15 @@ test("market center presents breadth, capital, and sector rotation together", ()
       { trade_date: "2026-08-18", industry_name: "半导体", pct_change: 4.85, net_amount: 322.38, source: "industry_fund_flow_cache", lead_stock: "中芯国际" },
       { trade_date: "2026-08-18", industry_name: "煤炭", pct_change: -2.1, net_amount: -18.2, source: "industry_fund_flow_cache", lead_stock: "中国神华" },
     ],
+    briefRows: [{
+      trade_date: "2026-08-18",
+      title: "震荡偏强，主线仍需资金确认",
+      summary: "指数修复，但行业分化仍然明显。",
+      body: "## 今日观察\n- 关注量能延续",
+      source_name: "雪球公开简报",
+      source_url: "https://xueqiu.com/example/1",
+      published_at: "2026-08-18T16:00:00+08:00",
+    }],
   });
 
   assert.equal(market.overview.score_label, "68 分");
@@ -132,7 +146,39 @@ test("market center presents breadth, capital, and sector rotation together", ()
   assert.equal(market.capital.inflow_count, 1);
   assert.equal(market.capital.outflow_count, 1);
   assert.match(market.overview.dominant_style, /结构强化/);
+  assert.deepEqual(market.score_trend.map((item) => item.score), [61.5, 68]);
+  assert.equal(market.commentary.external, true);
+  assert.equal(market.commentary.source_label, "雪球公开简报");
+  assert.equal(market.commentary.body, "今日观察\n• 关注量能延续");
   assert.doesNotMatch(market.advice, /买入|卖出|仓位|建议|积极参与/);
+});
+
+test("market commentary falls back to data-derived interpretation without impersonating Xueqiu", () => {
+  const market = presentation.mobileMarketCenterPayload({
+    scoreRows: [{ trade_date: "2026-08-18", market_score: 52, market_phase: "watch" }],
+    flowRows: [{ trade_date: "2026-08-18", main_net: -100000000 }],
+  });
+
+  assert.equal(market.commentary.external, false);
+  assert.equal(market.commentary.source_label, "市场数据解读");
+  assert.match(market.commentary.summary, /资金整体净流出/);
+  assert.equal(market.commentary.source_url, "");
+});
+
+test("market brief publishing is restricted to the configured administrator", () => {
+  const env = { MOBILE_MARKET_BRIEF_ADMIN_EMAILS: "guotao7021@gmail.com" };
+  assert.equal(presentation.isMobileBriefAdmin(env, { email: "guotao7021@gmail.com" }), true);
+  assert.equal(presentation.isMobileBriefAdmin(env, { email: "reader@example.com" }), false);
+
+  const brief = presentation.normalizeMobileMarketBrief({
+    trade_date: "2026-08-20",
+    title: "昨日市场简报",
+    summary: "公开摘要",
+    body: "公开正文",
+    source_url: "https://xueqiu.com/example/2",
+  }, { email: "guotao7021@gmail.com" });
+  assert.equal(brief.brief_id, "mobile-market-brief-2026-08-20");
+  assert.equal(brief.source_name, "雪球公开简报");
 });
 
 test("fund presentation keeps missing scores partial and uses unsigned allocation ratios", () => {
