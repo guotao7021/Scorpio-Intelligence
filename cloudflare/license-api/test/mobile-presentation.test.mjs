@@ -181,6 +181,48 @@ test("market brief publishing is restricted to the configured administrator", ()
   assert.equal(brief.source_name, "雪球公开简报");
 });
 
+test("mobile technical indicators are derived from published OHLCV rows", () => {
+  const rows = Array.from({ length: 40 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, "0")}`,
+    close: 20 + Math.sin(index / 3) * 2 + index * 0.08,
+  }));
+  const indicators = presentation.mobileTechnicalIndicators(rows);
+  const latest = indicators.points.at(-1);
+
+  assert.equal(indicators.points.length, 40);
+  assert.equal(typeof latest.dif, "number");
+  assert.equal(typeof latest.dea, "number");
+  assert.equal(typeof latest.macd, "number");
+  assert.equal(typeof latest.rsi6, "number");
+  assert.equal(typeof latest.rsi12, "number");
+  assert.equal(typeof latest.rsi24, "number");
+  assert.equal(typeof latest.boll_upper, "number");
+  assert.equal(typeof latest.boll_mid, "number");
+  assert.equal(typeof latest.boll_lower, "number");
+  assert.match(indicators.macd_signal, /MACD|DIF/);
+  assert.match(indicators.rsi_signal, /RSI6/);
+  assert.match(indicators.bollinger_signal, /布林/);
+});
+
+test("controlled hybrid mobile snapshots stay display-only and bind cloud analysis", () => {
+  const identity = presentation.controlledHybridSnapshotIdentity(
+    "stock_quote",
+    { code: "600000", as_of: "数据日期 2026-08-21" },
+    "cloudflare_quote_gateway",
+    "cloud_quote_gateway",
+  );
+  const contract = presentation.controlledHybridDisplayContract(identity, "mobile");
+
+  assert.equal(identity.business_date, "2026-08-21");
+  assert.equal(identity.authority, "cloud_quote_gateway");
+  assert.equal(identity.display_only, true);
+  assert.equal(identity.formal_use_allowed, false);
+  assert.equal(contract.analysis_authority, "cloud_canonical_analysis");
+  assert.equal(contract.formal_authority, "cloud_canonical_batch");
+  assert.equal(contract.quote_binding_required, true);
+  assert.match(contract.display_label, /实时参考/);
+});
+
 test("fund presentation keeps missing scores partial and uses unsigned allocation ratios", () => {
   const fund = presentation.mobileFundPayload({
     status: "partial",

@@ -45,6 +45,9 @@ export const __mobilePresentationTest = {
   mobileAssetSearchKeyword,
   isMobileBriefAdmin,
   normalizeMobileMarketBrief,
+  mobileTechnicalIndicators,
+  controlledHybridSnapshotIdentity,
+  controlledHybridDisplayContract,
 };
 
 export const __productionUploadMaintenanceTest = {
@@ -1163,6 +1166,9 @@ route("POST", "/v1/analysis/stock/bundle", async (ctx) => {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.request);
   const request = normalizeAnalysisRequest(body, "stock");
+  if (request.quote_binding_required) {
+    requireControlledHybridQuoteBinding(request.quote_snapshot_identity, request.code);
+  }
   const license = await verifyAnalysisLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
   await applyAnalysisSecurity(ctx, { user, license, requestBody: body, endpoint: "/v1/analysis/stock/bundle" });
 
@@ -1637,7 +1643,19 @@ route("POST", "/v1/mobile/market", async (ctx) => {
     endpoint: "/v1/mobile/market",
   });
   const market = await loadMobileMarketCenter(ctx.env, license);
-  return json({ ok: true, market, source: "published_cloud_data" });
+  const snapshotIdentity = controlledHybridSnapshotIdentity(
+    "market_quote",
+    market,
+    "published_cloud_data",
+    "cloud_quote_gateway",
+  );
+  return json({
+    ok: true,
+    market,
+    source: "published_cloud_data",
+    snapshot_identity: snapshotIdentity,
+    display_contract: controlledHybridDisplayContract(snapshotIdentity, "mobile"),
+  });
 });
 
 route("POST", "/v1/mobile/stock/detail", async (ctx) => {
@@ -1706,6 +1724,19 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
     source: deepRefresh && analysisResult.status === "fulfilled"
       ? "cloudflare_deep_analysis"
       : "published_data_fallback",
+    quote_snapshot_identity: controlledHybridSnapshotIdentity(
+      "stock_quote",
+      research,
+      "cloudflare_quote_gateway",
+      "cloud_quote_gateway",
+    ),
+    analysis_snapshot_identity: controlledHybridSnapshotIdentity(
+      "stock_analysis",
+      research,
+      deepRefresh ? "cloudflare_deep_analysis" : "published_data_fallback",
+      "cloud_canonical_analysis",
+    ),
+    display_contract: controlledHybridDisplayContract(null, "mobile"),
   });
 });
 
@@ -2533,6 +2564,7 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
   );
   const industry = firstText(scoreRow.group_name, behavior.industry, quote.industry, fundamental.industry, "行业待补充");
   const ohlcv = mobileResearchOhlcv(technical, sections);
+  const technicalIndicators = mobileTechnicalIndicators(ohlcv);
   const riskFlags = mobileTextList(risk.flags).map((item) => mobileUserText(item, "需复核风险项"));
   const qualityIssues = mobileTextList(quality.issues).map((item) => mobileUserText(item, "部分数据仍待补充"));
   const cautionItems = uniqueStrings([...riskFlags, ...qualityIssues]).slice(0, 5);
@@ -2614,6 +2646,7 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
       summary: mobileMovementPriceText(board, quote, ohlcv),
       metrics: mobileTechnicalMetrics({ scoreRow, quote, board, capital, riskMetrics }),
     },
+    technical_indicators: technicalIndicators,
     financial: {
       title: "财务与估值指标",
       summary: firstText(financial.report_date, fundamental.report_date)
@@ -2951,8 +2984,126 @@ function mobileResearchOhlcv(technical, sections) {
   const rows = candidates.find((value) => Array.isArray(value)) || [];
   return rows.map((row) => ({
     date: firstText(row.trade_date, row.date),
+    open: firstNumber(row.open, row.open_price, null),
+    high: firstNumber(row.high, row.high_price, null),
+    low: firstNumber(row.low, row.low_price, null),
     close: firstNumber(row.close, row.price, row.latest_price, null),
+    volume: firstNumber(row.volume, row.vol, null),
   })).filter((row) => row.close !== null).slice(-60);
+}
+
+function mobileTechnicalIndicators(ohlcv) {
+  const rows = Array.isArray(ohlcv) ? ohlcv.filter((row) => Number.isFinite(Number(row.close))).slice(-60) : [];
+  const closes = rows.map((row) => Number(row.close));
+  if (closes.length < 2) {
+    return { points: [], macd_signal: "指标数据待更新", rsi_signal: "指标数据待更新", bollinger_signal: "指标数据待更新" };
+  }
+  const ema12 = mobileEmaSeries(closes, 12);
+  const ema26 = mobileEmaSeries(closes, 26);
+  const dif = closes.map((_, index) => ema12[index] - ema26[index]);
+  const dea = mobileEmaSeries(dif, 9);
+  const macd = dif.map((value, index) => (value - dea[index]) * 2);
+  const rsi6 = mobileRsiSeries(closes, 6);
+  const rsi12 = mobileRsiSeries(closes, 12);
+  const rsi24 = mobileRsiSeries(closes, 24);
+  const boll = mobileBollingerSeries(closes, 20);
+  const points = rows.map((row, index) => ({
+    date: row.date,
+    close: mobileIndicatorNumber(closes[index]),
+    dif: mobileIndicatorNumber(dif[index]),
+    dea: mobileIndicatorNumber(dea[index]),
+    macd: mobileIndicatorNumber(macd[index]),
+    rsi6: mobileIndicatorNumber(rsi6[index]),
+    rsi12: mobileIndicatorNumber(rsi12[index]),
+    rsi24: mobileIndicatorNumber(rsi24[index]),
+    boll_upper: mobileIndicatorNumber(boll[index].upper),
+    boll_mid: mobileIndicatorNumber(boll[index].mid),
+    boll_lower: mobileIndicatorNumber(boll[index].lower),
+  }));
+  return {
+    points,
+    macd_signal: mobileMacdSignal(dif, dea),
+    rsi_signal: mobileRsiSignal(rsi6),
+    bollinger_signal: mobileBollingerSignal(closes, boll),
+  };
+}
+
+function mobileEmaSeries(values, period) {
+  if (!values.length) return [];
+  const alpha = 2 / (period + 1);
+  const result = [Number(values[0])];
+  for (let index = 1; index < values.length; index += 1) {
+    result.push(Number(values[index]) * alpha + result[index - 1] * (1 - alpha));
+  }
+  return result;
+}
+
+function mobileRsiSeries(values, period) {
+  const result = Array(values.length).fill(null);
+  if (values.length <= period) return result;
+  let gain = 0;
+  let loss = 0;
+  for (let index = 1; index <= period; index += 1) {
+    const change = values[index] - values[index - 1];
+    gain += Math.max(change, 0);
+    loss += Math.max(-change, 0);
+  }
+  let averageGain = gain / period;
+  let averageLoss = loss / period;
+  result[period] = mobileRsiValue(averageGain, averageLoss);
+  for (let index = period + 1; index < values.length; index += 1) {
+    const change = values[index] - values[index - 1];
+    averageGain = ((averageGain * (period - 1)) + Math.max(change, 0)) / period;
+    averageLoss = ((averageLoss * (period - 1)) + Math.max(-change, 0)) / period;
+    result[index] = mobileRsiValue(averageGain, averageLoss);
+  }
+  return result;
+}
+
+function mobileRsiValue(gain, loss) {
+  if (gain === 0 && loss === 0) return 50;
+  if (loss === 0) return 100;
+  return 100 - (100 / (1 + gain / loss));
+}
+
+function mobileBollingerSeries(values, period) {
+  return values.map((_, index) => {
+    if (index + 1 < period) return { upper: null, mid: null, lower: null };
+    const window = values.slice(index + 1 - period, index + 1);
+    const mid = window.reduce((sum, value) => sum + value, 0) / period;
+    const variance = window.reduce((sum, value) => sum + ((value - mid) ** 2), 0) / period;
+    const deviation = Math.sqrt(variance);
+    return { upper: mid + deviation * 2, mid, lower: mid - deviation * 2 };
+  });
+}
+
+function mobileIndicatorNumber(value) {
+  return Number.isFinite(Number(value)) ? Number(Number(value).toFixed(4)) : null;
+}
+
+function mobileMacdSignal(dif, dea) {
+  const index = dif.length - 1;
+  if (index < 0) return "指标数据待更新";
+  if (index > 0 && dif[index] >= dea[index] && dif[index - 1] < dea[index - 1]) return "MACD 金叉，短线动能转强";
+  if (index > 0 && dif[index] <= dea[index] && dif[index - 1] > dea[index - 1]) return "MACD 死叉，短线动能转弱";
+  return dif[index] >= dea[index] ? "DIF 位于 DEA 上方" : "DIF 位于 DEA 下方";
+}
+
+function mobileRsiSignal(values) {
+  const latest = [...values].reverse().find((value) => value !== null && value !== undefined && Number.isFinite(Number(value)));
+  if (latest === undefined) return "指标数据待更新";
+  if (latest >= 70) return `RSI6 ${latest.toFixed(1)}，处于超买区`;
+  if (latest <= 30) return `RSI6 ${latest.toFixed(1)}，处于超卖区`;
+  return `RSI6 ${latest.toFixed(1)}，处于中性区`;
+}
+
+function mobileBollingerSignal(closes, values) {
+  const latestPrice = closes[closes.length - 1];
+  const latest = [...values].reverse().find((value) => Number.isFinite(Number(value.mid)));
+  if (!latest) return "指标数据待更新";
+  if (latestPrice >= latest.upper) return "价格位于布林上轨附近";
+  if (latestPrice <= latest.lower) return "价格位于布林下轨附近";
+  return latestPrice >= latest.mid ? "价格运行于布林中轨上方" : "价格运行于布林中轨下方";
 }
 
 function mobileTextList(value) {
@@ -3546,6 +3697,48 @@ function mobileDataDate(value) {
   const month = String(match[3]).padStart(2, "0");
   const day = String(match[4]).padStart(2, "0");
   return `${match[2]}-${month}-${day}`;
+}
+
+function controlledHybridSnapshotIdentity(kind, payload, source, authority) {
+  const data = safeJsonObject(payload || {});
+  const businessDate = mobileDataDate(firstText(data.as_of, data.freshness, data.data_date));
+  const normalizedKind = safeText(kind || "unknown", 64).toLowerCase();
+  const normalizedSource = safeText(source || "unknown", 96).toLowerCase();
+  const normalizedAuthority = safeText(authority || "cloud_published_snapshot", 64).toLowerCase();
+  const assetCode = safeText(data.code || "", 32).toUpperCase();
+  const identityToken = [normalizedKind, businessDate || "undated", assetCode || "market", normalizedSource]
+    .join(":")
+    .replace(/[^a-zA-Z0-9:_-]/g, "-");
+  return {
+    snapshot_id: `snapshot:${identityToken}`,
+    identity_version: "controlled_hybrid/v1",
+    snapshot_kind: normalizedKind,
+    authority: normalizedAuthority,
+    business_date: businessDate,
+    observed_at: nowIso(),
+    source: normalizedSource,
+    asset_code: assetCode,
+    workflow_name: normalizedAuthority === "cloud_canonical_analysis" ? "cloud_stock_analysis" : "mobile_quote_gateway",
+    run_id: businessDate ? `${normalizedAuthority}:${businessDate}` : "",
+    display_only: true,
+    formal_use_allowed: false,
+  };
+}
+
+function controlledHybridDisplayContract(identity, surface = "mobile") {
+  const authority = safeText(identity && identity.authority ? identity.authority : "cloud_quote_gateway", 64);
+  return {
+    contract_version: "controlled_hybrid/v1",
+    client_surface: safeText(surface || "mobile", 32),
+    usage: "realtime_reference",
+    display_label: "实时参考（不作为盘后正式结论）",
+    display_authority: authority,
+    analysis_authority: "cloud_canonical_analysis",
+    formal_authority: "cloud_canonical_batch",
+    quote_binding_required: true,
+    client_direct_fallback_optional: true,
+    formal_use_allowed: false,
+  };
 }
 
 async function mobileStockAnalysis(ctx, options) {
@@ -5890,7 +6083,47 @@ function normalizeAnalysisRequest(body, assetType) {
     mode: safeText(body.mode || "commercial_realtime", 64),
     period: safeText(body.period || "1y", 32),
     tabs,
+    quote_snapshot_identity: normalizeControlledHybridSnapshotIdentity(body.quote_snapshot_identity),
+    quote_binding_required: Boolean(body.quote_binding_required),
   };
+}
+
+function normalizeControlledHybridSnapshotIdentity(value) {
+  const raw = safeJsonObject(value || {});
+  return {
+    snapshot_id: safeText(raw.snapshot_id || "", 160),
+    identity_version: safeText(raw.identity_version || "", 64),
+    snapshot_kind: safeText(raw.snapshot_kind || "", 64),
+    authority: safeText(raw.authority || "", 64),
+    business_date: safeText(raw.business_date || "", 32),
+    observed_at: safeText(raw.observed_at || "", 64),
+    source: safeText(raw.source || "", 96),
+    asset_code: safeText(raw.asset_code || "", 32),
+    display_only: raw.display_only !== false,
+    formal_use_allowed: raw.formal_use_allowed === true,
+  };
+}
+
+function requireControlledHybridQuoteBinding(identity, code) {
+  const required = ["snapshot_id", "identity_version", "snapshot_kind", "authority", "business_date", "source"];
+  const missing = required.filter((field) => !safeText(identity && identity[field] ? identity[field] : "", 160));
+  if (safeText(identity && identity.asset_code ? identity.asset_code : "", 32).toUpperCase() !== safeText(code, 32).toUpperCase()) {
+    missing.push("asset_code_match");
+  }
+  if (identity && identity.formal_use_allowed === true) {
+    missing.push("interactive_snapshot_must_not_claim_formal_authority");
+  }
+  if (safeText(identity && identity.identity_version ? identity.identity_version : "", 64) !== "controlled_hybrid/v1") {
+    missing.push("identity_version_supported");
+  }
+  if (!["client_realtime_quote", "cloud_quote_gateway", "client_cache_fallback"].includes(
+    safeText(identity && identity.authority ? identity.authority : "", 64),
+  )) {
+    missing.push("interactive_quote_authority");
+  }
+  if (missing.length) {
+    throwHttp(400, `quote_snapshot_identity_invalid:${[...new Set(missing)].join(",")}`);
+  }
 }
 
 function normalizePortfolioRequest(body) {
