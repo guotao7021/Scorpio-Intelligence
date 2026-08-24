@@ -12,7 +12,8 @@ test("account release lookup sends an explicit platform and uses the Android bet
 });
 
 test("dual release publisher registers the platform-aware release identity", () => {
-  assert.match(publishSource, /buildRelease\("android",\s*"android"/);
+  assert.match(publishSource, /buildRelease\("all",\s*"android"/);
+  assert.match(publishSource, /platform === "android" \? "application\/vnd\.android\.package-archive"/);
   assert.match(publishSource, /ON CONFLICT\(version, channel, edition, platform\)/);
   assert.match(publishSource, /release\.platform/);
 });
