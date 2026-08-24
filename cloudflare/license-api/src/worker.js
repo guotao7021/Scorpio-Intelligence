@@ -1771,6 +1771,12 @@ route("POST", "/v1/mobile/industry", async (ctx) => {
 
 route("PUT", "/v1/mobile/admin/market-brief", async (ctx) => {
   const user = await requireUser(ctx);
+  // Keep an untouched copy for raw-body-v1 signature verification.  The
+  // existing JSON reader consumes the original request stream, so cloning must
+  // happen before parsing.  This scheme is deliberately limited to the
+  // long-form brief publisher; all other mobile endpoints keep their legacy
+  // canonical-JSON signature contract.
+  const rawRequestBody = await ctx.request.clone().text();
   const body = await readJson(ctx.request);
   const request = normalizeMobileBootstrapRequest(body);
   const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
@@ -1778,6 +1784,7 @@ route("PUT", "/v1/mobile/admin/market-brief", async (ctx) => {
     user,
     license,
     requestBody: body,
+    rawRequestBody,
     endpoint: "/v1/mobile/admin/market-brief",
     // Publishing is an authenticated administrator action, not an on-device
     // market calculation. Keep its request signature and replay protection,
@@ -6368,7 +6375,19 @@ async function verifyAnalysisRequestSignature(ctx, options) {
   }
   const method = ctx.request.method.toUpperCase();
   const path = normalizePath(new URL(ctx.request.url).pathname);
-  const bodyHash = await sha256Hex(stableJson(options.requestBody || {}));
+  const signatureScheme = String(ctx.request.headers.get("X-Scorpio-Signature-Scheme") || "").trim().toLowerCase();
+  let bodyHash;
+  if (!signatureScheme) {
+    // Legacy Android releases canonicalize parsed JSON before hashing.
+    bodyHash = await sha256Hex(stableJson(options.requestBody || {}));
+  } else if (signatureScheme === "raw-body-v1" && typeof options.rawRequestBody === "string") {
+    // Long-form user content may be escaped differently by Gson and
+    // JSON.stringify.  Hash the exact UTF-8 body instead of two independent
+    // JSON serializers, while the HMAC still binds that hash to this request.
+    bodyHash = await sha256Hex(options.rawRequestBody);
+  } else {
+    throwHttp(400, "analysis_signature_scheme_unsupported");
+  }
   const base = `${method}\n${path}\n${timestamp}\n${nonce}\n${bodyHash}`;
   const expected = await hmacSha256Hex(bearer, base);
   if (!timingSafeEqual(signature, expected)) {
