@@ -25,7 +25,10 @@ const allowReplace = Boolean(args.allowReplace);
 const releases = await Promise.all([
   proFile ? buildRelease("personal_pro", "desktop", proFile, notes || `Scorpio Intelligence Pro v${version} release.`) : null,
   standardFile ? buildRelease("personal_standard", "desktop", standardFile, notes || `Scorpio Intelligence Standard v${version} release.`) : null,
-  apkFile ? buildRelease("android", "android", apkFile, notes || `Scorpio Intelligence Android v${version} release.`) : null,
+  // The Android client checks updates with its commercial edition
+  // (personal_pro/personal_standard).  Use the shared edition record so that
+  // a single Android APK is discoverable by every entitled mobile user.
+  apkFile ? buildRelease("all", "android", apkFile, notes || `Scorpio Intelligence Android v${version} release.`) : null,
 ].filter(Boolean));
 
 for (const release of releases) {
@@ -52,7 +55,7 @@ async function buildRelease(edition, platform, file, releaseNotes) {
   if (!info.isFile() || info.size < 1) throw new Error(`Release file is empty or invalid: ${file}`);
   const fileName = basename(file);
   const sha256 = await sha256File(file);
-  const contentType = edition === "android" ? "application/vnd.android.package-archive" : "application/octet-stream";
+  const contentType = platform === "android" ? "application/vnd.android.package-archive" : "application/octet-stream";
   const r2Key = `releases/${edition}/${channel}/${version}/${fileName}`;
   const ossKey = `releases/v${version}/${fileName}`;
   return {
