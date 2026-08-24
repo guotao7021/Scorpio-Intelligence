@@ -45,6 +45,7 @@ export const __mobilePresentationTest = {
   mobileAssetSearchKeyword,
   isMobileBriefAdmin,
   normalizeMobileMarketBrief,
+  mobileMarketBriefItems,
   mobileTechnicalIndicators,
   controlledHybridSnapshotIdentity,
   controlledHybridDisplayContract,
@@ -3423,7 +3424,14 @@ function mobileMarketBriefItems(rows) {
     source_label: firstText(row.source_name, row.source, "雪球公开简报"),
     source_url: safeText(firstText(row.source_url, row.url), 1000),
     published_at: firstText(row.published_at, row.trade_date, row._data_date),
-  })).filter((row) => row.title && row.body);
+  })).filter((row) => row.title && row.body).sort((left, right) => {
+    // Historical briefs may be backfilled today.  The report's market date,
+    // not its publication time, determines its position in every mobile view.
+    const reportDateOrder = right.trade_date.localeCompare(left.trade_date);
+    if (reportDateOrder) return reportDateOrder;
+    const publishedOrder = right.published_at.localeCompare(left.published_at);
+    return publishedOrder || left.id.localeCompare(right.id);
+  });
 }
 
 async function loadMobileMarketBriefRows(env, license, limit = 30) {

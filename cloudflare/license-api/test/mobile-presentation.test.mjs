@@ -196,6 +196,15 @@ test("market brief publishing is restricted to the configured administrator", ()
   );
 });
 
+test("mobile briefs sort by report date instead of the historical backfill time", () => {
+  const briefs = presentation.mobileMarketBriefItems([
+    { brief_id: "brief-2026-08-19", trade_date: "2026-08-19", title: "补发简报", body: "正文", published_at: "2026-08-24T10:00:00Z" },
+    { brief_id: "brief-2026-08-22", trade_date: "2026-08-22", title: "最新报告", body: "正文", published_at: "2026-08-22T10:00:00Z" },
+  ]);
+
+  assert.deepEqual(briefs.map((brief) => brief.trade_date), ["2026-08-22", "2026-08-19"]);
+});
+
 test("mobile technical indicators are derived from published OHLCV rows", () => {
   const rows = Array.from({ length: 40 }, (_, index) => ({
     date: `2026-07-${String(index + 1).padStart(2, "0")}`,
