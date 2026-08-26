@@ -36,6 +36,43 @@ test("mobile data-date catalog exposes published dates in descending order", asy
   assert.deepEqual(dates, ["2026-08-22", "2026-08-21"]);
 });
 
+test("mobile fund and bond profile lookups stay below D1 binding limits", async () => {
+  const bindCalls = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        assert.match(sql, /json_extract\(r\.row_json, '\$\.fund_code'\)/);
+        return {
+          bind(...params) {
+            assert.equal(params[0], "fund_profiles");
+            bindCalls.push(params);
+            const codes = params.filter((value) => /^\d{6}$/.test(String(value)));
+            return {
+              all: async () => ({
+                results: codes.map((code) => ({ row_json: JSON.stringify({ fund_code: code, fund_name: `基金${code}` }) })),
+              }),
+            };
+          },
+        };
+      },
+    },
+  };
+  const codes = Array.from({ length: 161 }, (_, index) => String(index).padStart(6, "0"));
+  const profiles = await presentation.loadMobileSampleProfiles(
+    env,
+    { edition: "personal_pro" },
+    "fund_profiles",
+    "fund_code",
+    codes,
+  );
+
+  assert.equal(bindCalls.length, 3);
+  assert.ok(bindCalls.every((params) => params.length <= 80));
+  assert.equal(profiles.length, codes.length);
+  assert.equal(profiles[0].fund_code, "000000");
+  assert.equal(profiles.at(-1).fund_code, "000160");
+});
+
 test("mobile network probe is public, lightweight, and never cached", async () => {
   const response = await worker.fetch(
     new Request("https://api.example.invalid/v1/mobile/network-check"),

@@ -35,6 +35,7 @@ export const __mobilePresentationTest = {
   mobileFundSamplePoolItem,
   mobileBondSamplePoolItem,
   rankMobileAssetSamplePoolItems,
+  loadMobileSampleProfiles,
   mobileStockResearchPayload,
   mobileStockResearchUnavailablePayload,
   mobileAnalysisComputeAvailable,
@@ -2631,22 +2632,32 @@ async function loadMobileSampleProfiles(env, license, tableName, codeKey, codes)
   const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
   const scopePlaceholders = scopes.map(() => "?").join(", ");
   const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
-  const rows = await env.DB.prepare(
-    `SELECT r.row_json, r.data_date, r.updated_at, r.edition_scope, r.row_key
-     FROM production_table_rows r
-     JOIN production_upload_batches b ON b.batch_id = r.batch_id
-     WHERE r.table_name = ?
-       AND r.module = 'target_research'
-       AND r.edition_scope IN (${scopePlaceholders})
-       AND b.status = 'committed'
-       AND UPPER(COALESCE(json_extract(r.row_json, '$.${codeKey}'), '')) IN (${normalizedCodes.map(() => "?").join(", ")})
-     ORDER BY CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
-              r.updated_at DESC,
-              r.row_key ASC`
-  ).bind(tableName, ...scopes, ...normalizedCodes, ...scopes).all();
+  // D1 has a bounded number of values that can be bound to a single prepared
+  // statement.  A full fund/bond sample pool can exceed that limit, which used
+  // to turn a valid request into a 500 response.  Keep a margin for the table
+  // and edition bindings and merge the profile chunks below.
+  const profileCodeChunkSize = 72;
+  const rows = [];
+  for (let start = 0; start < normalizedCodes.length; start += profileCodeChunkSize) {
+    const codeChunk = normalizedCodes.slice(start, start + profileCodeChunkSize);
+    const result = await env.DB.prepare(
+      `SELECT r.row_json, r.data_date, r.updated_at, r.edition_scope, r.row_key
+       FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+       WHERE r.table_name = ?
+         AND r.module = 'target_research'
+         AND r.edition_scope IN (${scopePlaceholders})
+         AND b.status = 'committed'
+         AND UPPER(COALESCE(json_extract(r.row_json, '$.${codeKey}'), '')) IN (${codeChunk.map(() => "?").join(", ")})
+       ORDER BY CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+                r.updated_at DESC,
+                r.row_key ASC`
+    ).bind(tableName, ...scopes, ...codeChunk, ...scopes).all();
+    rows.push(...(result.results || []));
+  }
   const seen = new Set();
   const result = [];
-  for (const row of rows.results || []) {
+  for (const row of rows) {
     const payload = parseJson(row.row_json || "{}", {});
     const code = firstText(payload[codeKey], payload.code).toUpperCase();
     if (!code || seen.has(code)) continue;
