@@ -7522,7 +7522,19 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
       };
     }
 
-    const scoreRows = await publishedRowsForCode(env, "score_history", options.license, code, 10);
+    // Bond profile and daily snapshot are the minimum viable detail contract.
+    // Scoring rows are not present for every listed convertible bond, so a
+    // transient/legacy score-history problem must not block the entire bond
+    // detail page after the user selects a valid sample-pool item.
+    let scoreRows = [];
+    try {
+      scoreRows = await publishedRowsForCode(env, "score_history", options.license, code, 10);
+    } catch (error) {
+      console.warn("mobile_bond_score_history_unavailable", {
+        code,
+        error: safeText(error && error.message ? error.message : String(error), 240),
+      });
+    }
     const scoreRow = scoreRows.find((row) => firstText(row.asset_type).toLowerCase() === "bond") || {};
     const missing = [
       ...(profileRows.length ? [] : ["bond_profiles"]),
