@@ -43,6 +43,7 @@ export const __mobilePresentationTest = {
   mergeMobilePortfolioPositions,
   analysisFallbackPortfolioBundle,
   mobileAssetSearchKeyword,
+  mobileDataHistoryDates,
   isMobileBriefAdmin,
   normalizeMobileMarketBrief,
   mobileMarketBriefItems,
@@ -1701,7 +1702,9 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
       }, "published_mobile_data");
   const [analysisResult, scoreRowsResult] = await Promise.allSettled([
     analysisPromise,
-    publishedRowsForCode(ctx.env, "score_history", license, request.code, 1),
+    publishedRowsForCode(ctx.env, "score_history", license, request.code, 1, {
+      data_date: request.data_date,
+    }),
   ]);
   const analysis = analysisResult.status === "fulfilled"
     ? analysisResult.value
@@ -1739,6 +1742,21 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
     ),
     display_contract: controlledHybridDisplayContract(null, "mobile"),
   });
+});
+
+route("POST", "/v1/mobile/data-history/dates", async (ctx) => {
+  const user = await requireUser(ctx);
+  const body = await readJson(ctx.request);
+  const request = normalizeMobileBootstrapRequest(body);
+  const license = await verifyMobileLicense(ctx.env, user, request.license_id, request.machine_fingerprint);
+  await applyAnalysisSecurity(ctx, {
+    user,
+    license,
+    requestBody: body,
+    endpoint: "/v1/mobile/data-history/dates",
+  });
+  const dates = await mobileDataHistoryDates(ctx.env, license);
+  return json({ ok: true, dates, latest_date: dates[0] || "" });
 });
 
 route("POST", "/v1/mobile/industry", async (ctx) => {
@@ -2436,6 +2454,7 @@ function normalizeMobileSamplePoolRequest(body) {
     : "balanced";
   return {
     strategy,
+    data_date: normalizeMobileDataDate(body.data_date || body.as_of_date || ""),
     keyword: safeText(body.keyword || body.query || "", 64).toUpperCase(),
     industry: safeText(body.industry || "", 64),
     limit: Math.max(1, Math.min(Number(body.limit || 40), 60)),
@@ -2461,9 +2480,15 @@ async function loadMobileSamplePoolRows(env, license, filters) {
         AND r2.module = 'target_research'
         AND r2.edition_scope IN (${scopePlaceholders})
         AND b2.status = 'committed'
+        AND COALESCE(json_extract(r2.row_json, '$.asset_type'), 'stock') = 'stock'
     )`,
   ];
   const params = [...scopes, ...scopes];
+  if (filters.data_date) {
+    where[where.length - 1] = "r.data_date = ?";
+    params.splice(scopes.length, scopes.length);
+    params.push(filters.data_date);
+  }
   if (filters.keyword) {
     where.push("UPPER(r.row_json) LIKE ?");
     params.push(`%${filters.keyword}%`);
@@ -2526,7 +2551,7 @@ function mobileSamplePoolItem(row, strategy, index) {
     risk_label: riskLabel,
     summary: mobileSampleSummary(score, riskLabel),
     tone: mobileResearchTone(score, riskLabel),
-    as_of: mobileDateLabel(firstText(row.score_date, row._data_date)),
+    as_of: mobileDateLabel(row._data_date),
   };
 }
 
@@ -2602,7 +2627,7 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
   ];
   const status = score !== null || ohlcv.length ? "ready" : analysis.status === "error" ? "error" : "partial";
   const freshness = firstText(
-    scoreRow.score_date,
+    scoreRow._data_date,
     analysis.data_quality && analysis.data_quality.freshness,
     quote.trade_date,
     analysis.as_of
@@ -2768,6 +2793,31 @@ function mobileStockResearchUnavailablePayload(request) {
 
 function mobileResearchFactor(title, detail, tone) {
   return { title, detail, tone: ["success", "warning", "danger", "primary"].includes(tone) ? tone : "primary" };
+}
+
+function normalizeMobileDataDate(value) {
+  const date = safeText(value || "", 10);
+  if (!date) return "";
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(date)) throwHttp(400, "data_date_invalid");
+  return date;
+}
+
+async function mobileDataHistoryDates(env, license, limit = 60) {
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const rows = await env.DB.prepare(
+    `SELECT DISTINCT r.data_date
+       FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+      WHERE r.table_name = 'score_history'
+        AND r.module = 'target_research'
+        AND r.edition_scope IN (${scopePlaceholders})
+        AND b.status = 'committed'
+        AND COALESCE(json_extract(r.row_json, '$.asset_type'), 'stock') = 'stock'
+      ORDER BY r.data_date DESC
+      LIMIT ?`
+  ).bind(...scopes, Math.max(1, Math.min(Number(limit || 60), 120))).all();
+  return (rows.results || []).map((row) => normalizeMobileDataDate(row.data_date)).filter(Boolean);
 }
 
 function mobileFundPayload(bundle, request) {
@@ -6109,6 +6159,7 @@ function normalizeAnalysisRequest(body, assetType) {
     client_version: safeText(body.client_version || "", 64),
     mode: safeText(body.mode || "commercial_realtime", 64),
     period: safeText(body.period || "1y", 32),
+    data_date: normalizeMobileDataDate(body.data_date || body.as_of_date || ""),
     tabs,
     quote_snapshot_identity: normalizeControlledHybridSnapshotIdentity(body.quote_snapshot_identity),
     quote_binding_required: Boolean(body.quote_binding_required),
@@ -7447,8 +7498,12 @@ function portfolioSnapshotItem(item) {
   };
 }
 
-async function publishedRowsForCode(env, tableName, license, code, limit = 1) {
-  return publishedRows(env, tableName, license, { asset_codes: assetCodeCandidates(code), limit });
+async function publishedRowsForCode(env, tableName, license, code, limit = 1, options = {}) {
+  return publishedRows(env, tableName, license, {
+    ...options,
+    asset_codes: assetCodeCandidates(code),
+    limit,
+  });
 }
 
 async function publishedRows(env, tableName, license, options = {}) {
@@ -7470,6 +7525,11 @@ async function publishedRows(env, tableName, license, options = {}) {
   if (module) {
     where.push("r.module = ?");
     params.push(module);
+  }
+  const dataDate = tableName === "score_history" ? normalizeMobileDataDate(options.data_date || "") : "";
+  if (dataDate) {
+    where.push("r.data_date = ?");
+    params.push(dataDate);
   }
   const codePatterns = Array.isArray(options.code_patterns) ? options.code_patterns.filter(Boolean) : [];
   const assetCodes = Array.isArray(options.asset_codes) ? options.asset_codes.filter(Boolean) : [];

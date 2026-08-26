@@ -10,6 +10,32 @@ test("mobile fund and bond search accepts desktop exchange code formats", () => 
   assert.equal(presentation.mobileAssetSearchKeyword("fund", "华夏成长"), "华夏成长");
 });
 
+test("mobile data-date catalog exposes published dates in descending order", async () => {
+  const env = {
+    DB: {
+      prepare(sql) {
+        assert.match(sql, /score_history/);
+        assert.match(sql, /ORDER BY r\.data_date DESC/);
+        return {
+          bind(...params) {
+            assert.ok(params.includes("pro"));
+            return {
+              all: async () => ({
+                results: [
+                  { data_date: "2026-08-22" },
+                  { data_date: "2026-08-21" },
+                ],
+              }),
+            };
+          },
+        };
+      },
+    },
+  };
+  const dates = await presentation.mobileDataHistoryDates(env, { edition: "personal_pro" });
+  assert.deepEqual(dates, ["2026-08-22", "2026-08-21"]);
+});
+
 test("mobile network probe is public, lightweight, and never cached", async () => {
   const response = await worker.fetch(
     new Request("https://api.example.invalid/v1/mobile/network-check"),
