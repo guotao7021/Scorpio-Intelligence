@@ -32,6 +32,9 @@ export const __mobilePresentationTest = {
   mobileIndustryPayload,
   rankMobileSamplePoolItems,
   mobileSamplePoolItem,
+  mobileFundSamplePoolItem,
+  mobileBondSamplePoolItem,
+  rankMobileAssetSamplePoolItems,
   mobileStockResearchPayload,
   mobileStockResearchUnavailablePayload,
   mobileAnalysisComputeAvailable,
@@ -1618,13 +1621,15 @@ route("POST", "/v1/mobile/sample-pool", async (ctx) => {
   });
   const filters = normalizeMobileSamplePoolRequest(body);
   const rows = await loadMobileSamplePoolRows(ctx.env, license, filters);
-  const items = rankMobileSamplePoolItems(rows, filters.strategy);
+  const items = rankMobileAssetSamplePoolItems(rows, filters);
+  const assetLabel = mobileAssetTypeLabel(filters.asset_type);
   return json({
     ok: true,
-    title: "研究样本池",
+    title: `${assetLabel}样本池`,
     summary: items.length
-      ? `已按${mobileStrategyLabel(filters.strategy)}筛选 ${items.length} 个标的`
-      : "当前筛选条件下暂无标的",
+      ? `已按${mobileSamplePoolStrategyLabel(filters.asset_type, filters.strategy)}筛选 ${items.length} 个${assetLabel}`
+      : `当前筛选条件下暂无${assetLabel}`,
+    asset_type: filters.asset_type,
     strategy: filters.strategy,
     strategy_label: mobileStrategyLabel(filters.strategy),
     as_of: mobileDateLabel(rows[0] && rows[0]._data_date),
@@ -2452,7 +2457,12 @@ function normalizeMobileSamplePoolRequest(body) {
   const strategy = ["conservative", "balanced", "aggressive", "momentum"].includes(requestedStrategy)
     ? requestedStrategy
     : "balanced";
+  const requestedAssetType = safeText(body.asset_type || "stock", 16).toLowerCase();
+  const assetType = ["stock", "fund", "bond"].includes(requestedAssetType)
+    ? requestedAssetType
+    : "stock";
   return {
+    asset_type: assetType,
     strategy,
     data_date: normalizeMobileDataDate(body.data_date || body.as_of_date || ""),
     keyword: safeText(body.keyword || body.query || "", 64).toUpperCase(),
@@ -2462,6 +2472,12 @@ function normalizeMobileSamplePoolRequest(body) {
 }
 
 async function loadMobileSamplePoolRows(env, license, filters) {
+  if (filters.asset_type === "fund") return loadMobileFundSamplePoolRows(env, license, filters);
+  if (filters.asset_type === "bond") return loadMobileBondSamplePoolRows(env, license, filters);
+  return loadMobileStockSamplePoolRows(env, license, filters);
+}
+
+async function loadMobileStockSamplePoolRows(env, license, filters) {
   const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
   const scopePlaceholders = scopes.map(() => "?").join(", ");
   const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
@@ -2530,6 +2546,116 @@ async function loadMobileSamplePoolRows(env, license, filters) {
   return result;
 }
 
+async function loadMobileFundSamplePoolRows(env, license, filters) {
+  const performanceRows = await loadLatestMobileSampleTableRows(
+    env,
+    license,
+    "fund_performance_snapshots",
+    filters,
+    "fund_code",
+  );
+  const profiles = await loadMobileSampleProfiles(env, license, "fund_profiles", "fund_code", performanceRows.map((row) => row.fund_code));
+  const profileByCode = new Map(profiles.map((row) => [firstText(row.fund_code, row.code), row]));
+  return performanceRows.map((row) => ({
+    ...profileByCode.get(firstText(row.fund_code, row.code)),
+    ...row,
+    asset_type: "fund",
+  }));
+}
+
+async function loadMobileBondSamplePoolRows(env, license, filters) {
+  const snapshots = await loadLatestMobileSampleTableRows(
+    env,
+    license,
+    "bond_daily_snapshot",
+    filters,
+    "bond_code",
+  );
+  const profiles = await loadMobileSampleProfiles(env, license, "bond_profiles", "bond_code", snapshots.map((row) => row.bond_code));
+  const profileByCode = new Map(profiles.map((row) => [firstText(row.bond_code, row.code), row]));
+  return snapshots.map((row) => ({
+    ...profileByCode.get(firstText(row.bond_code, row.code)),
+    ...row,
+    asset_type: "bond",
+  }));
+}
+
+async function loadLatestMobileSampleTableRows(env, license, tableName, filters, codeKey) {
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
+  const codePath = `$.${codeKey}`;
+  const rows = await env.DB.prepare(
+    `SELECT r.row_json, r.data_date, r.updated_at, r.edition_scope, r.row_key
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE r.table_name = ?
+       AND r.module = 'target_research'
+       AND r.edition_scope IN (${scopePlaceholders})
+       AND b.status = 'committed'
+       AND r.data_date = (
+         SELECT MAX(r2.data_date)
+         FROM production_table_rows r2
+         JOIN production_upload_batches b2 ON b2.batch_id = r2.batch_id
+         WHERE r2.table_name = ?
+           AND r2.module = 'target_research'
+           AND r2.edition_scope IN (${scopePlaceholders})
+           AND b2.status = 'committed'
+       )
+       AND (? = '' OR UPPER(r.row_json) LIKE ?)
+     ORDER BY CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+              r.updated_at DESC,
+              r.row_key ASC
+     LIMIT ?`
+  ).bind(
+    tableName,
+    ...scopes,
+    tableName,
+    ...scopes,
+    filters.keyword || "",
+    sqlLikeContains(filters.keyword || ""),
+    ...scopes,
+    Math.min(filters.limit * 6, 360),
+  ).all();
+  return (rows.results || []).map((row) => ({
+    ...parseJson(row.row_json || "{}", {}),
+    _data_date: row.data_date || "",
+    _updated_at: row.updated_at || "",
+    _edition_scope: row.edition_scope || "",
+  }));
+}
+
+async function loadMobileSampleProfiles(env, license, tableName, codeKey, codes) {
+  const normalizedCodes = uniqueStrings((codes || []).map((code) => safeText(code || "", 32).toUpperCase()).filter(Boolean));
+  if (!normalizedCodes.length) return [];
+  const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const scopePriority = scopes.map((scope, index) => `WHEN ? THEN ${index}`).join(" ");
+  const rows = await env.DB.prepare(
+    `SELECT r.row_json, r.data_date, r.updated_at, r.edition_scope, r.row_key
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE r.table_name = ?
+       AND r.module = 'target_research'
+       AND r.edition_scope IN (${scopePlaceholders})
+       AND b.status = 'committed'
+       AND UPPER(COALESCE(json_extract(r.row_json, '$.${codeKey}'), '')) IN (${normalizedCodes.map(() => "?").join(", ")})
+     ORDER BY CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+              r.updated_at DESC,
+              r.row_key ASC`
+  ).bind(tableName, ...scopes, ...normalizedCodes, ...scopes).all();
+  const seen = new Set();
+  const result = [];
+  for (const row of rows.results || []) {
+    const payload = parseJson(row.row_json || "{}", {});
+    const code = firstText(payload[codeKey], payload.code).toUpperCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    result.push(payload);
+  }
+  return result;
+}
+
 function mobileSamplePoolItem(row, strategy, index) {
   const details = parseJson(row.public_details || row.details || "{}", {});
   const strategyScores = safeJsonObject(safeJsonObject(details.all_strategy_scores)[strategy] || {});
@@ -2540,6 +2666,7 @@ function mobileSamplePoolItem(row, strategy, index) {
   const riskLabel = mobileRiskLabel(firstText(risk.level, row.risk_level), row.risk_score);
   const industry = firstText(row.group_name, behavior.industry, row.industry, "行业待补充");
   return {
+    asset_type: "stock",
     code: firstText(row.code, row.ts_code, row.symbol),
     name: firstText(row.name, details.name, row.code),
     industry,
@@ -2553,6 +2680,100 @@ function mobileSamplePoolItem(row, strategy, index) {
     tone: mobileResearchTone(score, riskLabel),
     as_of: mobileDateLabel(row._data_date),
   };
+}
+
+function mobileFundSamplePoolItem(row, strategy, index) {
+  const score = firstNumber(row.score, 0);
+  const return1m = firstNumber(row.return_1m_pct, row.return_1m, null);
+  const return3m = firstNumber(row.return_3m_pct, row.return_3m, null);
+  const riskMetrics = parseJson(row.risk_metrics_json || "{}", {});
+  const annualVolatility = firstNumber(riskMetrics.annual_volatility, row.annual_volatility, null);
+  const riskLabel = mobileRiskLabel(firstText(row.risk_level), annualVolatility === null ? null : annualVolatility * 3);
+  const summaryParts = [
+    return1m === null ? "近1月表现待补充" : `近1月 ${mobilePercent(return1m)}`,
+    annualVolatility === null ? "波动数据待补充" : `年化波动 ${mobileUnsignedPercent(annualVolatility)}`,
+  ];
+  return {
+    asset_type: "fund",
+    code: firstText(row.fund_code, row.code),
+    name: firstText(row.fund_name, row.name, row.fund_code),
+    industry: firstText(row.fund_subtype, row.fund_type_raw, row.asset_role_label, "基金"),
+    market: "CN",
+    rank: index + 1,
+    score: Number(score.toFixed(1)),
+    score_label: score > 0 ? `${Number(score.toFixed(1))} 分` : "待评估",
+    rating: mobileRatingLabel(row.rating, score > 0 ? score : null),
+    risk_label: riskLabel,
+    summary: summaryParts.join(" · "),
+    tone: mobileResearchTone(score, riskLabel),
+    as_of: mobileDateLabel(row._data_date),
+    _sample_sort: mobileFundSampleSort(row, strategy),
+    _return_1m: return1m,
+    _return_3m: return3m,
+    _annual_volatility: annualVolatility,
+  };
+}
+
+function mobileBondSamplePoolItem(row, strategy, index) {
+  const change = firstNumber(row.pct_change, null);
+  const amount = firstNumber(row.amount, null);
+  const premium = firstNumber(row.premium_rate, null);
+  const price = firstNumber(row.price, row.bond_price, null);
+  const score = change === null ? 0 : change;
+  const summaryParts = [
+    price === null ? "价格待补充" : `价格 ${price.toFixed(3)}`,
+    premium === null ? "溢价率待补充" : `溢价率 ${mobileUnsignedPercent(premium)}`,
+  ];
+  return {
+    asset_type: "bond",
+    code: firstText(row.bond_code, row.code),
+    name: firstText(row.bond_name, row.name, row.bond_code),
+    industry: firstText(row.underlying_name, row.credit_rating, "可转债"),
+    market: "CN",
+    rank: index + 1,
+    score,
+    score_label: change === null ? "--" : mobilePercent(change),
+    rating: "当日表现",
+    risk_label: firstText(row.credit_rating, "待评估"),
+    summary: summaryParts.join(" · "),
+    tone: change !== null && change > 0 ? "success" : change !== null && change < 0 ? "danger" : "primary",
+    as_of: mobileDateLabel(row._data_date),
+    _sample_sort: mobileBondSampleSort(row, strategy),
+    _amount: amount,
+    _premium: premium,
+  };
+}
+
+function mobileFundSampleSort(row, strategy) {
+  const score = firstNumber(row.score, 0);
+  const returns = strategy === "momentum"
+    ? firstNumber(row.return_3m_pct, row.return_3m, -Infinity)
+    : firstNumber(row.return_1m_pct, row.return_1m, -Infinity);
+  const riskMetrics = parseJson(row.risk_metrics_json || "{}", {});
+  const volatility = firstNumber(riskMetrics.annual_volatility, row.annual_volatility, Infinity);
+  if (strategy === "conservative") return -volatility;
+  if (strategy === "aggressive" || strategy === "momentum") return returns;
+  return score;
+}
+
+function mobileBondSampleSort(row, strategy) {
+  if (strategy === "conservative") return -firstNumber(row.premium_rate, Infinity);
+  if (strategy === "balanced") return firstNumber(row.amount, -Infinity);
+  return firstNumber(row.pct_change, -Infinity);
+}
+
+function mobileAssetTypeLabel(assetType) {
+  return ({ stock: "股票", fund: "基金", bond: "可转债" })[String(assetType || "").toLowerCase()] || "标的";
+}
+
+function mobileSamplePoolStrategyLabel(assetType, strategy) {
+  const key = String(strategy || "balanced").toLowerCase();
+  const labels = {
+    stock: { conservative: "稳健策略", balanced: "平衡策略", aggressive: "进取策略", momentum: "动量策略" },
+    fund: { conservative: "风险优先", balanced: "综合评分", aggressive: "近1月表现", momentum: "近3月表现" },
+    bond: { conservative: "低溢价", balanced: "成交活跃", aggressive: "当日强势", momentum: "价格动量" },
+  };
+  return labels[String(assetType || "stock").toLowerCase()]?.[key] || "综合排序";
 }
 
 function mobileSampleSummary(score, riskLabel) {
@@ -4348,6 +4569,26 @@ function rankMobileSamplePoolItems(rows, strategy) {
     .map((row, index) => mobileSamplePoolItem(row, strategy, index))
     .sort((left, right) => right.score - left.score || left.code.localeCompare(right.code))
     .map((item, index) => ({ ...item, rank: index + 1 }));
+}
+
+function rankMobileAssetSamplePoolItems(rows, filters) {
+  const assetType = filters && filters.asset_type ? filters.asset_type : "stock";
+  const strategy = filters && filters.strategy ? filters.strategy : "balanced";
+  if (assetType === "stock") return rankMobileSamplePoolItems(rows, strategy);
+  const mapper = assetType === "fund" ? mobileFundSamplePoolItem : mobileBondSamplePoolItem;
+  return rows
+    .map((row, index) => mapper(row, strategy, index))
+    .sort((left, right) => {
+      const sortDelta = Number(right._sample_sort) - Number(left._sample_sort);
+      if (Number.isFinite(sortDelta) && sortDelta !== 0) return sortDelta;
+      const scoreDelta = Number(right.score) - Number(left.score);
+      if (Number.isFinite(scoreDelta) && scoreDelta !== 0) return scoreDelta;
+      return left.code.localeCompare(right.code);
+    })
+    .map((item, index) => {
+      const { _sample_sort, _return_1m, _return_3m, _annual_volatility, _amount, _premium, ...presentation } = item;
+      return { ...presentation, rank: index + 1 };
+    });
 }
 
 function mobileEditionLabel(value) {

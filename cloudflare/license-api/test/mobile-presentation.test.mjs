@@ -461,6 +461,26 @@ test("sample pool preserves distinct strategies when research JSON contains NaN"
   assert.equal(presentation.rankMobileSamplePoolItems(rows, "momentum")[0].code, "600004");
 });
 
+test("fund and bond sample pools use published metrics without inventing stock scores", () => {
+  const funds = presentation.rankMobileAssetSamplePoolItems([
+    { fund_code: "000001", fund_name: "低波动基金", score: 66, return_1m_pct: 2.1, return_3m_pct: 5.2, risk_metrics_json: '{"annual_volatility":12.5}' },
+    { fund_code: "000002", fund_name: "高动量基金", score: 58, return_1m_pct: 8.1, return_3m_pct: 14.2, risk_metrics_json: '{"annual_volatility":28.5}' },
+  ], { asset_type: "fund", strategy: "momentum" });
+  const bonds = presentation.rankMobileAssetSamplePoolItems([
+    { bond_code: "123001", bond_name: "强势转债", pct_change: 2.5, amount: 12000, price: 121.2, premium_rate: 18.4 },
+    { bond_code: "123002", bond_name: "弱势转债", pct_change: -0.6, amount: 21000, price: 109.8, premium_rate: 9.4 },
+  ], { asset_type: "bond", strategy: "aggressive" });
+
+  assert.equal(funds[0].code, "000002");
+  assert.equal(funds[0].asset_type, "fund");
+  assert.equal(funds[0].score_label, "58 分");
+  assert.match(funds[0].summary, /近1月/);
+  assert.equal(bonds[0].code, "123001");
+  assert.equal(bonds[0].asset_type, "bond");
+  assert.equal(bonds[0].score_label, "+2.50%");
+  assert.match(bonds[0].summary, /价格/);
+});
+
 test("industry presentation recognizes sector names and exposes ranked user data", () => {
   const payload = presentation.mobileIndustryPayload({
     status: "ready",
