@@ -381,6 +381,7 @@ test("bond presentation does not fabricate component scores or request-time data
   assert.equal(bond.header.score_label, "待评估");
   assert.equal(bond.as_of, "数据日期 2026-08-18");
   assert.deepEqual(bond.scores, []);
+  assert.deepEqual(bond.terms[0], { label: "债券代码", value: "113009" });
   assert.doesNotMatch(bond.linkage.summary, /Cloud|cache|fallback/i);
 });
 

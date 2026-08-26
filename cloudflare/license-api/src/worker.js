@@ -3241,7 +3241,7 @@ function mobileBondPayload(bundle, request) {
     ["转股溢价率", mobilePercent(premium)],
     ["信用评级", firstText(detail.credit_rating, "--").replace(/sti$/i, "").trim()],
     ["发行规模", firstNumber(detail.issue_size, null) === null ? "--" : `${Number(firstNumber(detail.issue_size, null)).toFixed(2)} 亿`],
-  ];
+  ].map(([label, value]) => ({ label, value }));
   const advice = mobileUserText(sections.advice, "");
   const state = bundle.status === "ready" ? "ready" : "partial";
   return {
