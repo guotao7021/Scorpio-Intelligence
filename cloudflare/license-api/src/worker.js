@@ -3099,10 +3099,14 @@ function mobileFundPayload(bundle, request) {
     ["债券", firstNumber(assetAllocation.bond_ratio, null)],
     ["现金", firstNumber(assetAllocation.cash_ratio, null)],
   ].map(([label, value]) => ({ label, value: mobileUnsignedPercent(value), tone: "primary" }));
-  const holdingRows = holdings.map((item) => ({
-    name: firstText(item.name, item.stock_name, "--"),
-    pct: mobileUnsignedPercent(firstNumber(item.pct, item.weight, item.ratio, null)),
-  }));
+  const holdingRows = holdings.map((item) => {
+    const change = firstNumber(item.change_percent, item.pct_change, item.change_pct, null);
+    return {
+      name: firstText(item.name, item.stock_name, "--"),
+      pct: mobileUnsignedPercent(firstNumber(item.pct, item.weight, item.ratio, null)),
+      change: change === null ? "--" : mobilePercent(change),
+    };
+  });
   const industryRows = industry.map((item) => ({
     name: firstText(item.name, item.industry, item.sector, "--"),
     pct: mobileUnsignedPercent(firstNumber(item.pct, item.weight, item.ratio, null)),
@@ -7463,9 +7467,47 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
         risk_metrics: parseJson(performanceRow.risk_metrics_json, {}),
         returns: parseJson(performanceRow.returns_json, {}),
       });
+      const rawHoldings = parseJson(exposureRow.holdings_json, []);
+      const holdingChangeByCode = new Map();
+      const holdingCodes = rawHoldings
+        .slice(0, 10)
+        .map((item) => safeText(item && item.code ? item.code : item.stock_code, 24))
+        .filter(Boolean);
+      if (holdingCodes.length) {
+        try {
+          const candidates = [];
+          for (const holdingCode of holdingCodes) {
+            candidates.push(...assetCodeCandidates(holdingCode));
+          }
+          const quoteRows = await publishedRows(env, "stock_daily_latest", options.license, {
+            asset_codes: candidates,
+            limit: Math.max(holdingCodes.length * 3, 20),
+          });
+          for (const row of quoteRows) {
+            const rowCode = firstText(row.code, row.stock_code, row.symbol, row.ts_code);
+            const change = firstNumber(row.change_percent, row.pct_chg, row.pct_change, null);
+            if (!rowCode || change === null) continue;
+            const key = String(rowCode).toUpperCase().replace(/\.(SH|SZ|BJ)$/i, "").replace(/^(SH|SZ|BJ)/i, "");
+            if (key && !holdingChangeByCode.has(key)) {
+              holdingChangeByCode.set(key, change);
+            }
+          }
+        } catch (error) {
+          console.warn("mobile_fund_holding_quote_unavailable", {
+            code,
+            error: safeText(error && error.message ? error.message : String(error), 240),
+          });
+        }
+      }
+      const holdings = rawHoldings.map((item) => {
+        const holdingCode = safeText(item && item.code ? item.code : item.stock_code, 24);
+        const key = holdingCode.toUpperCase().replace(/\.(SH|SZ|BJ)$/i, "").replace(/^(SH|SZ|BJ)/i, "");
+        const change = key && holdingChangeByCode.has(key) ? holdingChangeByCode.get(key) : null;
+        return change === null ? item : { ...item, change_percent: change };
+      });
       const exposure = compactObject({
         ...exposureRow,
-        holdings: parseJson(exposureRow.holdings_json, []),
+        holdings,
         industry: parseJson(exposureRow.industry_json, []),
         risk_factor_tags: parseJson(exposureRow.risk_factor_tags_json, []),
         asset_allocation: {

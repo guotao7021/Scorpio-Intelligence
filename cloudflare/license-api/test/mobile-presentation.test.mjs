@@ -321,7 +321,7 @@ test("fund presentation keeps missing scores partial and uses unsigned allocatio
       performance: {},
       exposure: {
         asset_allocation: { stock_ratio: 80, bond_ratio: 15, cash_ratio: 5 },
-        holdings: [{ name: "样本持仓", pct: 9.5 }],
+        holdings: [{ name: "样本持仓", pct: 9.5, change_percent: -1.23 }],
       },
     },
   }, { code: "000001", market: "CN" });
@@ -332,6 +332,7 @@ test("fund presentation keeps missing scores partial and uses unsigned allocatio
   assert.equal(fund.as_of, "数据日期 2026-08-18");
   assert.deepEqual(fund.allocation.map((item) => item.value), ["80.00%", "15.00%", "5.00%"]);
   assert.equal(fund.holdings[0].pct, "9.50%");
+  assert.equal(fund.holdings[0].change, "-1.23%");
   assert.equal(fund.header.data_confidence, "部分");
   assert.equal(fund.header.risk_score, null);
   assert.doesNotMatch(fund.conclusion.summary, /Cloud|cache|fallback/i);
