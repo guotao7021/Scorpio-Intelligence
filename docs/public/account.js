@@ -8,6 +8,14 @@
   });
   const WINDOWS_RELEASE_EDITIONS = ["personal_pro", "personal_standard"];
   const RELEASE_EDITIONS = [...WINDOWS_RELEASE_EDITIONS, "android"];
+  const SESSION_EXPIRED_MESSAGE = "登录已过期，请重新登录。";
+  const AUTH_ERROR_CODES = [
+    "token_expired",
+    "invalid_token",
+    "authentication_required",
+    "access_token_required",
+    "user_not_found",
+  ];
 
   const state = loadAuth();
   const licenseState = loadLicenseState();
@@ -327,6 +335,13 @@
         state.current_release_errors[edition] = error;
       }
     }));
+    const sessionExpired = Object.values(state.current_release_errors || {}).some((error) => isAuthError(error));
+    if (sessionExpired) {
+      renderReleaseUnavailable("windows", "登录过期", SESSION_EXPIRED_MESSAGE);
+      renderReleaseUnavailable("android", "登录过期", SESSION_EXPIRED_MESSAGE);
+      els.releaseState.textContent = "登录过期";
+      return;
+    }
     renderSelectedWindowsRelease();
     renderAndroidRelease();
     const windowsAvailable = WINDOWS_RELEASE_EDITIONS.some((edition) => releaseAvailable(state.current_releases[edition]));
@@ -371,7 +386,7 @@
       renderRelease("windows", data);
       return;
     }
-    renderReleaseUnavailable("windows", "不可下载", userFacingReleaseError(error, edition));
+    renderReleaseUnavailable("windows", isAuthError(error) ? "登录过期" : "不可下载", userFacingReleaseError(error, edition));
   }
 
   function renderAndroidRelease() {
@@ -381,7 +396,7 @@
       renderRelease("android", data);
       return;
     }
-    renderReleaseUnavailable("android", "尚未发布", userFacingReleaseError(error, "android"));
+    renderReleaseUnavailable("android", isAuthError(error) ? "登录过期" : "尚未发布", userFacingReleaseError(error, "android"));
   }
 
   function renderRelease(target, data) {
@@ -458,6 +473,9 @@
 
   function userFacingReleaseError(error, edition = "") {
     const message = error && error.message ? error.message : "";
+    if (isAuthError(error)) {
+      return SESSION_EXPIRED_MESSAGE;
+    }
     if (message.includes("release_entitlement_required")) {
       return "当前账号没有对应版本的下载权益，请先激活或绑定授权。";
     }
@@ -499,6 +517,8 @@
         if (refreshed) {
           return downloadRelease(edition, event);
         }
+        expireSession(SESSION_EXPIRED_MESSAGE);
+        throw new Error(SESSION_EXPIRED_MESSAGE);
       }
       if (!response.ok) {
         const text = await response.text();
@@ -592,6 +612,11 @@
       if (refreshed) {
         return request(path, options);
       }
+      expireSession(SESSION_EXPIRED_MESSAGE);
+      const expiredError = new Error(SESSION_EXPIRED_MESSAGE);
+      expiredError.status = 401;
+      expiredError.authExpired = true;
+      throw expiredError;
     }
     if (!response.ok) {
       const error = new Error(data.error || data.message || `HTTP ${response.status}`);
@@ -628,6 +653,28 @@
   function requireLogin() {
     if (!state.access_token) {
       throw new Error("请先登录用户中心。");
+    }
+  }
+
+  function isAuthError(error) {
+    const message = String((error && error.message) || "");
+    return Boolean(error && error.authExpired) || AUTH_ERROR_CODES.some((code) => message.includes(code));
+  }
+
+  function expireSession(message) {
+    state.access_token = "";
+    state.refresh_token = "";
+    state.email = "";
+    state.user_id = "";
+    state.current_releases = {};
+    state.current_release_errors = {};
+    saveAuth();
+    clearLicenseState();
+    clearLicenseFields();
+    renderSession();
+    setLicenseStatus("待激活", "待激活");
+    if (message) {
+      setMessage(els.authMessage, message, "warn");
     }
   }
 
