@@ -1,0 +1,16 @@
+{
+  "available_at": "2026-09-30T20:00:00",
+  "bars": [
+    {"bar_time":"2026-09-29 09:30:00","open":10,"high":10,"low":10,"close":10,"volume":99999,"amount":999990},
+    {"bar_time":"2026-09-29 10:30:00","open":10,"high":11,"low":9,"close":10,"volume":100,"amount":1000},
+    {"bar_time":"2026-09-29 11:30:00","open":10,"high":12,"low":9,"close":12,"volume":100,"amount":1000},
+    {"bar_time":"2026-09-29 14:00:00","open":12,"high":13,"low":10,"close":11,"volume":100,"amount":1000},
+    {"bar_time":"2026-09-29 15:00:00","open":11,"high":12,"low":8,"close":9,"volume":100,"amount":1000},
+    {"bar_time":"2026-09-30 09:30:00","open":11,"high":11,"low":11,"close":11,"volume":99999,"amount":1099989},
+    {"bar_time":"2026-09-30 10:30:00","open":11,"high":12,"low":9,"close":11,"volume":200,"amount":2200},
+    {"bar_time":"2026-09-30 11:30:00","open":11,"high":12,"low":9,"close":10,"volume":200,"amount":2000},
+    {"bar_time":"2026-09-30 14:00:00","open":10,"high":15,"low":9,"close":13,"volume":200,"amount":2600},
+    {"bar_time":"2026-09-30 15:00:00","open":13,"high":14,"low":10,"close":12,"volume":200,"amount":2400}
+  ],
+  "expected_metrics": {"window_change_pct":20,"high":15,"low":8,"close_drawdown_pct":25,"rising_interval_pct":33.33333333333333,"latest_volume_ratio":1.3333333333333333}
+}

@@ -1,45 +1,23 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Feedback | Scorpio Intelligence</title>
-  <link rel="stylesheet" href="site.css?v=20260616-delivery">
+  <meta name="description" content="Scorpio Intelligence issue reports, product suggestions and support questions.">
+  <meta name="scorpio-api-base" content="https://api.scorpio-intelligence.tech/v1">
+  <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css?v=20260819-platform-downloads">
+  <link rel="stylesheet" href="account-center.css?v=20261102-authorization">
+  <link rel="stylesheet" href="feedback-center.css?v=20261102-feedback-center">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+  <script src="account-center-ui.js?v=20261102-authorization" defer></script>
+  <script src="feedback-center-ui.js?v=20261102-feedback-center" defer></script>
+  <script src="feedback.js?v=20261102-feedback-center" defer></script>
 </head>
-<body>
-  <main class="feedback-shell">
-    <div class="feedback-grid">
-      <section class="feedback-panel">
-        <div class="section-kicker">Feedback</div>
-        <h1>Tell us what happened</h1>
-        <p>Choose the route that feels easiest. GitHub Issues keeps technical reports trackable; email is best for a quick question, a product idea, or feedback without technical details.</p>
-        <div class="actions">
-          <a class="button primary" href="https://github.com/guotao7021/Scorpio-Intelligence/issues/new?template=bug_report.md">Submit a bug</a>
-          <a class="button secondary" href="https://github.com/guotao7021/Scorpio-Intelligence/issues/new?template=feature_request.md">Request an improvement</a>
-          <a class="button secondary" href="mailto:guotao7021@gmail.com?subject=Scorpio%20Intelligence%20feedback">Send a simple email</a>
-        </div>
-        <ul>
-          <li>What you tried</li>
-          <li>What you expected</li>
-          <li>What happened instead</li>
-          <li>Version or build</li>
-          <li>Environment details</li>
-          <li>Logs or screenshots, only if they are easy to share</li>
-        </ul>
-      </section>
-      <aside class="mini-card">
-        <strong>What helps most</strong>
-        <p>A short note is enough: tell us what you tried, what you expected, and what happened. You do not need logs to send a useful suggestion.</p>
-        <strong style="margin-top:18px;">Preferred flow</strong>
-        <ul>
-          <li>Open an issue from this page</li>
-          <li>Add evidence if needed</li>
-          <li>Return to the home page to keep browsing</li>
-        </ul>
-        <p style="margin-top:18px;"><a href="index-en.html">Back to home</a></p>
-      </aside>
-    </div>
-  </main>
+<body class="portal-page feedback-center">
+  <div id="feedbackDesk"></div>
+  <noscript><main><h1>Scorpio Intelligence Feedback</h1><a href="mailto:guotao7021@gmail.com">guotao7021@gmail.com</a></main></noscript>
   <script src="site-analytics.js?v=20260630-analytics" defer></script>
 </body>
 </html>

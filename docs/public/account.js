@@ -1,5 +1,5 @@
 (function () {
-  const API_BASE = "https://api.scorpio-intelligence.tech/v1";
+  const API_BASE = document.querySelector('meta[name="scorpio-api-base"]')?.content || "https://api.scorpio-intelligence.tech/v1";
   const TOKEN_KEY = "scorpio_user_auth";
   const LICENSE_KEY = "scorpio_user_license";
   const RELEASE_CHANNELS = Object.freeze({
@@ -19,6 +19,7 @@
 
   const state = loadAuth();
   const licenseState = loadLicenseState();
+  let refreshInFlight = null;
 
   const els = {
     sessionEmail: byId("sessionEmail"),
@@ -73,8 +74,17 @@
   init();
 
   function init() {
+    window.ScorpioAccountCenter?.init({request, refreshAccount: refreshAccountData, selectActivationCode});
     document.querySelectorAll("[data-auth-tab]").forEach((button) => {
       button.addEventListener("click", () => switchAuthTab(button.dataset.authTab));
+      button.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const tabs = [...document.querySelectorAll("[data-auth-tab]")];
+        const current = tabs.indexOf(button);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+        switchAuthTab(tabs[index].dataset.authTab); tabs[index].focus();
+      });
     });
     els.loginForm.addEventListener("submit", guard(onLogin, els.authMessage));
     els.registerForm.addEventListener("submit", guard(onRegister, els.authMessage));
@@ -84,7 +94,10 @@
     els.activateForm.addEventListener("submit", guard(onActivate, els.licenseMessage));
     els.statusForm.addEventListener("submit", guard(onCheckLicense, els.licenseMessage));
     els.activationCodeSelect.addEventListener("change", () => selectActivationCode(els.activationCodeSelect.value));
-    els.windowsEditionSelect.addEventListener("change", renderSelectedWindowsRelease);
+    els.windowsEditionSelect.addEventListener("change", () => {
+      renderSelectedWindowsRelease();
+      if (state.access_token) loadCurrentLicense();
+    });
     els.refreshRelease.addEventListener("click", refreshRelease);
     els.windowsDownloadLink.addEventListener("click", guard((event) => downloadRelease(selectedWindowsEdition(), event), els.authMessage));
     els.androidDownloadLink.addEventListener("click", guard((event) => downloadRelease("android", event), els.authMessage));
@@ -99,10 +112,14 @@
   function switchAuthTab(tab) {
     document.querySelectorAll("[data-auth-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.authTab === tab);
+      button.setAttribute("aria-selected", String(button.dataset.authTab === tab));
+      button.tabIndex = button.dataset.authTab === tab ? 0 : -1;
     });
     els.loginForm.classList.toggle("hidden", tab !== "login");
     els.registerForm.classList.toggle("hidden", tab !== "register");
     els.resetForm.classList.toggle("hidden", tab !== "reset");
+    const title = byId("authTitle");
+    if (title) title.textContent = window.ScorpioAccountViews.t(...({login: ["登录用户中心", "Sign in"], register: ["创建账号", "Create an account"], reset: ["重置密码", "Reset password"]}[tab] || ["登录用户中心", "Sign in"]));
     setMessage(els.authMessage, "", "");
   }
 
@@ -111,10 +128,18 @@
       if (event && typeof event.preventDefault === "function") {
         event.preventDefault();
       }
+      const form = event?.currentTarget;
+      if (form?.getAttribute("aria-busy") === "true") return;
+      const button = form?.querySelector('button[type="submit"]');
+      form?.setAttribute("aria-busy", "true");
+      if (button) button.disabled = true;
       try {
         await handler(event);
       } catch (error) {
-        setMessage(messageTarget, error.message || String(error), "error");
+        setMessage(messageTarget, window.ScorpioAccountViews?.errorText(error) || error.message || String(error), "error");
+      } finally {
+        form?.removeAttribute("aria-busy");
+        if (button) button.disabled = false;
       }
     };
   }
@@ -127,6 +152,8 @@
       body: {
         email: els.loginEmail.value.trim(),
         password: els.loginPassword.value,
+        client_edition: selectedWindowsEdition(),
+        client_version: "web-account",
       },
       auth: false,
     });
@@ -134,11 +161,12 @@
     state.refresh_token = data.refresh_token;
     state.email = data.email;
     state.user_id = data.user_id;
+    els.loginPassword.value = "";
     saveAuth();
     renderSession();
     applyActivationCodePayload(data);
     await refreshAccountData();
-    setMessage(els.authMessage, "登录成功。现在可以激活授权，或回到桌面端同步数据。", "success");
+    setMessage(els.authMessage, "登录成功。", "success");
   }
 
   async function onRegister(event) {
@@ -155,8 +183,15 @@
       auth: false,
     });
     els.loginEmail.value = els.registerEmail.value.trim();
-    switchAuthTab("login");
-    setMessage(els.authMessage, "注册成功。请使用刚才的邮箱和密码登录。", "success");
+    els.loginPassword.value = els.registerPassword.value;
+    els.registerPassword.value = "";
+    els.registerCode.value = "";
+    try { await onLogin({preventDefault() {}}); }
+    catch {
+      els.loginPassword.value = "";
+      switchAuthTab("login");
+      setMessage(els.authMessage, "注册成功，请登录以继续。", "warn");
+    }
   }
 
   async function onResetPassword(event) {
@@ -181,12 +216,24 @@
       setMessage(target, "请先填写邮箱。", "warn");
       return;
     }
+    const button = purpose === "register" ? els.sendRegisterCode : els.sendResetCode;
+    if (button.disabled) return;
+    button.disabled = true;
     setMessage(target, "正在发送验证码...", "loading");
-    const data = await request("/auth/send-code", {
+    let data;
+    try { data = await request("/auth/send-code", {
       method: "POST",
       body: { email: email.trim(), purpose },
       auth: false,
-    });
+    }); } catch (error) { button.disabled = false; throw error; }
+    let seconds = 60;
+    const tick = () => { button.textContent = window.ScorpioAccountViews.t(`${seconds} 秒后重发`, `Resend in ${seconds}s`); };
+    tick();
+    const timer = setInterval(() => {
+      --seconds;
+      if (seconds <= 0) { clearInterval(timer); button.disabled = false; button.textContent = window.ScorpioAccountViews.t("发送验证码", "Send code"); }
+      else tick();
+    }, 1000);
     const debug = data.debug_code ? ` 调试码：${data.debug_code}` : "";
     setMessage(target, `验证码已发送，请查看邮箱。${debug}`, "success");
   }
@@ -216,12 +263,13 @@
       license_id: data.license_id || "",
       edition: data.edition || "",
       expires_at: data.expires_at || "",
-      valid: true,
+      valid: data.status !== "pending_approval" && Boolean(data.license_file?.signature),
       updated_at: new Date().toISOString(),
     });
     renderLicenseState();
     await loadCurrentLicense();
     await refreshRelease();
+    await window.ScorpioAccountCenter?.refresh();
     setMessage(
       els.licenseMessage,
       data.idempotent
@@ -428,6 +476,7 @@
   async function refreshAccountData() {
     await refreshSavedLicenseStatus();
     await refreshRelease();
+    await window.ScorpioAccountCenter?.refresh();
   }
 
   async function ensureCurrentLicenseLoaded() {
@@ -486,7 +535,7 @@
     return message || "发行信息读取失败。";
   }
 
-  async function downloadRelease(edition, event) {
+  async function downloadRelease(edition, event, retried = false) {
     if (event && typeof event.preventDefault === "function") {
       event.preventDefault();
     }
@@ -512,10 +561,10 @@
           authorization: `Bearer ${state.access_token}`,
         },
       });
-      if (response.status === 401 && state.refresh_token) {
+      if (response.status === 401 && state.refresh_token && !retried) {
         const refreshed = await refreshToken();
         if (refreshed) {
-          return downloadRelease(edition, event);
+          return downloadRelease(edition, event, true);
         }
         expireSession(SESSION_EXPIRED_MESSAGE);
         throw new Error(SESSION_EXPIRED_MESSAGE);
@@ -594,7 +643,7 @@
     return `${API_BASE}${normalizedPath}`;
   }
 
-  async function request(path, options) {
+  async function request(path, options = {}) {
     const headers = { "content-type": "application/json" };
     if (options.auth) {
       requireLogin();
@@ -606,11 +655,12 @@
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
     const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
-    if (response.status === 401 && options.auth && state.refresh_token) {
+    let data = {}, invalidResponse = false;
+    try { data = text ? JSON.parse(text) : {}; } catch { invalidResponse = true; }
+    if (response.status === 401 && options.auth && state.refresh_token && !options.retried) {
       const refreshed = await refreshToken();
       if (refreshed) {
-        return request(path, options);
+        return request(path, {...options, retried: true});
       }
       expireSession(SESSION_EXPIRED_MESSAGE);
       const expiredError = new Error(SESSION_EXPIRED_MESSAGE);
@@ -618,24 +668,40 @@
       expiredError.authExpired = true;
       throw expiredError;
     }
+    if (response.status === 401 && options.auth) {
+      expireSession(SESSION_EXPIRED_MESSAGE);
+      const error = new Error(SESSION_EXPIRED_MESSAGE);
+      error.status = 401; error.authExpired = true;
+      throw error;
+    }
     if (!response.ok) {
       const error = new Error(data.error || data.message || `HTTP ${response.status}`);
       error.status = response.status;
       error.data = data;
       throw error;
     }
+    if (invalidResponse) {
+      const error = new Error("service_response_invalid"); error.status = 502; throw error;
+    }
     return data;
   }
 
   async function refreshToken() {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = performTokenRefresh();
+    try { return await refreshInFlight; } finally { refreshInFlight = null; }
+  }
+
+  async function performTokenRefresh() {
+    const token = state.refresh_token;
     try {
       const response = await fetch(`${API_BASE}/auth/refresh`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ refresh_token: state.refresh_token }),
+        body: JSON.stringify({ refresh_token: token }),
       });
       const data = await response.json();
-      if (!response.ok) {
+      if (!response.ok || !token || state.refresh_token !== token) {
         return false;
       }
       state.access_token = data.access_token;
@@ -688,6 +754,7 @@
     els.nextStepText.textContent = loggedIn ? "激活或检查授权" : "登录后激活授权";
     els.syncState.textContent = loggedIn ? "等待授权" : "等待登录";
     els.logoutButton.disabled = !loggedIn;
+    window.ScorpioAccountCenter?.sessionChanged(loggedIn, state.email || "");
     renderLicenseState();
   }
 
@@ -749,12 +816,32 @@
 
   function activationCodeStatus(item) {
     if (item.license_revoked || item.status === "revoked") return "已撤销";
+    if (item.expires_at && item.expires_at.slice(0, 10) < new Date().toISOString().slice(0, 10)) return "已到期";
     if (item.approval_status === "pending") return "待审核";
     if (item.approval_status === "rejected") return "已拒绝";
     if (item.license_active) return "授权有效";
     if (item.status === "assigned" || item.status === "active") return "待激活";
     if (item.status === "used") return "已使用";
     return item.status || "状态未知";
+  }
+
+  function preferredActivationCode(items) {
+    const codes = Array.isArray(items) ? items : [];
+    const edition = selectedWindowsEdition();
+    const usable = codes.filter((item) =>
+      !item.license_revoked && !["revoked", "expired", "suspended"].includes(item.status)
+    );
+    return usable.find((item) => item.edition === edition && item.license_active)
+      || usable.find((item) => item.edition === edition && ["active", "assigned"].includes(item.status))
+      || usable.find((item) => item.edition === edition)
+      || usable.find((item) => item.license_active)
+      || usable[0]
+      || codes[0]
+      || null;
+  }
+
+  function activationCodeMatchesSelectedEdition(item) {
+    return Boolean(item && item.edition === selectedWindowsEdition());
   }
 
   function renderActivationCodePicker() {
@@ -767,9 +854,11 @@
     const codes = belongsToCurrentUser && Array.isArray(licenseState.activation_codes)
       ? licenseState.activation_codes
       : [];
-    const selectedCode = codes.some((item) => item.code === licenseState.activation_code)
-      ? licenseState.activation_code
-      : (codes[0] && codes[0].code) || "";
+    const preferred = preferredActivationCode(codes);
+    const previous = codes.find((item) => item.code === licenseState.activation_code);
+    const selectedCode = activationCodeMatchesSelectedEdition(previous)
+      ? previous.code
+      : (preferred && preferred.code) || "";
     els.activationCodeSelect.replaceChildren();
 
     if (!codes.length) {
@@ -792,7 +881,7 @@
     });
     els.activationCodeSelect.disabled = false;
     els.activationCodeSelect.value = selectedCode;
-    const selected = codes.find((item) => item.code === selectedCode) || codes[0];
+    const selected = codes.find((item) => item.code === selectedCode) || preferred || codes[0];
     const expiresText = selected.expires_at ? ` · 有效期至 ${selected.expires_at}` : "";
     const deviceText = selected.machine_fingerprint ? " · 已绑定设备" : " · 未绑定设备";
     els.activationCodeMeta.textContent = `${releaseEditionLabel(selected.edition)} · ${activationCodeStatus(selected)}${expiresText}${deviceText}`;
@@ -826,10 +915,15 @@
       return false;
     }
     const payloadCode = String(data.activation_code || data.trial_activation_code || "").trim();
-    const selectedCode = activationCodes.some((item) => item.code === licenseState.activation_code)
-      ? licenseState.activation_code
-      : (activationCodes.some((item) => item.code === payloadCode) ? payloadCode : activationCodes[0].code);
-    const selected = activationCodes.find((item) => item.code === selectedCode) || activationCodes[0];
+    const preferred = preferredActivationCode(activationCodes);
+    const previous = activationCodes.find((item) => item.code === licenseState.activation_code);
+    const payloadSelection = activationCodes.find((item) => item.code === payloadCode);
+    const selectedCode = activationCodeMatchesSelectedEdition(previous)
+      ? previous.code
+      : (activationCodeMatchesSelectedEdition(payloadSelection)
+        ? payloadSelection.code
+        : (preferred && preferred.code) || activationCodes[0].code);
+    const selected = activationCodes.find((item) => item.code === selectedCode) || preferred || activationCodes[0];
     saveLicenseState({
       ...licenseState,
       email: state.email,
@@ -921,7 +1015,7 @@
 
   async function loadCurrentLicense() {
     try {
-      const data = await request("/license/current", {
+      const data = await request(`/license/current?edition=${encodeURIComponent(selectedWindowsEdition())}`, {
         method: "GET",
         auth: true,
       });
@@ -998,7 +1092,13 @@
 
   function setMessage(el, text, type) {
     el.textContent = text;
+    el.setAttribute("role", type === "error" ? "alert" : "status");
     el.className = `account-message ${type || ""}`.trim();
+    const notice = byId("portalNotice");
+    if (notice && state.access_token && text) {
+      notice.textContent = window.scorpioTranslate ? window.scorpioTranslate(text) : text;
+      notice.className = `portal-notice ${type || ""}`;
+    }
   }
 
   function setDownloadProgress({ visible, percent, text, meta }) {

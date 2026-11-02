@@ -2,6 +2,38 @@
 
 本文用于维护 Scorpio Intelligence 商业版安装包的上传、登记和下载链路。
 
+## 账户中心与反馈升级的部署前检查
+
+2026-11-02 的只读核对结果：Cloudflare Pages 生产版本仍为 `9670428`；
+Worker 最新版本为 `0ff9bb86-be88-4ba1-818d-f12f5153f370`。新账户接口
+`GET /v1/account/overview` 在线返回 404，生产库尚无账户操作、授权历史和
+续期申请三张表。`wrangler d1 migrations list --remote` 确认仅待执行
+`0031_account_center.sql`。此次检查没有执行远程迁移或发布。
+
+本地新版已经包含用户授权工作台、用户中心、续期审批和中英文反馈表单，
+但仅提交静态页面无法完成升级。正式发布需经确认后按顺序执行：
+
+1. 再次核对两个工作区及远程版本，避免覆盖部署期间出现的新云端模块。
+2. 确认远程待迁移列表仍只有审核过的 `0031_account_center.sql`，再执行迁移。
+3. 发布通过测试和 `wrangler deploy --dry-run` 的合并版 Worker，保留现有
+   D1/R2 绑定、签名密钥和生产 secret。不要使用旧版网站 Worker 覆盖新模块。
+4. 核对 API 的 CORS 包含官网、Pages 域名及 `https://guotao7021.github.io`。
+   旧线上配置返回了不匹配的 GitHub Pages Origin；本地配置已补齐。
+5. 从 `docs/public` 发布完整静态目录，包括新增的 CSS/JS。GitHub Actions
+   的 `pages.yml` 会原样复制此目录，不需要前端构建命令。
+6. 在官网和 GitHub Pages 分别检查样式资源、登录、授权、续期回执及反馈。
+   国际用户须验证真实 Turnstile 控件，大陆用户须验证真实邮件验证码；
+   实际收信和真实客户端安装包下载不能由本地假数据验收替代。
+
+反馈接口已移除重复的 Turnstile 校验：大陆路径只消费反馈邮箱验证码，
+国际路径只调用一次 Siteverify，均保留原来的服务端验证和限流。
+Turnstile 令牌只能校验一次，参见
+[Cloudflare 服务端校验文档](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)。
+
+本地预览 `node scripts/preview-account-center.mjs --port 4173` 使用内存数据库、
+假账号和假验证码，不会发送真实邮件。预览服务关闭访问统计并限制浏览器
+API 请求到本机；反馈预览固定模拟大陆邮箱验证，不绕过生产验证逻辑。
+
 ## 交付链路
 
 - 安装包文件存放在 Cloudflare R2：`scorpio-releases`。

@@ -1,0 +1,13 @@
+[
+  {"name":"formal_over_summary","input":{"summary":{"score":80},"sections":{"regime":{"market_score":23,"effective_trade_date":"2026-09-11","score_status":"ready"}}},"value":23,"date":"2026-09-11","status":"ready","conflict":true},
+  {"name":"formal_null_no_summary_fallback","input":{"summary":{"score":80},"sections":{"regime":{"market_score":null}},"as_of":"2026-09-12"},"value":null,"date":null,"status":"missing","conflict":false},
+  {"name":"legacy_zero","input":{"market_score":0,"trade_date":"20260911"},"value":0,"date":"2026-09-11","status":"ready","conflict":false},
+  {"name":"missing_not_refresh_date","input":{"as_of":"2026-09-12","summary":{"brief":"score=80"}},"value":null,"date":null,"status":"missing","conflict":false},
+  {"name":"sentiment_not_market","input":{"sections":{"regime":{"market_score":66,"score_source":"market_sentiment_daily"}}},"value":null,"date":null,"status":"missing","conflict":false},
+  {"name":"blocked_preserves_actual_date","input":{"market_score":23,"effective_trade_date":"2026-09-10","score_input_quality":{"expected_trade_date":"2026-09-11","blockers":["missing_input"]}},"value":23,"date":"2026-09-10","status":"blocked","conflict":false},
+  {"name":"expected_is_not_observed_date","input":{"market_score":23,"score_input_quality":{"expected_trade_date":"2026-09-11"}},"value":23,"date":null,"status":"ready","conflict":false},
+  {"name":"legacy_summary_only","input":{"summary":{"score":60},"as_of":"2026-09-12"},"value":60,"date":null,"status":"ready","conflict":false},
+  {"name":"invalid_number","input":{"market_score":"NaN","trade_date":"2026-02-30"},"value":null,"date":null,"status":"missing","conflict":false},
+  {"name":"boolean_not_zero","input":{"market_score":false},"value":null,"date":null,"status":"missing","conflict":false},
+  {"name":"out_of_range","input":{"market_score":101},"value":null,"date":null,"status":"missing","conflict":false}
+]

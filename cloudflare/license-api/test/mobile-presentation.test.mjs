@@ -121,12 +121,18 @@ test("mobile bootstrap turns raw market diagnostics into customer copy", () => {
   });
 
   assert.equal(payload.home.market_state, "市场处于启动阶段");
-  assert.match(payload.home.market_detail, /市场活跃度 55 分/);
+  assert.match(payload.home.market_detail, /正式市场评分 55 分/);
   assert.match(payload.home.market_detail, /资金整体偏流出/);
   assert.equal(payload.home.freshness, "数据日期待更新");
   assert.equal(payload.home.data_date, "");
   assert.equal(payload.license.edition_label, "个人专业版");
   assert.equal(payload.portfolio.risk_state, "empty");
+  assert.deepEqual(payload.portfolio.monitoring, {
+    schema_version: "monitoring-view.v1", scope: "cloud_portfolio", state: "view_only",
+    data_date: payload.portfolio.data_date, observed_at: null,
+    reason: "当前页面是云端组合分析；桌面账户事件、绑定状态与回执请在监测通知单独核对。",
+    receipt_available: false,
+  });
   assert.equal(payload.portfolio.cloud_status, "尚未同步组合持仓");
   assert.equal(payload.briefing.headline, "尚未同步组合持仓");
   assert.equal(payload.briefing.events.some((item) => item.title === "组合风险复核"), false);
@@ -196,7 +202,7 @@ test("market center presents breadth, capital, and sector rotation together", ()
   assert.equal(market.breadth.up_ratio, "64.0%");
   assert.equal(market.breadth.total_amount, "1.80 万亿元");
   assert.equal(market.capital.main_net, "-129.88 亿元");
-  assert.equal(market.freshness, "数据日期 2026-08-18");
+  assert.equal(market.freshness, "评分业务日 2026-08-18");
   assert.deepEqual(market.sectors.map((item) => item.name), ["半导体", "消费电子"]);
   assert.deepEqual(market.indices.map((item) => item.name), ["上证指数", "深证成指"]);
   assert.equal(market.leaders[0].name, "半导体");
@@ -205,6 +211,9 @@ test("market center presents breadth, capital, and sector rotation together", ()
   assert.equal(market.inflows[0].name, "半导体");
   assert.equal(market.outflows[0].name, "煤炭");
   assert.equal(market.industry_overview.mood, "多空均衡");
+  assert.equal(market.industry_overview.conclusion, "行业分化偏强，资金净流入");
+  assert.equal(market.industry_overview.confidence_score, 77);
+  assert.equal(market.industry_overview.confidence_label, "中");
   assert.equal(market.industry_overview.total_net, "+304.18 亿元");
   assert.equal(market.capital.inflow_count, 1);
   assert.equal(market.capital.outflow_count, 1);
@@ -319,6 +328,10 @@ test("fund presentation keeps missing scores partial and uses unsigned allocatio
     sections: {
       profile: { fund_code: "000001", fund_name: "测试基金" },
       performance: {},
+      nav: [
+        { nav_date: "2026-08-17", nav: 1.2100, acc_nav: 2.3100, daily_return_pct: -0.20 },
+        { nav_date: "2026-08-18", nav: 1.2300, acc_nav: 2.3300, daily_return_pct: 1.65 },
+      ],
       exposure: {
         asset_allocation: { stock_ratio: 80, bond_ratio: 15, cash_ratio: 5 },
         holdings: [{ name: "样本持仓", pct: 9.5, change_percent: -1.23 }],
@@ -335,6 +348,12 @@ test("fund presentation keeps missing scores partial and uses unsigned allocatio
   assert.equal(fund.holdings[0].change, "-1.23%");
   assert.equal(fund.header.data_confidence, "部分");
   assert.equal(fund.header.risk_score, null);
+  assert.deepEqual(fund.nav_history, [
+    { date: "2026-08-17", nav: 1.21, accumulated_nav: 2.31, daily_return: -0.2 },
+    { date: "2026-08-18", nav: 1.23, accumulated_nav: 2.33, daily_return: 1.65 },
+  ]);
+  assert.deepEqual(fund.returns, []);
+  assert.deepEqual(fund.risk, []);
   assert.doesNotMatch(fund.conclusion.summary, /Cloud|cache|fallback/i);
 });
 
@@ -384,6 +403,103 @@ test("bond presentation does not fabricate component scores or request-time data
   assert.deepEqual(bond.scores, []);
   assert.deepEqual(bond.terms[0], { label: "债券代码", value: "113009" });
   assert.doesNotMatch(bond.linkage.summary, /Cloud|cache|fallback/i);
+});
+
+test("bond presentation exposes published score components and normalizes available terms", () => {
+  const bond = presentation.mobileBondPayload({
+    status: "ready",
+    data_quality: { freshness: "2026-10-22", missing: [] },
+    summary: { score: 71.1, rating: "watch" },
+    sections: {
+      detail: {
+        bond_code: "113046",
+        bond_name: "测试转债",
+        underlying_code: "600016",
+        underlying_name: "民生银行",
+        bond_price: 118.2,
+        premium_rate: 12.5,
+        convert_value: 105.1,
+        credit_rating: "AAA",
+        issue_size: 429018000,
+        remain_size: 20.5,
+        list_date: "2021-05-10",
+        maturity_date: "2027-04-08",
+        conversion_start_date: "2021-10-15",
+        conversion_end_date: "2027-04-07",
+      },
+      scores: { price: 76.5, premium: 71.1, rating: 85, convert_value: 53.7, total_score: 71.1 },
+    },
+  }, { code: "113046", market: "CN" });
+
+  assert.equal(bond.snapshot.find((item) => item.label === "发行规模").value, "4.29 亿元");
+  assert.equal(bond.snapshot.find((item) => item.label === "剩余规模").value, "20.50 亿元");
+  assert.equal(bond.scores.length, 4);
+  assert.deepEqual(bond.scores.map((item) => item.value), [76.5, 71.1, 85, 53.7]);
+  assert.deepEqual(bond.terms.find((item) => item.label === "正股"), { label: "正股", value: "民生银行 (600016)" });
+  assert.deepEqual(bond.terms.find((item) => item.label === "到期日期"), { label: "到期日期", value: "2027-04-08" });
+  assert.deepEqual(bond.terms.find((item) => item.label === "转股期"), { label: "转股期", value: "2021-10-15 至 2027-04-07" });
+});
+
+test("asset fallback joins public score details with fund NAV and bond terms", async () => {
+  const tables = {
+    fund_profiles: [{ fund_code: "000001", fund_name: "测试基金" }],
+    fund_nav_daily: [
+      { fund_code: "000001", nav_date: "2026-10-22", nav: 1.23, acc_nav: 2.33, daily_return_pct: 1.1 },
+      { fund_code: "000001", nav_date: "2026-10-21", nav: 1.21, acc_nav: 2.31, daily_return_pct: -0.2 },
+    ],
+    fund_performance_snapshots: [{ fund_code: "000001", snapshot_date: "2026-10-22", score: 61 }],
+    fund_exposure_profiles: [{ fund_code: "000001", profile_date: "2026-10-22" }],
+    bond_profiles: [{
+      bond_code: "113046", bond_name: "测试转债", underlying_code: "600016", underlying_name: "民生银行",
+      issue_size: 429018000, remain_size: 20.5, maturity_date: "2027-04-08",
+    }],
+    bond_daily_snapshot: [{ bond_code: "113046", trade_date: "2026-10-22", price: 118.2, premium_rate: 12.5 }],
+    score_history: [
+      { code: "000001", asset_type: "fund", score_date: "2026-10-22", total_score: 84, public_details: JSON.stringify({ rating: "positive", research_summary: "基金结论" }) },
+      { code: "113046", asset_type: "bond", score_date: "2026-10-22", total_score: 71.1, public_details: JSON.stringify({ rating: "watch", scores: { price: 76.5, premium: 71.1, rating: 85, convert_value: 53.7 } }) },
+    ],
+  };
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind(...params) {
+            const table = params[0];
+            const requestedCodes = new Set(params.map((value) => String(value).replace(/^(SH|SZ|BJ)/, "").replace(/\.(SH|SZ|BJ)$/, "")));
+            const rows = (tables[table] || []).filter((row) => requestedCodes.has(String(row.code || row.fund_code || row.bond_code)));
+            return {
+              all: async () => ({
+                results: rows.map((row, index) => ({
+                  table_name: table,
+                  row_key: `${table}-${index}`,
+                  row_hash: `hash-${index}`,
+                  row_json: JSON.stringify(row),
+                  data_date: row.score_date || row.nav_date || row.trade_date || "2026-10-22",
+                  edition_scope: "standard_pro",
+                  module: "target_research",
+                  batch_id: "batch",
+                  updated_at: "2026-10-22T18:00:00Z",
+                })),
+              }),
+            };
+          },
+        };
+      },
+    },
+  };
+  const options = { feature: "asset", license: { edition: "personal_pro" }, user: { id: 1 }, endpoint: "/test" };
+  const fundBundle = await presentation.analysisFallbackAssetBundle(env, { code: "000001", market: "CN" }, { ...options, assetType: "fund" });
+  const bondBundle = await presentation.analysisFallbackAssetBundle(env, { code: "113046", market: "CN" }, { ...options, assetType: "bond" });
+
+  assert.equal(fundBundle.summary.score, 84);
+  assert.equal(fundBundle.sections.performance.score, 84);
+  assert.equal(fundBundle.sections.performance.research_summary, "基金结论");
+  assert.deepEqual(fundBundle.sections.nav.map((row) => row.nav), [1.21, 1.23]);
+  assert.deepEqual(fundBundle.sections.exposure.asset_allocation, {});
+  assert.equal(bondBundle.sections.detail.stock_code, "600016");
+  assert.equal(bondBundle.sections.detail.stock_name, "民生银行");
+  assert.equal(bondBundle.sections.scores.rating, 85);
+  assert.equal(bondBundle.sections.scores.rating_label, "watch");
 });
 
 test("configured test account has unlimited mobile deep analysis", () => {
@@ -448,10 +564,10 @@ test("mobile bootstrap hides cache implementation copy from customers", () => {
     positions: [],
   });
 
-  assert.equal(payload.home.market_state, "市场以震荡观察为主");
+  assert.equal(payload.home.market_state, "市场阶段待评估");
   assert.equal(payload.home.market_detail, "市场状态正在更新，当前资金方向仍待确认。");
-  assert.equal(payload.home.data_date, "2026-08-17");
-  assert.equal(payload.briefing.data_date, "2026-08-17");
+  assert.equal(payload.home.data_date, "");
+  assert.equal(payload.briefing.data_date, "");
   assert.doesNotMatch(JSON.stringify(payload.home), /云端|缓存|上下文/);
 });
 

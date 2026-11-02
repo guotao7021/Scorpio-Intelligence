@@ -1,55 +1,62 @@
 param(
     [string]$MirrorPath = 'D:\dev\stock\cloudflare\license-api',
-    [switch]$Apply
+    [switch]$Apply,
+    [string]$ExpectedMirrorFingerprint
 )
 
 $ErrorActionPreference = 'Stop'
-$sourceRoot = Split-Path -Parent $PSScriptRoot
-$mirrorRoot = [System.IO.Path]::GetFullPath($MirrorPath)
-$files = @(
-    'src\worker.js',
-    'test\mobile-presentation.test.mjs',
-    'test\admin-overview.test.mjs',
-    'package.json',
-    'wrangler.toml'
-)
-
+$sourceRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$mirrorRoot = [IO.Path]::GetFullPath($MirrorPath)
 if (-not (Test-Path -LiteralPath $mirrorRoot -PathType Container)) {
     throw "Worker mirror directory does not exist: $mirrorRoot"
 }
+if ($sourceRoot -eq $mirrorRoot) { throw 'Source and mirror must be different directories.' }
+
+function Get-SourceFiles([string]$Root) {
+    $result = @('package.json', 'wrangler.toml')
+    foreach ($folder in @('src', 'test', 'migrations')) {
+        $directory = Join-Path $Root $folder
+        if (Test-Path -LiteralPath $directory) {
+            $result += Get-ChildItem -LiteralPath $directory -Recurse -File |
+                ForEach-Object { $_.FullName.Substring($Root.Length + 1) }
+        }
+    }
+    return @($result | Sort-Object -Unique)
+}
+
+$mirrorFiles = Get-SourceFiles $mirrorRoot
+$inventory = @($mirrorFiles | ForEach-Object {
+    $path = Join-Path $mirrorRoot $_
+    if (Test-Path -LiteralPath $path -PathType Leaf) { "$_ $((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)" }
+})
+$hasher = [Security.Cryptography.SHA256]::Create()
+try { $fingerprint = [Convert]::ToHexString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes(($inventory -join "`n")))) }
+finally { $hasher.Dispose() }
+Write-Output "Mirror fingerprint: $fingerprint"
+
+$sourceFiles = Get-SourceFiles $sourceRoot
+$mirrorOnlyModules = @($mirrorFiles | Where-Object { $_ -like 'src\*' -and $_ -notin $sourceFiles })
+if ($mirrorOnlyModules.Count) {
+    throw "The mirror contains modules absent from this checkout. Reconcile them first: $($mirrorOnlyModules -join ', ')"
+}
+if ($Apply -and $ExpectedMirrorFingerprint -ne $fingerprint) {
+    throw 'Refusing to overwrite an unreviewed or changed mirror. Review dry-run differences, then provide -ExpectedMirrorFingerprint with its exact fingerprint.'
+}
 
 $differences = @()
-foreach ($relativePath in $files) {
-    $sourceFile = Join-Path $sourceRoot $relativePath
-    $mirrorFile = Join-Path $mirrorRoot $relativePath
-    if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
-        throw "Canonical Worker file is missing: $sourceFile"
-    }
-    $same = (Test-Path -LiteralPath $mirrorFile -PathType Leaf) -and
-        ((Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $mirrorFile -Algorithm SHA256).Hash)
-    if ($same) {
-        Write-Output "OK   $relativePath"
-        continue
-    }
+foreach ($relativePath in $sourceFiles) {
+    $from = [IO.Path]::GetFullPath((Join-Path $sourceRoot $relativePath))
+    $to = [IO.Path]::GetFullPath((Join-Path $mirrorRoot $relativePath))
+    if (-not $to.StartsWith($mirrorRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Mirror path escaped its root.' }
+    if (-not (Test-Path -LiteralPath $from -PathType Leaf)) { throw "Missing source: $relativePath" }
+    $same = (Test-Path -LiteralPath $to -PathType Leaf) -and
+        ((Get-FileHash -LiteralPath $from).Hash -eq (Get-FileHash -LiteralPath $to).Hash)
+    if ($same) { continue }
     $differences += $relativePath
     if ($Apply) {
-        $parent = Split-Path -Parent $mirrorFile
-        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-            New-Item -ItemType Directory -Path $parent -Force | Out-Null
-        }
-        Copy-Item -LiteralPath $sourceFile -Destination $mirrorFile -Force
+        New-Item -ItemType Directory -Path (Split-Path -Parent $to) -Force | Out-Null
+        Copy-Item -LiteralPath $from -Destination $to -Force
         Write-Output "SYNC $relativePath"
-    } else {
-        Write-Output "DIFF $relativePath"
-    }
+    } else { Write-Output "DIFF $relativePath" }
 }
-
-if ($differences.Count -and -not $Apply) {
-    throw "Consumer Worker mirror is out of sync. Re-run with -Apply after reviewing the canonical website changes."
-}
-
-if ($Apply) {
-    Write-Output "Synchronized $($differences.Count) consumer Worker file(s) from the website source."
-} else {
-    Write-Output 'Consumer Worker mirror is synchronized.'
-}
+Write-Output "$($differences.Count) differing file(s). No files are deleted; database migrations and deployment are never executed."

@@ -76,15 +76,15 @@ async function buildRelease(edition, platform, file, releaseNotes) {
 async function ensureReleaseIsNew(release) {
   if (allowReplace) return;
   const sql = `SELECT id FROM release_versions WHERE version = ${sqlText(version)} AND channel = ${sqlText(channel)} AND edition = ${sqlText(release.edition)} AND platform = ${sqlText(release.platform)} LIMIT 1;`;
-  const result = run("npx.cmd", ["wrangler", "d1", "execute", "scorpio-license-db", "--remote", "--command", sql], { capture: true });
+  const result = runWrangler(["d1", "execute", "scorpio-license-db", "--remote", "--command", sql], { capture: true });
   if (/"id"\s*:\s*\d+/.test(result.stdout || "")) {
     throw new Error(`Release ${version}/${channel}/${release.edition} already exists. Use a new version or pass --allow-replace deliberately.`);
   }
 }
 
 function uploadR2(release) {
-  run("npx.cmd", [
-    "wrangler", "r2", "object", "put", `${r2Bucket}/${release.r2Key}`,
+  runWrangler([
+    "r2", "object", "put", `${r2Bucket}/${release.r2Key}`,
     "--file", release.file,
     "--content-type", release.contentType,
     "--remote",
@@ -129,7 +129,11 @@ function registerRelease(release) {
 VALUES (${sqlText(version)}, ${sqlText(channel)}, ${sqlText(release.edition)}, ${sqlText(release.platform)}, ${sqlText(release.releaseNotes)}, '', ${sqlText(release.hkDownloadUrl)}, ${sqlText(release.r2Key)}, ${sqlText(release.fileName)}, ${sqlText(release.contentType)}, ${sqlText(release.sha256)}, ${release.fileSizeBytes}, 0, 1, ${sqlText(releasedAt)}, ${sqlText(new Date().toISOString())})
 ON CONFLICT(version, channel, edition, platform) DO UPDATE SET
 release_notes = excluded.release_notes, hk_download_url = excluded.hk_download_url, r2_key = excluded.r2_key, file_name = excluded.file_name, content_type = excluded.content_type, file_hash_sha256 = excluded.file_hash_sha256, file_size_bytes = excluded.file_size_bytes, is_active = excluded.is_active, released_at = excluded.released_at, uploaded_at = excluded.uploaded_at;`;
-  run("npx.cmd", ["wrangler", "d1", "execute", "scorpio-license-db", "--remote", "--command", sql]);
+  runWrangler(["d1", "execute", "scorpio-license-db", "--remote", "--command", sql]);
+}
+
+function runWrangler(commandArgs, options = {}) {
+  return run(process.execPath, ["node_modules/wrangler/bin/wrangler.js", ...commandArgs], options);
 }
 
 function run(command, commandArgs, options = {}) {
@@ -141,7 +145,7 @@ function run(command, commandArgs, options = {}) {
     env: process.env,
     encoding: "utf8",
     stdio: options.capture ? "pipe" : "inherit",
-    shell: process.platform === "win32",
+    shell: false,
   });
   if (result.status !== 0) {
     throw new Error(`${command} failed with exit code ${result.status ?? "unknown"}`);

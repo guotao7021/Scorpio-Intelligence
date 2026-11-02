@@ -14,4 +14,8 @@ test("public beta versions compare in numeric order without downgrade prompts", 
   assert.equal(release.versionGreater("0.3.0-beta.4", "0.3.0-beta.5"), false);
   assert.equal(release.versionGreater("0.3.0-beta.5", "0.3.0-beta.5"), false);
   assert.equal(release.versionGreater("0.3.1", "0.3.0-beta.9"), true);
+  assert.equal(release.versionGreater("0.3.0-beta.20", "0.3.0-beta.19"), true);
+  assert.equal(release.versionGreater("0.3.0-beta.20", "0.3.0-beta.20"), false);
+  assert.equal(release.versionGreater("0.3.0-beta.23", "0.3.0-beta.22"), true);
+  assert.equal(release.versionGreater("0.3.0-beta.22", "0.3.0-beta.23"), false);
 });

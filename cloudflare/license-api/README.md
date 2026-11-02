@@ -68,6 +68,86 @@ login identity; a `customer` is an operator-managed delivery/accounting record
 that can be linked to activation codes and, when an email matches, to a website
 account.
 
+## Account Authorization Center
+
+The registered-user workflow is independent of the customer ledger. An existing
+website account can receive a grant without creating a customer or collecting a
+machine fingerprint first. The administration page defaults to the authorization
+workbench; legacy customer and bulk-delivery tools remain available separately.
+
+- `GET /v1/account/overview`: effective license states, grants, devices, requests
+  and change history for the signed-in user. Signed payloads are not included.
+- `POST /v1/account/redeem`: link an available code to its eligible owner.
+- `POST /v1/account/requests`: request a renewal without extending the license.
+- `GET /v1/scorpio_v1_admin/authorizations`: paginated account entitlements,
+  grouped by grant rather than by machine, with search and status counts.
+- `GET /v1/scorpio_v1_admin/users` and `/users/detail?user_id=...`: registered
+  users, including those without a customer ledger entry or activated license.
+- `POST /v1/scorpio_v1_admin/users/grant`: assign Standard or Pro, term and
+  device allowance to a registered account.
+- `POST /v1/scorpio_v1_admin/users/code-action`: edit, pause, resume, revoke or
+  restore an unactivated grant. Activated grants must use license actions.
+- `POST /v1/scorpio_v1_admin/users/license-action`: extend, revoke, restore or
+  explicitly approve a pending license. Actions affect credentials in the same
+  account grant, preserving their IDs and machine fingerprints.
+- `GET /v1/scorpio_v1_admin/users/license-file`: authenticated admin download
+  scoped to an explicit user and active license.
+- `GET /v1/scorpio_v1_admin/account-requests` and
+  `POST /v1/scorpio_v1_admin/account-requests/resolve`: renewal review.
+- `POST /v1/scorpio_v1_admin/users/device-action`: release one mobile binding.
+  This is not a permanent device ban; a device may authorize again on sign-in.
+
+New mutations require a unique `request_id` and administrative mutations require
+a reason. Transactional receipts prevent retries from extending twice. Reasons
+and before/after states are retained in `account_license_events`. A request may
+be pending only once per grant even when multiple desktop credentials exist.
+
+License terms start on first activation. Additional devices inherit the grant's
+expiry, including extensions. Android companion bindings do not consume Windows
+device slots. Revoking a grant also disables its remaining activation slots;
+restoration does not extend the original expiry. Already downloaded offline
+credentials can remain usable until their next online validation, subject to
+the existing desktop offline policy.
+
+Apply `migrations/0031_account_center.sql` before deploying this API or the new
+UI. Registration and automatic trial-code creation now share a transaction.
+Keep the deployed Ed25519 signing key compatible with existing client packages.
+
+The website Worker baseline includes the 20 newer serving modules from
+`D:\dev\stock`; do not deploy an older website Worker over those routes. Source,
+migrations and tests were merged without deleting website-only files. The sync
+script defaults to a dry run, and a write requires both `-Apply` and the exact
+`-ExpectedMirrorFingerprint` printed by that dry run. Do not apply the merged
+historical migrations blindly to production: compare the remote migration ledger
+and schema first. Source synchronization never authorizes a cloud deployment.
+
+### Isolated Preview And Validation
+
+From the repository root, with API dependencies installed:
+
+```powershell
+node scripts/preview-account-center.mjs --port 4173
+```
+
+- User center: `http://127.0.0.1:4173/account.html`
+- Administration: `http://127.0.0.1:4173/scorpio_v1_admin.html`
+- Fictional users: `researcher@example.test`, `newuser@example.test`,
+  `expired@example.test`, `revoked@example.test`
+- Fictional user password: `LocalPreview2026!`
+- Preview-only admin token: `local-preview-admin-only`
+- Preview verification code: `123456`
+
+The preview binds to loopback and uses in-memory SQLite, fake signing material,
+and text-only download fixtures. It sends no email. Analytics are suppressed and
+browser API connections are restricted to the preview origin. All mutations are
+discarded on restart. Never use these credentials or fixtures in production.
+
+From `cloudflare/license-api`, run `node --test test/*.test.mjs`. Account-center
+tests cover real SQLite transactions, authorization boundaries, registration
+rollback, group expiry, signatures, idempotency, competing mutations, and the
+request/approval loop. Historical sample-package integration tests skip when
+their optional private/local data fixtures are absent.
+
 ## Desktop License Contract
 
 Cloudflare is the online authority, but the desktop application still trusts the

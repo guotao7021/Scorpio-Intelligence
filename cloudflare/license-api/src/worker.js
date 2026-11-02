@@ -1,4 +1,25 @@
 import { ed25519 } from "@noble/curves/ed25519";
+import { registerAccountCenterRoutes, effectiveLicenseStatus } from "./account-center.mjs";
+import { registerMonitoringRoutes } from './monitoring-bridge.mjs';
+import { resolveMarketScore, dateScope, businessDate, observedNumber } from "./market-display-contract.mjs";
+import { hourlyPortrait } from "./hourly-portrait.js";
+import { readMarketMinuteObservation } from './market-minute-observation.mjs';
+import {loadBoardRiskSegments} from './mobile-board-risk.mjs';
+import {mobileTrapSignals} from './mobile-risk-details.mjs';
+import { projectIndexSession } from './index-session.mjs';
+import { marketRiskPortrait, stockRiskPortrait } from './mobile-risk-portrait.mjs';
+import { loadPublishedIndustryContext } from './mobile-industry-context.mjs';
+import { stockDetailVisuals, financialDisplayInputs } from './stock-detail-visuals.mjs';
+import { boundStockBehavior } from './stock-research-context.mjs';
+import { publishedMarketFlow } from './market-flow-display.mjs';
+import {
+  RiskLevel, mobileRiskLevelFromScore, normalizeRiskLevel, riskLevelIsAtLeast,
+  riskLevelLabel, riskLevelScore,
+} from './risk-level-enum.mjs';
+import { registerMinuteDeliveryRoutes, readPublication as readMinutePublication } from "./minute-delivery.mjs";
+import { authorizeStockRead } from "./mobile-stock-access.mjs";
+import { hourlyRetentionWindow, hourlyRetentionPredicate, validateHourlyUploadRetention } from './hourly-retention.mjs';
+export { hourlyRetentionWindow } from './hourly-retention.mjs';
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -43,9 +64,14 @@ export const __mobilePresentationTest = {
   mobileFundPayload,
   mobileBondPayload,
   mobileMarketCenterPayload,
+  publishedLatestSectorRows,
+  mobileMarketPresentation,
+  publishedMarketRegime,
+  publishedRows,
   mobileDeepAnalysisQuotaPayload,
   mergeMobilePortfolioPositions,
   analysisFallbackPortfolioBundle,
+  analysisFallbackAssetBundle,
   mobileAssetSearchKeyword,
   mobileDataHistoryDates,
   isMobileBriefAdmin,
@@ -58,12 +84,26 @@ export const __mobilePresentationTest = {
 
 export const __productionUploadMaintenanceTest = {
   cleanupStaleProductionUploads,
+  storeProductionUploadChunk,
+  commitProductionUploadBatch,
+  normalizeProductionUploadChunk,
+  validateHourlyUploadRetention,
+  normalizeProductionUploadBatch,
+  insertProductionUploadBatch,
+  productionUploadTableModule: (tableName) => PRODUCTION_UPLOAD_TABLES.get(tableName) || "",
 };
 
 export const __releaseTest = {
   versionGreater,
   normalizeReleasePlatform,
 };
+
+export const __dataSyncTest = { getDataSyncTableRows };
+export const __monitoringSecurityTest = { verifyAnalysisRequestSignature };
+
+function dataSyncPageLimit(tableName, requestedLimit) {
+  return tableName === "score_history" ? Math.min(requestedLimit, 200) : requestedLimit;
+}
 
 export default {
   async fetch(request, env) {
@@ -166,8 +206,12 @@ export default {
       await recordAdminRequest(ctx, result.status);
       return withCors(result, corsHeaders);
     } catch (error) {
-      const message = error && error.publicMessage ? error.publicMessage : "internal_server_error";
-      const status = error && error.status ? error.status : 500;
+      // Only authenticated upload failures expose operational (not raw SQL) diagnostics.
+      const uploadFailure = ctx?.adminActor && !error?.publicMessage
+        && path.startsWith("/v1/scorpio_v1_admin/production-uploads/")
+        ? productionUploadFailure(error) : null;
+      const message = uploadFailure?.error || error?.publicMessage || "internal_server_error";
+      const status = uploadFailure?.status || error?.status || 500;
       console.error("worker_request_failed", {
         method: request.method,
         path,
@@ -177,7 +221,9 @@ export default {
       if (path.startsWith("/v1/scorpio_v1_admin/") && !ctx?.adminActor && !error?.adminAuditLogged) {
         await recordAdminRequest({ request, env, url }, status, message);
       }
-      return json({ error: message }, status, corsHeaders);
+      return json(uploadFailure
+        ? { error: message, retryable: uploadFailure.retryable, stage: path.split("/").pop() }
+        : { error: message }, status, corsHeaders);
     }
   },
   async scheduled(_controller, env, executionCtx) {
@@ -213,18 +259,21 @@ route("POST", "/v1/auth/register", async (ctx) => {
 
   const now = nowIso();
   const passwordHash = await hashPassword(password);
-  const insert = await ctx.env.DB.prepare(
-    "INSERT INTO users (email, username, password_hash, email_verified, registered_ip, created_at) VALUES (?, ?, ?, 1, ?, ?)"
-  )
-    .bind(email, username, passwordHash, clientIp(ctx.request), now)
-    .run();
-
-  const userId = insert.meta.last_row_id;
-  const trial = await createTrialActivationCode(ctx.env, {
-    userId,
-    username,
-    email,
-  });
+  const trialCode = await uniqueActivationCode(ctx.env);
+  const trialEdition = normalizeEdition(ctx.env.REGISTRATION_TRIAL_EDITION || "personal_pro");
+  const trialDays = intEnv(ctx.env.REGISTRATION_TRIAL_DAYS, 7);
+  // Registration and its trial grant must succeed or roll back together.
+  const registration = await ctx.env.DB.batch([
+    ctx.env.DB.prepare(
+      "INSERT INTO users (email, username, password_hash, email_verified, registered_ip, created_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(email, username, passwordHash, clientIp(ctx.request), now),
+    ctx.env.DB.prepare(
+      `INSERT INTO activation_codes(code, edition, license_days, max_devices, status, assigned_to_user_id, customer_name, customer_email, notes, created_at)
+       SELECT ?, ?, ?, 1, 'assigned', id, username, email, 'auto_registration_trial', ? FROM users WHERE email = ?`
+    ).bind(trialCode, trialEdition, trialDays, now, email),
+  ]);
+  const userId = registration[0].meta.last_row_id;
+  const trial = {trial_activation_code: trialCode, trial_edition: trialEdition, trial_license_days: trialDays};
 
   return json(
     {
@@ -268,7 +317,7 @@ route("POST", "/v1/auth/login", async (ctx) => {
     response.mobile_license = mobileAuthorizationPayload(authorization);
   }
   const activationCodes = await activationCodesForUser(ctx.env, user.id);
-  return json(withActivationCodes(response, activationCodes));
+  return json(withActivationCodes(response, activationCodes, safeText(body.client_edition || "", 64)));
 });
 
 route("POST", "/v1/auth/refresh", async (ctx) => {
@@ -411,7 +460,7 @@ route("POST", "/v1/license/activate", async (ctx) => {
   const code = await ctx.env.DB.prepare("SELECT * FROM activation_codes WHERE code = ?")
     .bind(activationCode)
     .first();
-  if (!code) {
+  if (!code || ["suspended", "revoked"].includes(code.status)) {
     return json({ error: "activation_code_invalid_or_used" }, 400);
   }
 
@@ -470,12 +519,19 @@ route("POST", "/v1/license/activate", async (ctx) => {
   const autoIssue = listEnv(ctx.env.LICENSE_AUTO_ISSUE_EDITIONS, "personal_standard,personal_pro").includes(
     code.edition
   );
+  const grantExpiry = await ctx.env.DB.prepare(
+    "SELECT MAX(expires_at) AS expires_at FROM licenses WHERE activation_code_id = ? AND user_id = ? AND revoked = 0"
+  ).bind(code.id, user.id).first();
+  if (grantExpiry?.expires_at && grantExpiry.expires_at.slice(0, 10) < todayIso()) {
+    return json({error: "existing_license_inactive"}, 400);
+  }
   const issued = await issueLicensePayload(ctx.env, {
     edition: code.edition,
     customerName: user.username || user.email,
     customerEmail: user.email,
     machineFingerprint,
     days: Number(code.license_days || 365),
+    expiresAt: grantExpiry?.expires_at,
   });
 
   const now = nowIso();
@@ -487,13 +543,16 @@ route("POST", "/v1/license/activate", async (ctx) => {
        SELECT ?, ac.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        FROM activation_codes ac
        WHERE ac.id = ?
-         AND ac.status IN ('active', 'assigned')
+         AND ac.status IN ('active', 'assigned', 'used')
+         AND ac.edition = ? AND ac.license_days = ? AND ac.max_devices = ?
          AND (ac.assigned_to_user_id IS NULL OR ac.assigned_to_user_id = ?)
+         AND (ac.used_by_user_id IS NULL OR ac.used_by_user_id = ?)
          AND (ac.customer_email IS NULL OR ac.customer_email = '' OR lower(ac.customer_email) = ?)
          AND (
            SELECT COUNT(*)
            FROM licenses existing
            WHERE existing.activation_code_id = ac.id AND existing.revoked = 0
+             AND COALESCE(existing.machine_fingerprint, '') <> ''
          ) < ac.max_devices`
     ).bind(
       user.id,
@@ -510,6 +569,10 @@ route("POST", "/v1/license/activate", async (ctx) => {
       intEnv(ctx.env.MAX_OFFLINE_DAYS, 7),
       now,
       code.id,
+      code.edition,
+      code.license_days,
+      code.max_devices,
+      user.id,
       user.id,
       normalizeEmail(user.email)
     ),
@@ -518,14 +581,14 @@ route("POST", "/v1/license/activate", async (ctx) => {
        SET status = CASE
              WHEN (
                SELECT COUNT(*) FROM licenses
-               WHERE activation_code_id = activation_codes.id AND revoked = 0
+               WHERE activation_code_id = activation_codes.id AND revoked = 0 AND COALESCE(machine_fingerprint, '') <> ''
              ) >= max_devices THEN 'used'
              ELSE status
            END,
            used_by_user_id = ?,
            used_at = ?
-       WHERE id = ?`
-    ).bind(user.id, now, code.id),
+       WHERE id = ? AND EXISTS(SELECT 1 FROM licenses WHERE license_id = ?)`
+    ).bind(user.id, now, code.id, issued.license_id),
     ctx.env.DB.prepare(
       `INSERT INTO validation_logs
         (license_id, user_id, machine_fingerprint, client_version, client_ip, is_valid, fail_reason, validated_at)
@@ -634,22 +697,24 @@ route("POST", "/v1/license/status", async (ctx) => {
 route("GET", "/v1/license/current", async (ctx) => {
   const user = await requireUser(ctx);
   const machineFingerprint = safeText(ctx.url.searchParams.get("machine_fingerprint") || "", 160);
+  const requestedEdition = safeText(ctx.url.searchParams.get("edition") || "", 64);
+  const edition = requestedEdition ? normalizeEdition(requestedEdition) : "";
   const activationCodes = await activationCodesForUser(ctx.env, user.id);
-  const lic = machineFingerprint
-    ? await ctx.env.DB.prepare(
-      `SELECT *
-       FROM licenses
-       WHERE user_id = ? AND machine_fingerprint = ? AND is_active = 1 AND revoked = 0
-       ORDER BY created_at DESC, id DESC
-       LIMIT 1`
-    ).bind(user.id, machineFingerprint).first()
-    : await ctx.env.DB.prepare(
-      `SELECT *
-       FROM licenses
-       WHERE user_id = ? AND is_active = 1 AND revoked = 0
-       ORDER BY created_at DESC, id DESC
-       LIMIT 1`
-    ).bind(user.id).first();
+  const editionClause = edition ? " AND edition = ?" : "";
+  const licenseStatement = ctx.env.DB.prepare(
+    `SELECT *
+     FROM licenses
+     WHERE user_id = ?${editionClause} AND is_active = 1 AND revoked = 0
+     ORDER BY CASE
+                WHEN ? <> '' AND machine_fingerprint = ? THEN 0
+                ELSE 1
+              END,
+              created_at DESC, id DESC
+     LIMIT 1`
+  );
+  const lic = edition
+    ? await licenseStatement.bind(user.id, edition, machineFingerprint, machineFingerprint).first()
+    : await licenseStatement.bind(user.id, machineFingerprint, machineFingerprint).first();
   if (!lic) {
     return json(
       withActivationCodes(
@@ -657,7 +722,8 @@ route("GET", "/v1/license/current", async (ctx) => {
           active: false,
           message: activationCodes.length ? "activation_code_assigned" : "active_license_not_found",
         },
-        activationCodes
+        activationCodes,
+        edition
       )
     );
   }
@@ -671,7 +737,8 @@ route("GET", "/v1/license/current", async (ctx) => {
           message: "machine_fingerprint_mismatch",
           ...licenseActivationResponse(lic),
         },
-        activationCodes
+        activationCodes,
+        edition
       )
     );
   }
@@ -684,7 +751,8 @@ route("GET", "/v1/license/current", async (ctx) => {
         message: valid ? "ok" : "license_inactive",
         ...licenseActivationResponse(lic),
       },
-      activationCodes
+      activationCodes,
+      edition
     )
   );
 });
@@ -837,17 +905,26 @@ async function activationCodesForUser(env, userId) {
     created_at: row.created_at || "",
     license_id: row.license_id || "",
     expires_at: row.expires_at || "",
-    license_active: Boolean(Number(row.license_active || 0)),
+    license_active: effectiveLicenseStatus({ ...row, is_active: row.license_active, revoked: row.license_revoked }, todayIso()) === "active",
     license_revoked: Boolean(Number(row.license_revoked || 0)),
     approval_status: row.approval_status || "",
     machine_fingerprint: row.machine_fingerprint || "",
   }));
 }
 
-function withActivationCodes(payload, activationCodes) {
+function withActivationCodes(payload, activationCodes, preferredEdition = "") {
   const codes = Array.isArray(activationCodes) ? activationCodes : [];
+  const normalizedPreferredEdition = preferredEdition ? normalizeEdition(preferredEdition) : "";
+  const usableStatuses = new Set(["active", "assigned", "used"]);
   const activationCode =
     codes.find((item) => item.license_id && item.license_id === payload.license_id) ||
+    codes.find((item) =>
+      normalizedPreferredEdition &&
+      normalizeEdition(item.edition) === normalizedPreferredEdition &&
+      usableStatuses.has(String(item.status || "")) &&
+      !item.license_revoked
+    ) ||
+    codes.find((item) => usableStatuses.has(String(item.status || "")) && !item.license_revoked) ||
     codes[0];
   if (!activationCode) {
     return { ...payload, activation_codes: [] };
@@ -920,7 +997,6 @@ route("POST", "/v1/feedback", async (ctx) => {
     limit: intEnv(ctx.env.FEEDBACK_RATE_LIMIT_PER_HOUR, 5),
     windowSeconds: 60 * 60,
   });
-  await verifyFeedbackTurnstile(ctx.env, body, clientAddress);
   const item = normalizeFeedbackSubmission(body);
   if (isMainlandChinaRequest(ctx.request)) {
     if (!item.contact_email) {
@@ -1650,7 +1726,7 @@ route("POST", "/v1/mobile/market", async (ctx) => {
     requestBody: body,
     endpoint: "/v1/mobile/market",
   });
-  const market = await loadMobileMarketCenter(ctx.env, license);
+  const market = await loadMobileMarketCenter(ctx.env, license, request.client_version);
   const snapshotIdentity = controlledHybridSnapshotIdentity(
     "market_quote",
     market,
@@ -1678,6 +1754,10 @@ route("POST", "/v1/mobile/stock/detail", async (ctx) => {
     requestBody: body,
     endpoint: "/v1/mobile/stock/detail",
   });
+  const readAccess = await authorizeMobileStockRead(ctx.env, user, license, request, true);
+  // This legacy detail endpoint performs a new analysis, unlike read-only
+  // research/polling. It must not become a compute-quota bypass after a grant.
+  if (!readAccess.charged) await claimMobileDeepAnalysisQuota(ctx.env, user);
   const result = await mobileStockAnalysis(ctx, { user, license, request, startedAt });
   return json({ ok: true, result, source: "analysis_compute" });
 });
@@ -1695,7 +1775,8 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
     endpoint: "/v1/mobile/stock/research",
   });
   const deepRefresh = Boolean(body.deep_refresh);
-  let quota = deepRefresh
+  const readAccess = await authorizeMobileStockRead(ctx.env, user, license, request, true);
+  let quota = deepRefresh && !readAccess.charged
     ? await claimMobileDeepAnalysisQuota(ctx.env, user)
     : await mobileDeepAnalysisQuotaStatus(ctx.env, user);
   const analysisPromise = deepRefresh
@@ -1706,10 +1787,13 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
         endpoint: "/v1/mobile/stock/research",
         feature: "stock_bundle",
       }, "published_mobile_data");
-  const [analysisResult, scoreRowsResult] = await Promise.allSettled([
+  const [analysisResult, scoreRowsResult, hourlyRowsResult] = await Promise.allSettled([
     analysisPromise,
     publishedRowsForCode(ctx.env, "score_history", license, request.code, 1, {
       data_date: request.data_date,
+    }),
+    publishedRowsForCode(ctx.env, "stock_hourly_history", license, request.code, 30, {
+      as_of_date: request.data_date,
     }),
   ]);
   const analysis = analysisResult.status === "fulfilled"
@@ -1717,9 +1801,12 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
     : mobileStockAnalysisUnavailable(request, "edge_fallback_failed");
   const scoreRows = scoreRowsResult.status === "fulfilled" ? scoreRowsResult.value : [];
   const scoreRow = scoreRows.find((row) => firstText(row.asset_type, "stock").toLowerCase() === "stock") || {};
+  const contextDay=businessDate(request.data_date||scoreRow._data_date||analysis.data_quality?.freshness);
+  const contextIndustry=firstText(scoreRow.group_name,parseJson(scoreRow.public_details||scoreRow.details||'{}',{}).behavior_profile?.industry);
+  const marketContext=contextDay?await loadMobileStockRiskContext(ctx.env,license,contextDay,contextIndustry).catch(()=>null):null;
   let research;
   try {
-    research = mobileStockResearchPayload(analysis, scoreRow, request);
+    research = mobileStockResearchPayload(analysis, scoreRow, request, marketContext);
   } catch (error) {
     console.error("mobile_stock_presentation_failed", {
       code: request.code,
@@ -1727,6 +1814,20 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
     });
     research = mobileStockResearchUnavailablePayload(request);
   }
+  research.hourly_history = hourlyHistoryPresentation(hourlyRowsResult.status === "fulfilled" ? hourlyRowsResult.value : []);
+  if(research.risk_portrait && contextDay) {
+    const signals=await publishedRowsForCode(ctx.env,"stock_signal_observation_daily",license,request.code,2,{data_date:contextDay}).catch(()=>[]);
+    // More than one distinct same-day source remains ambiguous, not latest-wins.
+    const snapshots=[...new Map(signals.filter(r=>r.code===request.code&&r.business_date===contextDay)
+      .map(r=>[r.snapshot_json,r])).values()];
+    research.risk_portrait.trap_signals=mobileTrapSignals({snapshot:snapshots.length===1?parseJson(snapshots[0].snapshot_json,null):null,
+      code:request.code,day:contextDay});
+  }
+  const minuteDay = request.data_date || controlledHybridSnapshotIdentity("stock_analysis", research, "published_data_fallback", "cloud_canonical_analysis").business_date;
+  research.minute_explanations = /^\d{6}$/.test(request.code) && /^\d{4}-\d{2}-\d{2}$/.test(minuteDay)
+    ? await readMinutePublication(ctx.env, {code: request.code, businessDate: minuteDay,
+        editionScopes: dataSyncEditionScopes(license.edition), clientVersion: request.client_version})
+    : null;
   return json({
     ok: true,
     research,
@@ -1747,7 +1848,7 @@ route("POST", "/v1/mobile/stock/research", async (ctx) => {
       "cloud_canonical_analysis",
     ),
     display_contract: controlledHybridDisplayContract(null, "mobile"),
-  });
+  }, 200, {"cache-control": "no-store, private"});
 });
 
 route("POST", "/v1/mobile/data-history/dates", async (ctx) => {
@@ -2056,6 +2157,7 @@ async function authorizeMobileCompanionDevice(env, options) {
      JOIN licenses l ON l.license_id = b.license_id AND l.user_id = b.user_id
      WHERE b.user_id = ? AND b.machine_fingerprint = ? AND b.revoked = 0
        AND l.is_active = 1 AND l.revoked = 0
+       AND COALESCE(l.approval_status, '') NOT IN ('pending', 'rejected')
      ORDER BY b.id DESC
      LIMIT 1`
   ).bind(options.user.id, options.machineFingerprint).first();
@@ -2089,8 +2191,9 @@ async function authorizeMobileCompanionDevice(env, options) {
   }
 
   const countRow = await env.DB.prepare(
-    "SELECT COUNT(*) AS total FROM mobile_device_bindings WHERE user_id = ? AND revoked = 0"
-  ).bind(options.user.id).first();
+    `SELECT COUNT(*) AS total FROM mobile_device_bindings b JOIN licenses l ON l.license_id = b.license_id AND l.user_id = b.user_id
+     WHERE b.user_id = ? AND b.revoked = 0 AND l.revoked = 0 AND (l.activation_code_id = ? OR l.license_id = ?)`
+  ).bind(options.user.id, license.activation_code_id || null, license.license_id).first();
   const maxDevices = await mobileDeviceLimitForLicense(env, license);
   if (Number(countRow && countRow.total) >= maxDevices) {
     throwHttp(403, "mobile_device_limit_reached");
@@ -2156,6 +2259,11 @@ async function redeemAssignedMobileEntitlement(env, user) {
   );
   if (!autoIssueEditions.includes(normalizeEdition(code.edition))) return null;
 
+  const grantExpiry = await env.DB.prepare(
+    "SELECT MAX(expires_at) AS expires_at FROM licenses WHERE activation_code_id = ? AND user_id = ? AND revoked = 0"
+  ).bind(code.id, user.id).first();
+  if (grantExpiry?.expires_at && grantExpiry.expires_at.slice(0, 10) < todayIso()) return null;
+
   const previous = await env.DB.prepare(
     `SELECT * FROM licenses
      WHERE user_id = ? AND edition = ?
@@ -2174,6 +2282,7 @@ async function redeemAssignedMobileEntitlement(env, user) {
     machineFingerprint,
     licenseId: previous && previous.license_id,
     days: Number(code.license_days || 365),
+    expiresAt: grantExpiry?.expires_at,
     features: currentPayload.features || {},
   });
   const now = nowIso();
@@ -2247,7 +2356,7 @@ async function redeemAssignedMobileEntitlement(env, user) {
        SET status = CASE
              WHEN (
                SELECT COUNT(*) FROM licenses
-               WHERE activation_code_id = activation_codes.id AND revoked = 0
+               WHERE activation_code_id = activation_codes.id AND revoked = 0 AND COALESCE(machine_fingerprint, '') <> ''
              ) >= max_devices THEN 'used'
              ELSE status
            END,
@@ -2803,7 +2912,7 @@ function mobileStrategyLabel(value) {
   })[String(value || "").toLowerCase()] || "平衡策略";
 }
 
-function mobileStockResearchPayload(analysis, scoreRow, request) {
+function mobileStockResearchPayload(analysis, scoreRow, request, marketContext=null) {
   const summary = safeJsonObject(analysis.summary || {});
   const sections = safeJsonObject(analysis.sections || {});
   const quote = safeJsonObject(sections.quote || analysis.quote || {});
@@ -2813,7 +2922,8 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
   const riskMetrics = safeJsonObject(sections.risk_metrics || sections.risk || {});
   const reason = safeJsonObject(sections.reason || analysis.reason || {});
   const details = parseJson(scoreRow.public_details || scoreRow.details || "{}", {});
-  const behavior = safeJsonObject(details.behavior_profile || {});
+  const detailDay=businessDate(request.data_date||scoreRow._data_date||details.trade_date||quote.trade_date);
+  const behavior = boundStockBehavior({code:request.code,day:detailDay,scoreRow,details});
   const risk = safeJsonObject(behavior.risk || {});
   const capital = safeJsonObject(behavior.capital_behavior || {});
   const sector = safeJsonObject(behavior.sector_lifecycle || {});
@@ -2823,7 +2933,7 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
   const quality = safeJsonObject(behavior.data_quality || {});
   const score = firstNumber(details.total_score, scoreRow.total_score, summary.score, null);
   const rating = mobileRatingLabel(firstText(details.rating, scoreRow.rating, summary.rating), score);
-  const riskLabel = mobileRiskLabel(firstText(risk.level, summary.risk_level), scoreRow.risk_score);
+  const riskLabel = mobileRiskLabel(firstText(risk.level, summary.risk_level));
   const name = firstText(
     details.name,
     behavior.name,
@@ -2839,8 +2949,8 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
   const qualityIssues = mobileTextList(quality.issues).map((item) => mobileUserText(item, "部分数据仍待补充"));
   const cautionItems = uniqueStrings([...riskFlags, ...qualityIssues]).slice(0, 5);
   const researchSummary = mobileUserText(
-    behavior.research_summary,
     details.summary,
+    behavior.research_summary,
     reason.summary,
     summary.brief,
     score === null ? "云端暂未形成完整研究结论。" : `${rating}，综合评分 ${Number(score.toFixed(1))} 分。`
@@ -2849,7 +2959,9 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
     mobileUserText(business.summary, business.label, business.asset_role_label, ""),
     mobileUserText(model.market_state, model.decision_bias, model.model_label, ""),
     capital.label ? `资金行为：${mobileUserText(capital.label, "等待确认")}` : "",
-    sector.label ? `${industry}处于${mobileUserText(sector.label, "观察")}阶段` : "",
+    sector.label && sector.label!=='未知' ? `${industry}处于${mobileUserText(sector.label, "观察")}阶段` : "",
+    observedNumber(details.scores?.trend)!==null ? `趋势分 ${mobileScoreLabel(details.scores.trend)}` : "",
+    observedNumber(details.scores?.fundamental)!==null ? `基本面 ${mobileScoreLabel(details.scores.fundamental)}` : "",
   ]).filter(Boolean).slice(0, 4);
   const movementFactors = [
     mobileResearchFactor("资金行为", mobileUserText(capital.label, capital.signal, "尚未形成明确资金信号"), mobileTone(capital.label || capital.signal)),
@@ -2872,6 +2984,10 @@ function mobileStockResearchPayload(analysis, scoreRow, request) {
     state: status,
     state_message: mobileResearchStateMessage(status),
     as_of: mobileDateLabel(freshness),
+    risk_portrait: stockRiskPortrait({code:firstText(analysis.code,request.code),day:request.data_date||freshness,
+      behavior,riskMetrics,industry,marketPortrait:marketContext,financial}),
+    detail_visuals: stockDetailVisuals({code:firstText(analysis.code,request.code),day:request.data_date||freshness,
+      scoreRow,details,financial,fundamental,capital,sector,model,quote,board}),
     header: {
       score: score === null ? null : Number(score.toFixed(1)),
       score_label: score === null ? "待评估" : `${Number(score.toFixed(1))} 分`,
@@ -2936,15 +3052,17 @@ function mobileResearchMetric(label, value, note) {
 }
 
 function mobileTechnicalMetrics(values) {
+  const r=values.riskMetrics.data_source==='derived_daily_bar'?values.riskMetrics:{};
+  const drawdown=v=>{const n=observedNumber(v);return n!==null&&n>=-1&&n<=0?n*100:null;};
   const rows = [
     ["技术评分", mobileScoreLabel(values.scoreRow.technical_score), "趋势与量价综合"],
-    ["风险评分", mobileScoreLabel(firstNumber(values.riskMetrics.risk_score, values.scoreRow.risk_score, null)), "分数越高需越谨慎"],
+    ["风险压力分", mobileScoreLabel(observedNumber(r.risk_score)), "价格风险压力，不使用相对韧性分替代"],
     ["当日涨跌", mobilePercent(firstNumber(values.quote.change_percent, values.quote.pct_change, null)), "较前一交易日"],
     ["量比", mobileNumberLabel(firstNumber(values.board.volume_ratio, null)), "成交活跃度"],
-    ["20日波动", mobilePercent(firstNumber(values.riskMetrics.volatility_20, null)), "近20个交易日"],
-    ["60日波动", mobilePercent(firstNumber(values.riskMetrics.volatility_60, null)), "近60个交易日"],
-    ["20日回撤", mobilePercent(firstNumber(values.riskMetrics.max_drawdown_20, null)), "阶段最大回撤"],
-    ["60日回撤", mobilePercent(firstNumber(values.riskMetrics.max_drawdown_60, null)), "阶段最大回撤"],
+    ["20日波动", mobilePercent(observedNumber(r.volatility_20)), "近20个交易日"],
+    ["60日波动", mobilePercent(observedNumber(r.volatility_60)), "近60个交易日"],
+    ["20日回撤", mobilePercent(drawdown(r.max_drawdown_20)), "阶段最大回撤"],
+    ["60日回撤", mobilePercent(drawdown(r.max_drawdown_60)), "阶段最大回撤"],
     ["资金强度", mobileScoreLabel(firstNumber(values.capital.main_flow_score, values.capital.score, null)), "主力资金行为"],
   ];
   return rows.map(([label, value, note]) => ({ label, value, note })).filter((item) => item.value !== "--");
@@ -3058,6 +3176,7 @@ function mobileFundPayload(bundle, request) {
   const profile = safeJsonObject(sections.profile || {});
   const performance = safeJsonObject(sections.performance || {});
   const exposure = safeJsonObject(sections.exposure || {});
+  const nav = Array.isArray(sections.nav) ? sections.nav : [];
   const riskMetrics = safeJsonObject(performance.risk_metrics || {});
   const returns = safeJsonObject(performance.returns || {});
   const score = firstNumber(performance.score, summary.score, null);
@@ -3079,7 +3198,7 @@ function mobileFundPayload(bundle, request) {
     ["近1年", firstNumber(performance.return_1y, returns["1y"], null)],
     ["近3年", firstNumber(performance.return_3y, returns["3y"], null)],
     ["年初至今", firstNumber(performance.return_ytd, returns.ytd, null)],
-  ].map(([label, value]) => ({
+  ].filter(([, value]) => value !== null).map(([label, value]) => ({
     label,
     value: mobilePercent(value),
     tone: value === null ? "primary" : value >= 0 ? "success" : "danger",
@@ -3088,7 +3207,7 @@ function mobileFundPayload(bundle, request) {
     ["年化波动", firstNumber(riskMetrics.annual_volatility, null)],
     ["最大回撤", firstNumber(riskMetrics.max_drawdown, null)],
     ["夏普比率", firstNumber(riskMetrics.sharpe_ratio, null)],
-  ].map(([label, value]) => ({
+  ].filter(([, value]) => value !== null).map(([label, value]) => ({
     label,
     value: label === "夏普比率" ? mobileNumberLabel(value) : mobilePercent(value),
     tone: "primary",
@@ -3098,7 +3217,13 @@ function mobileFundPayload(bundle, request) {
     ["股票", firstNumber(assetAllocation.stock_ratio, null)],
     ["债券", firstNumber(assetAllocation.bond_ratio, null)],
     ["现金", firstNumber(assetAllocation.cash_ratio, null)],
-  ].map(([label, value]) => ({ label, value: mobileUnsignedPercent(value), tone: "primary" }));
+  ].filter(([, value]) => value !== null).map(([label, value]) => ({ label, value: mobileUnsignedPercent(value), tone: "primary" }));
+  const navHistory = nav.map((item) => ({
+    date: firstText(item.nav_date, item.trade_date, item.date),
+    nav: firstNumber(item.nav, item.unit_nav, item.nav_value, null),
+    accumulated_nav: firstNumber(item.acc_nav, item.accumulated_nav, item.cumulative_nav, null),
+    daily_return: firstNumber(item.daily_return_pct, item.daily_return, item.pct_change, null),
+  })).filter((item) => item.date && item.nav !== null).slice(-120);
   const holdingRows = holdings.map((item) => {
     const change = firstNumber(item.change_percent, item.pct_change, item.change_pct, null);
     return {
@@ -3155,6 +3280,7 @@ function mobileFundPayload(bundle, request) {
     returns: returnRows,
     risk: riskRows,
     allocation: allocationRows,
+    nav_history: navHistory,
     holdings: holdingRows,
     industry: industryRows,
     risk_tags: riskTags,
@@ -3214,18 +3340,23 @@ function mobileBondPayload(bundle, request) {
   const scores = safeJsonObject(sections.scores || {});
   const score = firstNumber(summary.score, scores.total_score, null);
   const name = firstText(detail.bond_name, detail.name, request.code);
-  const rating = mobileRatingLabel(firstText(summary.rating, scores.rating, "watch"), score);
+  const rating = mobileRatingLabel(firstText(summary.rating, scores.rating_label, scores.rating, "watch"), score);
   const premium = firstNumber(detail.premium_rate, null);
   const price = firstNumber(detail.bond_price, detail.price, null);
   const changePct = firstNumber(detail.change_pct, detail.change_percent, null);
+  const stockCode = firstText(detail.stock_code, detail.underlying_code);
+  const stockName = firstText(detail.stock_name, detail.underlying_name);
+  const issueSize = firstNumber(detail.issue_size, null);
+  const remainSize = firstNumber(detail.remain_size, null);
   const snapshotRows = [
     ["债券价格", price === null ? "--" : `${Number(price.toFixed(3))} ${changePct === null ? "" : mobilePercent(changePct)}`.trim(), changePct === null ? "primary" : changePct >= 0 ? "success" : "danger"],
     ["转股溢价率", mobilePercent(premium), premium !== null && premium > 20 ? "danger" : "primary"],
     ["正股价格", mobileNumberLabel(firstNumber(detail.stock_price, null)), "primary"],
     ["转股价值", mobileNumberLabel(firstNumber(detail.convert_value, null)), "primary"],
     ["信用评级", firstText(detail.credit_rating, "--").replace(/sti$/i, "").trim(), "warning"],
-    ["发行规模", firstNumber(detail.issue_size, null) === null ? "--" : `${Number(firstNumber(detail.issue_size, null)).toFixed(2)} 亿`, "primary"],
-  ].map(([label, value, tone]) => ({ label, value, tone }));
+    ["发行规模", mobileBondScale(issueSize), "primary"],
+    ["剩余规模", mobileBondScale(remainSize), "primary"],
+  ].filter(([, value]) => value !== "--").map(([label, value, tone]) => ({ label, value, tone }));
   const scoreRows = [
     ["价格安全", "30%", firstNumber(scores.price, null), "价格与债底保护"],
     ["转股溢价", "25%", firstNumber(scores.premium, null), "估值弹性与溢价约束"],
@@ -3239,13 +3370,17 @@ function mobileBondPayload(bundle, request) {
   })).filter((item) => item.value !== null);
   const terms = [
     ["债券代码", firstText(detail.bond_code, request.code)],
-    ["正股", firstText(detail.stock_name, "--") + (firstText(detail.stock_code) ? ` (${firstText(detail.stock_code)})` : "")],
+    ["正股", stockName ? `${stockName}${stockCode ? ` (${stockCode})` : ""}` : stockCode],
     ["转股价", mobileNumberLabel(firstNumber(detail.convert_price, null))],
     ["转股价值", mobileNumberLabel(firstNumber(detail.convert_value, null))],
     ["转股溢价率", mobilePercent(premium)],
     ["信用评级", firstText(detail.credit_rating, "--").replace(/sti$/i, "").trim()],
-    ["发行规模", firstNumber(detail.issue_size, null) === null ? "--" : `${Number(firstNumber(detail.issue_size, null)).toFixed(2)} 亿`],
-  ].map(([label, value]) => ({ label, value }));
+    ["发行规模", mobileBondScale(issueSize)],
+    ["剩余规模", mobileBondScale(remainSize)],
+    ["上市日期", firstText(detail.list_date)],
+    ["到期日期", firstText(detail.maturity_date, detail.delist_date)],
+    ["转股期", [firstText(detail.conversion_start_date), firstText(detail.conversion_end_date)].filter(Boolean).join(" 至 ")],
+  ].filter(([, value]) => value && value !== "--").map(([label, value]) => ({ label, value }));
   const advice = mobileUserText(sections.advice, "");
   const state = bundle.status === "ready" ? "ready" : "partial";
   return {
@@ -3448,6 +3583,32 @@ function mobilePeriodChange(rows) {
   return mobilePercent(((last - first) / first) * 100);
 }
 
+const SECTOR_DELIVERY_LIMIT = 1001;
+
+async function publishedLatestSectorRows(env, license) {
+  // Resolve the published business day first. A bounded multi-day read could
+  // otherwise drop sectors before the heat ranking is computed.
+  const head = await publishedRows(env, "sector_rotation_daily", license, {limit: 1});
+  const day = businessDate(head[0]?.trade_date || head[0]?._data_date || "");
+  if (!day) return [];
+  return (await publishedRows(env, "sector_rotation_daily", license, {
+    data_date: day, limit: SECTOR_DELIVERY_LIMIT,
+  })).filter((row) => businessDate(row.trade_date || row._data_date || "") === day);
+}
+
+function selectedSectorSource(rows) {
+  // The table can hold alternative source partitions for one day. Rank one
+  // coherent partition; never mix a provider sector with a fallback copy.
+  const groups = new Map();
+  for (const row of rows) {
+    const source = firstText(row.data_source, row.source, "unknown");
+    if (!groups.has(source)) groups.set(source, []);
+    groups.get(source).push(row);
+  }
+  return [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))[0]
+    || ["", []];
+}
+
 function mobileResearchMetrics(values) {
   const rows = [
     ["最新价格", mobilePrice(firstNumber(values.quote.latest_price, values.quote.price, null)), "最新交易快照"],
@@ -3462,42 +3623,141 @@ function mobileResearchMetrics(values) {
   return rows.map(([label, value, note]) => ({ label, value, note })).filter((item) => item.value !== "--");
 }
 
-async function loadMobileMarketCenter(env, license) {
-  const [scoreRows, sentimentRows, flowRows, sectorRows, industryRows, briefRows] = await Promise.all([
+async function loadMobileMarketCenter(env, license, clientVersion = "") {
+  const [scoreRows, sentimentRows, flowRows, sectorRows, briefRows, indexSessionRows, industryContext] = await Promise.all([
     publishedRows(env, "market_score_daily", license, { limit: 120 }),
     publishedRows(env, "market_sentiment_daily", license, { limit: 20 }),
     publishedRows(env, "market_fund_flow_cache", license, { limit: 20 }),
-    publishedRows(env, "sector_rotation_daily", license, { limit: 240 }),
-    publishedRows(env, "industry_fund_flow_cache", license, { limit: 240 }),
+    publishedLatestSectorRows(env, license),
     loadMobileMarketBriefRows(env, license, 10),
+    publishedRows(env, "market_index_session_snapshots", license, { limit: 1 }),
+    loadPublishedIndustryContext({
+      read: (table, options) => publishedRows(env, table, license, options),
+    }),
   ]);
-  return mobileMarketCenterPayload({
+  const market = mobileMarketCenterPayload({
     scoreRows,
     sentimentRows: latestDateRows(sentimentRows),
     flowRows: latestDateRows(flowRows),
-    sectorRows: latestDateRows(sectorRows),
-    industryRows: latestDateRows(industryRows),
+    sectorRows,
+    industryRows: industryContext.rows,
     briefRows: latestDateRows(briefRows),
   });
+  market.minute_observation = await readMarketMinuteObservation(env, {
+    businessDate: market.data_dates.score, editionScopes: dataSyncEditionScopes(license.edition), clientVersion,
+  });
+  market.index_session = projectIndexSession(indexSessionRows);
+  market.risk_portrait.market_segments = await loadBoardRiskSegments(env,{
+    day:market.data_dates.score,scopes:dataSyncEditionScopes(license.edition),
+  });
+  return market;
+}
+
+async function loadMobileStockRiskContext(env,license,day,industry='') {
+  // Bounded parallel public reads, independent of the full market/minute endpoint.
+  const names=['market_score_daily','market_sentiment_daily','market_fund_flow_cache'];
+  const [rows,industryContext]=await Promise.all([
+    Promise.all(names.map(name=>publishedRows(env,name,license,{data_date:day,limit:30}).catch(()=>[]))),
+    loadPublishedIndustryContext({
+      read: (table, options) => publishedRows(env,table,license,options).catch(()=>[]),
+      requestedDay: day,
+    }),
+  ]);
+  const score=preferredMarketScoreRow(rows[0])||{};
+  const observation=resolveMarketScore({sections:{regime:publishedMarketRegime(score)}});
+  const industries=industryContext.rows.sort((a,b)=>Number(firstText(b.industry_name,b.sector_name,b.name)===industry)-Number(firstText(a.industry_name,a.sector_name,a.name)===industry));
+  return marketRiskPortrait({scoreRow:score,observation:{...observation,business_date:day},sentimentRows:rows[1],flowRows:rows[2],industryRows:industries,
+    capitalValue:mobileMoneyAmount,industryValue:r=>mobileIndustryMoneyAmount(r,observedNumber(r.net_amount??r.net_inflow??r.main_net))});
+}
+
+function publishedMarketRegime(score = {}) {
+  return {
+    market_score: score.market_score ?? null,
+    phase: score.market_phase || "unknown", phase_label: score.market_phase || "未知",
+    risk_level: score.risk_level || "unknown",
+    effective_trade_date: businessDate(score.trade_date || score._data_date),
+    score_version: score.score_version || null,
+    score_status: score.score_status || (score.market_score == null ? "missing" : "ready"),
+    score_source: "market_score_daily",
+    score_breakdown: safeJsonObject(score.score_breakdown_json),
+    score_input_quality: safeJsonObject(score.input_quality_json),
+    score_evidence: safeJsonObject(score.evidence_json),
+  };
+}
+
+function mobileIndustryConclusion({
+  riseRatio,
+  averageChange,
+  totalNet,
+  rowCount,
+  validChangeCount,
+  validNetCount,
+  scope,
+}) {
+  if (!rowCount || riseRatio === null || averageChange === null) {
+    return {
+      conclusion: "行业结论待数据补齐",
+      confidence_score: null,
+      confidence_label: "待评估",
+      conclusion_tone: "muted",
+    };
+  }
+  const priceState = riseRatio >= 70 && averageChange > 0
+    ? "行业普涨"
+    : riseRatio >= 55 && averageChange > 0
+      ? "上涨行业占优"
+      : riseRatio <= 30 && averageChange < 0
+        ? "行业普跌"
+        : riseRatio <= 45 && averageChange < 0
+          ? "下跌行业占优"
+          : averageChange > 0
+            ? "行业分化偏强"
+            : averageChange < 0 ? "行业分化偏弱" : "行业涨跌均衡";
+  const fundState = totalNet === null
+    ? "资金数据不足"
+    : totalNet > 0 ? "资金净流入" : totalNet < 0 ? "资金净流出" : "资金收支平衡";
+  const dateComplete = scope?.start && scope.start === scope.end && !scope.missing_count;
+  const samplePoints = Math.min(20, rowCount);
+  const changePoints = 35 * validChangeCount / rowCount;
+  const netPoints = 25 * validNetCount / rowCount;
+  const confidenceScore = Math.min(95, Math.round(samplePoints + changePoints + netPoints + (dateComplete ? 15 : 0)));
+  const pricePositive = averageChange > 0 && riseRatio >= 55;
+  const priceNegative = averageChange < 0 && riseRatio <= 45;
+  const conclusionTone = totalNet === null
+    ? "muted"
+    : (pricePositive && totalNet > 0) ? "positive"
+      : (priceNegative && totalNet < 0) ? "negative"
+        : ((pricePositive && totalNet < 0) || (priceNegative && totalNet > 0)) ? "warning" : "neutral";
+  return {
+    conclusion: `${priceState}，${fundState}`,
+    confidence_score: confidenceScore,
+    confidence_label: confidenceScore >= 85 ? "高" : confidenceScore >= 65 ? "中" : "低",
+    conclusion_tone: conclusionTone,
+  };
 }
 
 function mobileMarketCenterPayload(values) {
   const allScoreRows = values.scoreRows || [];
   const score = preferredMarketScoreRow(latestDateRows(allScoreRows)) || {};
   const sentiment = (values.sentimentRows || [])[0] || {};
-  const flow = (values.flowRows || [])[0] || {};
-  const marketScore = firstNumber(score.market_score, sentiment.sentiment_score, null);
-  const phase = mobileMarketPhaseLabel(firstText(score.market_phase, sentiment.phase, "观察"));
+  const flow = publishedMarketFlow(values.flowRows || []) || {};
+  const regime = publishedMarketRegime(score);
+  const observation = resolveMarketScore({sections: {regime}});
+  const marketScore = observation.value;
+  const phase = mobileMarketPhaseLabel(firstText(score.market_phase, "未知"));
   const riskLabel = mobileRiskLabel(firstText(score.risk_level, "unknown"));
   const upCount = firstNumber(sentiment.up_count, null);
   const downCount = firstNumber(sentiment.down_count, null);
   const totalCount = firstNumber(sentiment.total_count, upCount !== null && downCount !== null ? upCount + downCount : null);
   const upRatio = totalCount && upCount !== null ? (upCount / totalCount) * 100 : null;
   const mainNet = firstNumber(flow.main_net, flow.net_amount, null);
-  const sectors = (values.sectorRows || [])
+  const [sectorSource, sectorSourceRows] = selectedSectorSource(values.sectorRows || []);
+  const sectors = sectorSourceRows
     .map((row) => {
       const change = firstNumber(row.pct_change, null);
       return {
+        sector_code: firstText(row.sector_code),
+        sector_type: "industry",
         name: firstText(row.sector_name, row.name, row.sector_code),
         change: mobilePercent(change),
         hot_score: firstNumber(row.hot_score, null),
@@ -3506,9 +3766,19 @@ function mobileMarketCenterPayload(values) {
       };
     })
     .filter((row) => row.name)
-    .sort((left, right) => (right.hot_score || 0) - (left.hot_score || 0))
-    .slice(0, 12)
+    .sort((left, right) => (right.hot_score ?? -1) - (left.hot_score ?? -1))
+    .slice(0, 10)
     .map((row, index) => ({ ...row, rank: index + 1 }));
+  const sectorHeatMeta = {
+    business_date: firstText(sectorSourceRows[0]?.trade_date, sectorSourceRows[0]?._data_date),
+    source: sectorSource,
+    sector_type: "industry",
+    total_count: sectorSourceRows.length,
+    displayed_count: sectors.length,
+    other_count: Math.max(0, sectorSourceRows.length - sectors.length),
+    status: (values.sectorRows || []).length >= SECTOR_DELIVERY_LIMIT ? "partial" :
+      sectorSourceRows.length ? "available" : "unavailable",
+  };
   const evidence = parseJson(score.evidence_json, {});
   const evidenceIndices = Array.isArray(evidence.indices) ? evidence.indices : [];
   const indices = evidenceIndices.map((row) => ({
@@ -3551,16 +3821,16 @@ function mobileMarketCenterPayload(values) {
     .slice(0, 8)
     .map(sectorFlowItem);
   const industryChanges = industryFlows.map((row) => row.change).filter((value) => value !== null);
+  const validIndustryNetCount = industryFlows.filter((row) => row.net !== null).length;
   const riseCount = industryChanges.filter((value) => value > 0).length;
   const fallCount = industryChanges.filter((value) => value < 0).length;
   const flatCount = Math.max(0, industryChanges.length - riseCount - fallCount);
   const averageChange = industryChanges.length
     ? industryChanges.reduce((total, value) => total + value, 0) / industryChanges.length
     : null;
-  const totalIndustryNet = industryFlows
-    .map((row) => row.net)
-    .filter((value) => value !== null)
-    .reduce((total, value) => total + value, 0);
+  const totalIndustryNet = validIndustryNetCount
+    ? industryFlows.map((row) => row.net).filter((value) => value !== null).reduce((total, value) => total + value, 0)
+    : null;
   const industryInflowCount = industryFlows.filter((row) => row.net !== null && row.net > 0).length;
   const industryOutflowCount = industryFlows.filter((row) => row.net !== null && row.net < 0).length;
   const riseRatio = industryChanges.length ? riseCount / industryChanges.length * 100 : null;
@@ -3573,25 +3843,40 @@ function mobileMarketCenterPayload(values) {
   const dominantStyle = mobileDominantStyle(marketScore, mainNet);
   const advice = mobileMarketAdvice(marketScore);
   const scoreTrend = mobileMarketScoreSeries(allScoreRows);
-  const freshness = maxText([
-    score.trade_date,
-    sentiment.trade_date,
-    flow.trade_date,
-    ...(values.sectorRows || []).slice(0, 3).map((row) => row.trade_date || row._data_date),
-    ...(values.industryRows || []).slice(0, 3).map((row) => row.trade_date || row._data_date),
-  ]);
+  const freshness = observation.business_date || "";
+  const blockDates = {
+    score: observation.business_date, indices: dateScope(evidenceIndices),
+    capital: dateScope(Object.keys(flow).length?[flow]:[]), industry: dateScope(values.industryRows || []),
+    sentiment: dateScope(values.sentimentRows || []), sectors: dateScope(values.sectorRows || []),
+  };
+  const industryConclusion = mobileIndustryConclusion({
+    riseRatio,
+    averageChange,
+    totalNet: totalIndustryNet,
+    rowCount: industryFlows.length,
+    validChangeCount: industryChanges.length,
+    validNetCount: validIndustryNetCount,
+    scope: blockDates.industry,
+  });
+  const dateLabel = (scope) => !scope.end ? "未提供" : `${scope.start === scope.end ? scope.end : `${scope.start} — ${scope.end}`}${scope.missing_count ? ` · ${scope.missing_count} 条日期缺失` : ""}`;
   const ready = marketScore !== null || totalCount !== null || mainNet !== null || sectors.length > 0;
   return {
     title: "市场中心",
+    sector_heat_meta: sectorHeatMeta,
     summary: ready
       ? `${phase}，上涨家数占比${upRatio === null ? "待更新" : `${upRatio.toFixed(1)}%`}，主力资金${mainNet === null ? "方向待确认" : mainNet >= 0 ? "净流入" : "净流出"}。`
       : "市场数据正在更新，请稍后刷新。",
-    freshness: mobileDateLabel(freshness),
+    freshness: freshness ? `评分业务日 ${freshness}` : "评分业务日未提供",
+    block_dates: blockDates,
+    data_dates: {score: observation.business_date || "未提供", score_source: observation.source,
+      score_status: observation.status, indices: dateLabel(blockDates.indices), capital: dateLabel(blockDates.capital),
+      industry: dateLabel(blockDates.industry), sentiment: dateLabel(blockDates.sentiment)},
+    score_observation: observation,
     state: ready ? "ready" : "empty",
-    state_message: ready ? "市场数据已更新" : "市场数据暂不可用",
+    state_message: ready ? "各模块按各自业务日期展示" : "市场数据暂不可用",
     overview: {
       score: marketScore === null ? null : Number(marketScore.toFixed(1)),
-      score_label: marketScore === null ? "待评估" : `${Number(marketScore.toFixed(1))} 分`,
+      score_label: marketScore === null ? "待评估" : `${Number(marketScore.toFixed(1))} 分${observation.status === "ready" ? "" : " · 待复核"}`,
       phase,
       risk_label: riskLabel,
       sh_change: mobilePercent(firstNumber(flow.sh_pct, null)),
@@ -3621,6 +3906,7 @@ function mobileMarketCenterPayload(values) {
     },
     industry_overview: {
       mood: industryMood,
+      ...industryConclusion,
       rise_count: riseCount,
       flat_count: flatCount,
       fall_count: fallCount,
@@ -3630,7 +3916,7 @@ function mobileMarketCenterPayload(values) {
         : "--",
       sample_count: industryFlows.length,
     },
-    sectors: sectors.map(({ hot_score, ...row }) => row),
+    sectors,
     indices,
     leaders,
     laggards,
@@ -3646,6 +3932,9 @@ function mobileMarketCenterPayload(values) {
       mainNet,
     }),
     advice,
+    risk_portrait: marketRiskPortrait({scoreRow:score,observation,sentimentRows:values.sentimentRows,
+      flowRows:values.flowRows,industryRows:values.industryRows,capitalValue:mobileMoneyAmount,
+      industryValue:row=>mobileIndustryMoneyAmount(row,firstNumber(row.net_amount,row.net_inflow,row.main_net,null))}),
   };
 }
 
@@ -3916,19 +4205,16 @@ function mobileRatingLabel(value, score = null) {
 
 function mobileRiskLabel(value, score = null) {
   const text = safeText(value || "", 32);
-  if (["较低", "中等", "较高", "严重"].includes(text)) return text;
-  const normalized = text.toLowerCase();
-  if (["low", "minor"].includes(normalized)) return "较低";
-  if (["medium", "moderate"].includes(normalized)) return "中等";
-  if (["high"].includes(normalized)) return "较高";
-  if (["critical", "severe"].includes(normalized)) return "严重";
-  const number = Number(score);
-  if (Number.isFinite(number)) return number >= 80 ? "严重" : number >= 60 ? "较高" : number >= 35 ? "中等" : "较低";
-  return "待评估";
+  const number = score === null || score === undefined || score === "" ? NaN : Number(score);
+  const explicit = normalizeRiskLevel(text);
+  const level = text && explicit !== RiskLevel.UNKNOWN
+    ? explicit
+    : mobileRiskLevelFromScore(number);
+  return riskLevelLabel(level,{style:'standard'});
 }
 
 function mobileResearchTone(score, riskLabel) {
-  if (riskLabel === "严重" || riskLabel === "较高") return "warning";
+  if (riskLevelIsAtLeast(riskLabel,RiskLevel.HIGH)) return "warning";
   if (Number(score) >= 70) return "success";
   if (Number(score) < 50) return "danger";
   return "primary";
@@ -3958,6 +4244,16 @@ function mobileMoneyAmount(value) {
   return `${sign}${absolute.toFixed(0)} 元`;
 }
 
+function mobileBondScale(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "--";
+  // Historical bond masters contain both display-scaled values (亿元) and
+  // base-CNY values. Normalize both representations at the presentation edge.
+  if (number < 10000) return `${number.toFixed(2)} 亿元`;
+  return mobileMoneyAmount(number).replace(/^\+/, "");
+}
+
 function mobileIndustryMoneyAmount(row, value) {
   if (value === null || value === undefined || value === "") return "--";
   const number = Number(value);
@@ -3970,13 +4266,29 @@ function mobileIndustryMoneyAmount(row, value) {
   }
   if (/万|10k/.test(unit)) return `${sign}${absolute.toFixed(2)} 万元`;
   if (/元|cny|rmb|yuan/.test(unit)) return mobileMoneyAmount(number);
-  // Current production snapshots store base CNY even when the upstream source
-  // is Sina or industry_fund_flow_cache. Only an explicit unit may override the
-  // numeric scale; source names are lineage, not unit metadata. Small legacy
-  // values remain compatible with historical snapshots that were stored in 亿.
+  // Source names are lineage, not unit metadata. Current materialized snapshots
+  // usually store base CNY and therefore have large absolute values; older raw
+  // industry rows can store display-scaled 亿 values. Keep the compatibility
+  // boundary here so desktop and mobile both follow the same display contract.
   return absolute < 10000
     ? `${sign}${absolute.toFixed(2)} 亿元`
     : mobileMoneyAmount(number);
+}
+
+function inferredIndustryAmountUnit(row = {}) {
+  const explicit = firstText(row.amount_unit, row.net_amount_unit, row.unit);
+  if (explicit) return explicit;
+  const contract = firstText(row.amount_contract, row.money_contract, row.unit_contract).toLowerCase();
+  if (/cny|yuan|元|sector-flow|industry-factor-calculation/.test(contract)) return "CNY";
+  const values = [
+    firstNumber(row.net_amount, null),
+    firstNumber(row.net_inflow, null),
+    firstNumber(row.main_net, null),
+    firstNumber(row.fund_in, null),
+    firstNumber(row.fund_out, null),
+  ].filter((value) => value !== null);
+  if (values.some((value) => Math.abs(value) >= 10000)) return "CNY";
+  return "";
 }
 
 function mobilePrice(value) {
@@ -4299,6 +4611,13 @@ function mobileDeepAnalysisUnlimited(env, user) {
     .includes(email);
 }
 
+async function authorizeMobileStockRead(env, user, license, request, allowClaim = false) {
+  return authorizeStockRead(env, {user, license, code:request.code, businessDate:request.data_date || '',
+    editionScopes:dataSyncEditionScopes(license.edition), unlimited:mobileDeepAnalysisUnlimited(env,user),
+    usageDate:chinaTodayIso(), quotaLimit:Math.max(1,intEnv(env.MOBILE_DAILY_DEEP_ANALYSIS_LIMIT,5)),
+    allowClaim, grantedAt:nowIso()});
+}
+
 function mobileDeepAnalysisQuotaPayload(env, user, used = 0) {
   const limit = Math.max(1, intEnv(env.MOBILE_DAILY_DEEP_ANALYSIS_LIMIT, 5));
   const unlimited = mobileDeepAnalysisUnlimited(env, user);
@@ -4355,12 +4674,7 @@ function mobileBootstrapPayload(options) {
       version: options.latestPackageRow.version,
     }
     : null;
-  const freshness = firstText(
-    options.market.data_quality && options.market.data_quality.freshness,
-    options.market.sections && options.market.sections.regime && options.market.sections.regime.effective_trade_date,
-    options.market.sections && options.market.sections.capital_flow && options.market.sections.capital_flow.date,
-    options.market.as_of === "latest_available" ? "" : options.market.as_of
-  );
+  const freshness = resolveMarketScore(options.market).business_date || "";
   const dataDate = mobileDataDate(freshness);
   const portfolioDataDate = mobileDataDate(maxText(portfolioItems.map((item) => item.price_as_of))) || dataDate;
   const marketPresentation = mobileMarketPresentation(options.market);
@@ -4411,6 +4725,8 @@ function mobileBootstrapPayload(options) {
       data_date: dataDate,
       market_state: marketTitle,
       market_detail: marketDetail,
+      score_observation: marketPresentation.score_observation,
+      block_dates: marketPresentation.block_dates,
       portfolio_risk: risk.label,
       review_count: reviews.length,
       changes,
@@ -4424,6 +4740,17 @@ function mobileBootstrapPayload(options) {
         ? `组合数据已同步 · ${mobileTime(generatedAt)}`
         : "尚未同步组合持仓",
       data_date: portfolioDataDate,
+      // Cloud portfolio analysis is not a desktop monitoring subscription.
+      // Account-bound events live behind separate authenticated monitoring endpoints.
+      monitoring: {
+        schema_version: "monitoring-view.v1",
+        scope: "cloud_portfolio",
+        state: "view_only",
+        data_date: portfolioDataDate,
+        observed_at: null,
+        reason: "当前页面是云端组合分析；桌面账户事件、绑定状态与回执请在监测通知单独核对。",
+        receipt_available: false,
+      },
       risk_state: risk.state,
       risk_score: risk.score,
       risk_label: risk.label,
@@ -4491,11 +4818,11 @@ function mobileMarketPresentation(market) {
   const capital = safeJsonObject(sections.capital_flow || market.capital_flow || {});
   const rawBrief = firstText(summary.brief);
   const phaseMatch = rawBrief.match(/phase=([^|\s]+)/i);
-  const scoreMatch = rawBrief.match(/score=([0-9.]+)/i);
   const directionMatch = rawBrief.match(/(?:capital_direction|direction)=([^|\s]+)/i);
   const phaseRaw = firstText(regime.phase_label, regime.market_phase, regime.phase, phaseMatch && phaseMatch[1]);
   const phase = mobileMarketPhaseLabel(phaseRaw);
-  const score = firstNumber(regime.market_score, summary.score, scoreMatch && scoreMatch[1], null);
+  const observation = resolveMarketScore(market);
+  const score = observation.value;
   const mainNet = firstNumber(capital.main_net, capital.net_amount, capital.net_inflow, null);
   const directionRaw = firstText(capital.direction, directionMatch && directionMatch[1]);
   const flow = mainNet !== null
@@ -4506,9 +4833,9 @@ function mobileMarketPresentation(market) {
         ? "资金整体偏流入"
         : "资金方向仍待确认";
   const riskLabel = mobileRiskLabel(firstText(regime.risk_level, summary.risk_level));
-  const title = phase === "观察阶段" ? "市场以震荡观察为主" : `市场处于${phase}`;
+  const title = phase === "未知" ? "市场阶段待评估" : phase === "观察阶段" ? "市场以震荡观察为主" : `市场处于${phase}`;
   const detailParts = [];
-  if (score !== null) detailParts.push(`市场活跃度 ${Math.round(score)} 分`);
+  if (score !== null) detailParts.push(`正式市场评分 ${score} 分${observation.status === "ready" ? "" : "（待复核）"}`);
   detailParts.push(flow);
   if (riskLabel !== "待评估") detailParts.push(`整体风险${riskLabel}`);
   const curatedBrief = mobileUserText(rawBrief, "");
@@ -4516,10 +4843,12 @@ function mobileMarketPresentation(market) {
   const titleIsTechnical = /overview|云端|缓存|上下文|analysis/i.test(curatedTitle);
   const briefIsTechnical = /云端|缓存|已发布|上下文|analysis|cache/i.test(curatedBrief);
   return {
+    score_observation: observation,
+    block_dates: {score: observation.business_date, indices: dateScope(sections.indices || []), capital: dateScope(Object.keys(capital).length ? [capital] : [])},
     title: curatedTitle && !titleIsTechnical
       ? curatedTitle
       : title,
-    detail: curatedBrief && !briefIsTechnical
+    detail: curatedBrief && !briefIsTechnical && !observation.summary_conflict
       ? curatedBrief
       : score === null && flow === "资金方向仍待确认"
         ? "市场状态正在更新，当前资金方向仍待确认。"
@@ -4529,6 +4858,9 @@ function mobileMarketPresentation(market) {
 
 function mobileMarketPhaseLabel(value) {
   const text = String(value || "").toLowerCase();
+  if (/熊市|^bear$/.test(text)) return "熊市";
+  if (/牛市|^bull$/.test(text)) return "牛市";
+  if (/未知|^unknown$/.test(text) || !text) return "未知";
   if (/启动|startup|launch/.test(text)) return "启动阶段";
   if (/发酵|ferment/.test(text)) return "发酵阶段";
   if (/高潮|climax|overheat/.test(text)) return "高位阶段";
@@ -4550,14 +4882,12 @@ function mobileRisk(portfolio, positionCount = null) {
       detail: "同步或添加持仓后可生成组合风险分析",
     };
   }
-  const rawLevel = firstText(assessment.level, summary.risk_level, "unknown").toLowerCase();
+  const rawLevel = normalizeRiskLevel(firstText(assessment.level, summary.risk_level, "unknown"));
   const explicit = firstNumber(assessment.score, assessment.risk_score, summary.risk_score, null);
   const score = explicit === null
-    ? ({ low: 30, medium: 60, high: 85, critical: 95 }[rawLevel] || 0)
+    ? riskLevelScore(rawLevel,{profile:'portfolio'})
     : Math.round(Math.max(0, Math.min(100, explicit)));
-  const label = ({ low: "较低", medium: "中等", high: "较高", critical: "严重", unknown: "待评估" })[rawLevel]
-    || rawLevel
-    || "待评估";
+  const label = riskLevelLabel(rawLevel,{style:'standard'});
   const warnings = Array.isArray(assessment.warnings) ? assessment.warnings : [];
   return {
     state: explicit === null ? "provisional" : "ready",
@@ -5791,10 +6121,16 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/batches", async (ctx) => 
   const existing = await ctx.env.DB.prepare("SELECT * FROM production_upload_batches WHERE batch_id = ?")
     .bind(record.batch_id)
     .first();
+  if (existing && (String(existing.manifest_hash || "") !== record.manifest_hash
+      || existing.edition_scope !== record.edition_scope)) {
+    throwHttp(409, "production_upload_batch_identity_conflict");
+  }
   if (existing && String(existing.status || "") === "committed") {
     return json({ ok: true, batch_id: record.batch_id, status: "committed", already_committed: true });
   }
-  if (existing && body.resume && String(existing.manifest_hash || "") === record.manifest_hash && !["aborted", "committing"].includes(String(existing.status || ""))) {
+  // A failed commit leaves staged data intact. Return its receipts so the client
+  // can skip accepted chunks and retry the atomic commit, never reset the batch.
+  if (existing && body.resume && String(existing.status || "") !== "aborted") {
     const chunks = await listProductionUploadChunks(ctx.env, record.batch_id);
     return json({
       ok: true,
@@ -5810,8 +6146,7 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/batches", async (ctx) => 
     await ctx.env.DB.prepare("DELETE FROM production_upload_chunks WHERE batch_id = ?").bind(record.batch_id).run();
     await ctx.env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(record.batch_id).run();
   } else if (existing) {
-    await ctx.env.DB.prepare("DELETE FROM production_upload_chunks WHERE batch_id = ?").bind(record.batch_id).run();
-    await ctx.env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(record.batch_id).run();
+    throwHttp(409, "production_upload_batch_resume_required");
   }
   await insertProductionUploadBatch(ctx.env, record);
   await audit(ctx.env, "create_production_upload_batch", "admin_api", {
@@ -5826,9 +6161,8 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/batches", async (ctx) => 
 route("POST", "/v1/scorpio_v1_admin/production-uploads/chunks", async (ctx) => {
   requireAdmin(ctx);
   const body = await readJson(ctx.request);
-  const chunk = normalizeProductionUploadChunk(body);
   const batch = await ctx.env.DB.prepare("SELECT * FROM production_upload_batches WHERE batch_id = ?")
-    .bind(chunk.batch_id)
+    .bind(safeText(body.batch_id || "", 96))
     .first();
   if (!batch) {
     throwHttp(404, "production_upload_batch_not_found");
@@ -5836,6 +6170,13 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/chunks", async (ctx) => {
   if (["committed", "aborted", "committing"].includes(String(batch.status || ""))) {
     throwHttp(409, `production_upload_batch_${batch.status}`);
   }
+  let retainedPrevious = '';
+  if (body.table_name === 'stock_hourly_history') {
+    try { retainedPrevious = await validateHourlyUploadRetention(ctx.env, batch); }
+    catch (error) { throwHttp(409, error.message); }
+  }
+  const chunk = normalizeProductionUploadChunk(body, retainedPrevious);
+  if (chunk.edition_scope !== batch.edition_scope) throwHttp(409, 'production_upload_edition_mismatch');
   const existingChunk = await ctx.env.DB.prepare(
     "SELECT row_count, chunk_hash FROM production_upload_chunks WHERE batch_id = ? AND table_name = ? AND chunk_index = ?"
   ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index).first();
@@ -5884,6 +6225,17 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/commit", async (ctx) => {
   if (String(batch.status || "") === "aborted") {
     throwHttp(409, "production_upload_batch_aborted");
   }
+  const hourlyManifest = parseJson(batch.manifest_json || "{}", {});
+  if ((hourlyManifest.tables || []).some((item) => item.table_name === "stock_hourly_history")) {
+    const [first, next] = hourlyRetentionWindow();
+    let retainedPrevious = '';
+    try { retainedPrevious = await validateHourlyUploadRetention(ctx.env, batch); }
+    catch (error) { throwHttp(409, error.message); }
+    const obsolete = await ctx.env.DB.prepare("SELECT COUNT(*) AS n FROM production_upload_staging_rows "
+      + "WHERE batch_id=? AND table_name='stock_hourly_history' AND (data_date<? OR data_date>=?) AND data_date<>?")
+      .bind(batchId, first, next, retainedPrevious).first();
+    if (Number(obsolete?.n || 0)) throwHttp(409, "hourly_history_month_changed_rebuild_upload");
+  }
   const stats = await ctx.env.DB.prepare(
     `SELECT COUNT(*) AS chunk_count, COALESCE(SUM(row_count), 0) AS row_count
      FROM production_upload_chunks
@@ -5908,18 +6260,9 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/commit", async (ctx) => {
   }
   const now = nowIso();
   await ctx.env.DB.prepare(
-    "UPDATE production_upload_batches SET status = 'committing', updated_at = ? WHERE batch_id = ?"
+    "UPDATE production_upload_batches SET status = 'committing', updated_at = ? WHERE batch_id = ? AND status IN ('created', 'receiving')"
   ).bind(now, batchId).run();
-  await commitProductionUploadBatch(ctx.env, batch, batchId);
-  await ctx.env.DB.prepare(
-    `UPDATE production_upload_batches
-     SET status = 'committed',
-         received_row_count = ?,
-         received_chunk_count = ?,
-         committed_at = ?,
-         updated_at = ?
-     WHERE batch_id = ?`
-  ).bind(rowCount, chunkCount, now, now, batchId).run();
+  await commitProductionUploadBatch(ctx.env, batch, batchId, rowCount, chunkCount, now);
   await audit(ctx.env, "commit_production_upload_batch", "admin_api", {
     batch_id: batchId,
     row_count: rowCount,
@@ -5942,6 +6285,49 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/rollback", async (ctx) =>
     reason: safeText(body.reason || "", 500),
   });
   return json({ ok: true, batch_id: batchId, status: "aborted" });
+});
+
+route("POST", "/v1/scorpio_v1_admin/production-uploads/row-hashes", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request);
+  const tableName = safeText(body.table_name || "", 96);
+  const editionScope = normalizeProductionEditionScope(body.edition_scope || "standard_pro");
+  if (!tableName || !PRODUCTION_UPLOAD_TABLES.has(tableName)) {
+    throwHttp(400, "production_upload_table_not_allowed");
+  }
+  const rowKeys = Array.isArray(body.row_keys)
+    ? body.row_keys.map((key) => safeText(key || "", 128)).filter(Boolean)
+    : [];
+  if (rowKeys.length > 500) throwHttp(400, "production_upload_hash_lookup_too_large");
+  if (!rowKeys.length) {
+    const count = await ctx.env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM production_table_rows WHERE table_name = ? AND edition_scope = ?"
+    ).bind(tableName, editionScope).first();
+    return json({ ok: true, table_name: tableName, edition_scope: editionScope,
+      table_row_count: Number(count?.n || 0), matched: 0, rows: {} });
+  }
+  // Return only the row_hash for the requested row_keys so a resumable client can
+  // skip unchanged rows (content dedupe). Bound each IN clause to avoid SQLite
+  // variable-count limits on large tables like fund_profiles.
+  const rows = {};
+  const placeholders = (count) => Array.from({ length: count }, () => "?").join(",");
+  // D1 allows 100 bound parameters: two fixed parameters + at most 98 keys.
+  for (const group of chunkArray(rowKeys, 98)) {
+    const result = await ctx.env.DB.prepare(
+      `SELECT row_key, row_hash FROM production_table_rows
+       WHERE table_name = ? AND edition_scope = ? AND row_key IN (${placeholders(group.length)})`
+    ).bind(tableName, editionScope, ...group).all();
+    for (const row of result.results || []) {
+      rows[row.row_key] = row.row_hash;
+    }
+  }
+  return json({
+    ok: true,
+    table_name: tableName,
+    edition_scope: editionScope,
+    matched: Object.keys(rows).length,
+    rows,
+  });
 });
 
 async function getAdminProductionUploadBatchDetail(ctx) {
@@ -6056,6 +6442,14 @@ function compactCounts(row, keys) {
   return Object.fromEntries(keys.map((key) => [key, numberField(row, key)]));
 }
 
+registerAccountCenterRoutes({route, requireUser, requireAdmin, readJson, json, throwHttp,
+  todayIso, addDays, issueLicensePayload, uniqueActivationCode, normalizeEdition,
+  allowRateLimit, sha256Hex, audit});
+registerMonitoringRoutes({route, requireUser, readJson, json, throwHttp, verifyMobileLicense,
+  verifyAnalysisLicense, applyAnalysisSecurity, sha256Hex});
+registerMinuteDeliveryRoutes({route, requireAdmin, requireUser, verifyMobileLicense, applyAnalysisSecurity,
+  authorizeMobileStockRead, editionScopes: dataSyncEditionScopes, readJson, json});
+
 function firstBatchRow(result) {
   return result && Array.isArray(result.results) ? result.results[0] || null : null;
 }
@@ -6107,6 +6501,7 @@ async function requireUser(ctx) {
 function requireAdmin(ctx) {
   const configured = String(ctx.env.ADMIN_API_TOKEN || "");
   const previous = String(ctx.env.ADMIN_API_TOKEN_PREVIOUS || "");
+  const ephemeral = String(ctx.env.ADMIN_API_TOKEN_EPHEMERAL || "");
   const provided = String(ctx.request.headers.get("X-Admin-Token") || "");
   if (configured && timingSafeEqual(provided, configured)) {
     ctx.adminActor = String(ctx.env.ADMIN_API_TOKEN_ID || "admin_token_current");
@@ -6114,6 +6509,10 @@ function requireAdmin(ctx) {
   }
   if (previous && timingSafeEqual(provided, previous)) {
     ctx.adminActor = String(ctx.env.ADMIN_API_TOKEN_PREVIOUS_ID || "admin_token_previous");
+    return;
+  }
+  if (ephemeral && timingSafeEqual(provided, ephemeral)) {
+    ctx.adminActor = String(ctx.env.ADMIN_API_TOKEN_EPHEMERAL_ID || "admin_token_ephemeral");
     return;
   }
   if (!configured) {
@@ -6163,29 +6562,6 @@ async function runAdminRequest(ctx, handler) {
       error.adminAuditLogged = true;
     }
     throw error;
-  }
-}
-
-async function verifyFeedbackTurnstile(env, body, clientAddress) {
-  const secret = String(env.FEEDBACK_TURNSTILE_SECRET || "").trim();
-  if (!secret) {
-    return;
-  }
-  const token = safeText(body.turnstile_token || body.cf_turnstile_response || "", 2048);
-  if (!token) {
-    throwHttp(403, "turnstile_token_required");
-  }
-  const form = new URLSearchParams({ secret, response: token });
-  if (clientAddress && clientAddress !== "unknown") {
-    form.set("remoteip", clientAddress);
-  }
-  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    body: form,
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.success) {
-    throwHttp(403, "turnstile_verification_failed");
   }
 }
 
@@ -6300,7 +6676,31 @@ async function runScheduledMaintenance(env) {
   await Promise.all([
     runAnalysisMonitor(env),
     cleanupStaleProductionUploads(env),
+    cleanupHourlyHistory(env),
   ]);
+}
+
+export async function cleanupHourlyHistory(env, now = new Date()) {
+  const [first, next] = hourlyRetentionWindow(now);
+  const retained = hourlyRetentionPredicate('r', now);
+  // Bounded deletes use only the exact hourly logical table. Local history,
+  // other cloud datasets, batch receipts and account tables remain untouched.
+  const result = await env.DB.prepare(`DELETE FROM production_table_rows WHERE rowid IN (
+    SELECT r.rowid FROM production_table_rows r WHERE r.table_name='stock_hourly_history'
+      AND NOT ${retained.sql} LIMIT 20000
+  )`).bind(...retained.params).run();
+  // Receiving/committing staging belongs to its immutable upload plan. The
+  // stale-upload cleaner owns abandoned batches; a month change cannot erase
+  // a valid in-flight upload before its guarded commit.
+  const stagedRetention = hourlyRetentionPredicate('s', now);
+  const staged = await env.DB.prepare(`DELETE FROM production_upload_staging_rows WHERE rowid IN (
+    SELECT s.rowid FROM production_upload_staging_rows s
+      JOIN production_upload_batches b ON b.batch_id=s.batch_id
+      WHERE s.table_name='stock_hourly_history' AND b.status IN ('committed','aborted')
+      AND NOT ${stagedRetention.sql} LIMIT 20000
+  )`).bind(...stagedRetention.params).run();
+  return { table: "stock_hourly_history", retained_month: first.slice(0, 7),
+    deleted_rows: result.meta?.changes || 0, deleted_staging_rows: staged.meta?.changes || 0 };
 }
 
 async function cleanupStaleProductionUploads(env) {
@@ -7125,40 +7525,47 @@ async function handleAssetAnalysisGet(ctx, options) {
   return json(response);
 }
 
-async function analysisCacheHealth(env) {
+export async function analysisCacheHealth(env) {
   try {
     const row = await env.DB.prepare(
-      `SELECT COUNT(*) AS row_count, MAX(r.updated_at) AS updated_at
-       FROM production_table_rows r
-       JOIN production_upload_batches b ON b.batch_id = r.batch_id
-       WHERE b.status = 'committed'`
+      `SELECT batch_id, received_row_count AS row_count, committed_at AS updated_at
+       FROM production_upload_batches
+       WHERE status = 'committed' AND received_row_count > 0
+       ORDER BY created_at DESC
+       LIMIT 1`
     ).first();
     const rowCount = numberField(row, "row_count");
     return {
       ready: rowCount > 0,
       row_count: rowCount,
       updated_at: row && row.updated_at ? row.updated_at : "",
-      source: "production_table_rows",
+      batch_id: row && row.batch_id ? row.batch_id : "",
+      row_count_semantics: "latest_committed_nonempty_batch",
+      source: "production_upload_batches",
     };
   } catch (error) {
     return {
       ready: false,
       row_count: 0,
       error: safeText(error && error.message ? error.message : String(error), 240),
-      source: "production_table_rows",
+      row_count_semantics: "latest_committed_nonempty_batch",
+      source: "production_upload_batches",
     };
   }
 }
 
 async function analysisFallbackStockBundle(env, request, options, reason = "cache_fallback") {
-  const [financialRows, dailyRows, infoRows, ohlcvRows, riskRows] = await Promise.all([
-    publishedRowsForCode(env, "stock_financial_metrics", options.license, request.code, 1),
-    publishedRowsForCode(env, "stock_daily_latest", options.license, request.code, 1),
+  const [financialRows, incomeRows, cashflowRows, balanceRows, dailyRows, infoRows, ohlcvRows, riskRows] = await Promise.all([
+    publishedRowsForCode(env, "stock_financial_metrics", options.license, request.code, 8, {as_of_date:request.data_date}),
+    publishedRowsForCode(env, "financial_income_statement", options.license, request.code, 8, {as_of_date:request.data_date}),
+    publishedRowsForCode(env, "financial_cashflow_statement", options.license, request.code, 8, {as_of_date:request.data_date}),
+    publishedRowsForCode(env, "financial_balance_sheet", options.license, request.code, 8, {as_of_date:request.data_date}),
+    publishedRowsForCode(env, "stock_daily_latest", options.license, request.code, 1, {as_of_date:request.data_date}),
     publishedRowsForCode(env, "stock_info", options.license, request.code, 1),
-    publishedRowsForCode(env, "stock_daily_ohlcv", options.license, request.code, 60),
-    publishedRowsForCode(env, "stock_risk_metrics", options.license, request.code, 1),
+    publishedRowsForCode(env, "stock_daily_ohlcv", options.license, request.code, 60, {as_of_date:request.data_date}),
+    publishedRowsForCode(env, "stock_risk_metrics", options.license, request.code, 1, {as_of_date:request.data_date}),
   ]);
-  const financial = financialRows[0] || {};
+  const financial = financialDisplayInputs(financialRows[0] || {},request.code,request.data_date||dailyRows[0]?.trade_date||dailyRows[0]?._data_date||new Date(Date.now()+8*3600000).toISOString().slice(0,10));
   const daily = dailyRows[0] || {};
   const info = infoRows[0] || {};
   const riskMetrics = riskRows[0] || {};
@@ -7207,12 +7614,31 @@ async function analysisFallbackStockBundle(env, request, options, reason = "cach
     net_profit: firstNumber(financial.net_profit, financial.parent_net_profit),
     revenue_growth: firstNumber(financial.revenue_growth, financial.or_yoy, financial.operating_revenue_yoy),
     profit_growth: firstNumber(financial.profit_growth, financial.net_profit_yoy, financial.parent_net_profit_yoy),
+    grossprofit_margin: firstNumber(financial.grossprofit_margin),
+    netprofit_margin: firstNumber(financial.netprofit_margin),
+    debt_to_assets: firstNumber(financial.debt_to_assets),
+    current_ratio: firstNumber(financial.current_ratio),
+    quick_ratio: firstNumber(financial.quick_ratio),
+    operating_cashflow_per_share: firstNumber(financial.operating_cashflow_per_share),
+    history: financialRows.map(row=>{
+      const r=financialDisplayInputs(row,request.code,request.data_date||daily.trade_date||daily._data_date||new Date(Date.now()+8*3600000).toISOString().slice(0,10));
+      return compactObject({code:r.code,report_date:r.report_date,report_publish_date:r.report_publish_date,data_available_date:r.data_available_date,
+        data_source:r.data_source,revenue_growth:r.revenue_growth,profit_growth:r.profit_growth,raw_payload:r.raw_payload});
+    }),
     report_publish_date: firstText(financial.report_publish_date, financial.ann_date),
     data_available_date: firstText(financial.data_available_date, financial.updated_at),
     data_source: firstText(financial.data_source, "production_table_rows"),
+    statement_rows: {
+      income: incomeRows,
+      cashflow: cashflowRows,
+      balance: balanceRows,
+    },
   });
   const missing = [];
   if (!financialRows.length) missing.push("stock_financial_metrics");
+  if (!incomeRows.length) missing.push("financial_income_statement");
+  if (!cashflowRows.length) missing.push("financial_cashflow_statement");
+  if (!balanceRows.length) missing.push("financial_balance_sheet");
   if (!dailyRows.length) missing.push("stock_daily_latest");
   if (!ohlcvRows.length && options.feature === "price_technical") missing.push("stock_daily_ohlcv");
   const freshness = maxText([
@@ -7253,6 +7679,12 @@ async function analysisFallbackStockBundle(env, request, options, reason = "cach
         max_drawdown_20: firstNumber(riskMetrics.max_drawdown_20),
         max_drawdown_60: firstNumber(riskMetrics.max_drawdown_60),
         risk_score: firstNumber(riskMetrics.risk_score),
+        extreme_down_days_20: firstNumber(riskMetrics.extreme_down_days_20),
+        avg_turnover_20: firstNumber(riskMetrics.avg_turnover_20),
+        liquidity_amount_20: firstNumber(riskMetrics.liquidity_amount_20),
+        liquidity_amount_unit: firstText(riskMetrics.liquidity_amount_unit),
+        symbol: firstText(riskMetrics.symbol, riskMetrics.code),
+        data_source: firstText(riskMetrics.data_source),
         trade_date: firstText(riskMetrics.trade_date, riskMetrics._data_date),
       }),
       fundamental,
@@ -7269,7 +7701,7 @@ async function analysisFallbackStockBundle(env, request, options, reason = "cach
 
 async function analysisFallbackSharedBundle(env, request, options, reason = "cache_fallback") {
   if (options.feature === "industry_overview") {
-    const rows = latestDateRows(await publishedRows(env, "industry_fund_flow_cache", options.license, { limit: 200 }));
+    const rows = latestDateRows(await publishedRows(env, "industry_fund_flow_cache", options.license, { limit: 200, latest_partition: true }));
     return sharedFallbackPayload(request, options, reason, {
       items: rows.map((row, index) => compactObject({
         name: firstText(row.name, row.sector_name, row.industry_name, row.sector_code, `sector-${index + 1}`),
@@ -7277,7 +7709,7 @@ async function analysisFallbackSharedBundle(env, request, options, reason = "cac
         industry_name: firstText(row.industry_name, row.sector_name, row.name),
         pct_change: firstNumber(row.pct_change, row.change_pct, row.change_percent),
         net_amount: firstNumber(row.net_amount, row.net_inflow, row.main_net),
-        amount_unit: firstText(row.amount_unit, row.net_amount_unit, row.unit, "亿元"),
+        amount_unit: inferredIndustryAmountUnit(row),
         lead_stock: firstText(row.lead_stock, row.leader),
         trade_date: firstText(row.trade_date, row.date, row._data_date),
         rank: firstNumber(row.rank, index + 1),
@@ -7289,7 +7721,7 @@ async function analysisFallbackSharedBundle(env, request, options, reason = "cac
   }
   if (options.feature === "capital_flow") {
     const marketRows = latestDateRows(await publishedRows(env, "market_fund_flow_cache", options.license, { limit: 20 }));
-    const sectorRows = latestDateRows(await publishedRows(env, "industry_fund_flow_cache", options.license, { limit: 200 }));
+    const sectorRows = latestDateRows(await publishedRows(env, "industry_fund_flow_cache", options.license, { limit: 200, latest_partition: true }));
     const marketFlow = marketRows[0] || {};
     return sharedFallbackPayload(request, options, reason, {
       items: sectorRows.map((row, index) => compactObject({
@@ -7297,6 +7729,7 @@ async function analysisFallbackSharedBundle(env, request, options, reason = "cac
         industry_name: firstText(row.industry_name, row.sector_name, row.name),
         net_amount: firstNumber(row.net_amount, row.net_inflow, row.main_net),
         pct_change: firstNumber(row.pct_change, row.change_pct, row.change_percent),
+        amount_unit: inferredIndustryAmountUnit(row),
         trade_date: firstText(row.trade_date, row.date, row._data_date),
         source: firstText(row.data_source, "industry_fund_flow_cache"),
       })),
@@ -7330,43 +7763,8 @@ async function analysisFallbackSharedBundle(env, request, options, reason = "cac
       ...(flowRows.length ? [] : ["market_fund_flow_cache"]),
     ],
     sections: {
-      regime: compactObject({
-        market_score: firstNumber(
-          marketScoreReady ? marketScore.market_score : null,
-          sentiment.market_score,
-          sentiment.sentiment_score,
-          sentiment.score,
-          50
-        ),
-        phase: firstText(
-          marketScoreReady ? marketScore.market_phase : null,
-          sentiment.phase,
-          sentiment.phase_key,
-          sentiment.market_phase,
-          "watch"
-        ),
-        phase_label: firstText(
-          marketScoreReady ? marketScore.market_phase : null,
-          sentiment.phase_label,
-          sentiment.market_phase,
-          "观察"
-        ),
-        risk_level: firstText(marketScoreReady ? marketScore.risk_level : null, sentiment.risk_level, "unknown"),
-        effective_trade_date: firstText(
-          marketScoreReady ? marketScore.trade_date : null,
-          sentiment.trade_date,
-          sentiment._data_date,
-          marketScore.trade_date
-        ),
-        score_version: marketScoreReady ? firstText(marketScore.score_version, "unknown") : "market-sentiment.fallback",
-        score_status: marketScoreReady ? "ready" : "fallback",
-        formal_score_version: firstText(marketScore.score_version, "missing"),
-        formal_score_status: firstText(marketScore.score_status, "missing"),
-        score_source: marketScoreReady ? "market_score_daily" : "market_sentiment_daily",
-        score_breakdown: safeJsonObject(marketScore.score_breakdown_json),
-        score_input_quality: safeJsonObject(marketScore.input_quality_json),
-        score_evidence: safeJsonObject(marketScore.evidence_json),
-      }),
+      regime: publishedMarketRegime(marketScore),
+      sentiment: {score: firstNumber(sentiment.sentiment_score, null), business_date: businessDate(sentiment.trade_date || sentiment._data_date)},
       capital_flow: compactObject({
         date: firstText(flow.trade_date, flow.date, flow._data_date),
         main_net: firstNumber(flow.main_net, flow.net_inflow, flow.net_amount),
@@ -7455,10 +7853,37 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
         code,
         1
       );
+      let fundScoreRows = [];
+      try {
+        fundScoreRows = await publishedRowsForCode(env, "score_history", options.license, code, 10);
+      } catch (error) {
+        console.warn("mobile_fund_score_history_unavailable", {
+          code,
+          error: safeText(error && error.message ? error.message : String(error), 240),
+        });
+      }
       const performanceRow = performanceRows[0] || {};
       const exposureRow = exposureRows[0] || {};
+      const fundScoreRow = fundScoreRows.find(
+        (row) => firstText(row.asset_type).toLowerCase() === "fund"
+      ) || {};
+      const fundScoreDetails = parseJson(fundScoreRow.public_details || fundScoreRow.details || "{}", {});
+      const authoritativeScore = firstNumber(
+        fundScoreRow.total_score,
+        fundScoreDetails.total_score,
+        fundScoreDetails.score,
+        performanceRow.score,
+        null
+      );
       const performance = compactObject({
         ...performanceRow,
+        score: authoritativeScore,
+        rating: firstText(fundScoreDetails.rating, performanceRow.rating),
+        research_summary: firstText(
+          fundScoreDetails.research_summary,
+          fundScoreDetails.summary,
+          performanceRow.research_summary
+        ),
         return_1m: firstNumber(performanceRow.return_1m, performanceRow.return_1m_pct),
         return_3m: firstNumber(performanceRow.return_3m, performanceRow.return_3m_pct),
         return_6m: firstNumber(performanceRow.return_6m, performanceRow.return_6m_pct),
@@ -7510,19 +7935,20 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
         holdings,
         industry: parseJson(exposureRow.industry_json, []),
         risk_factor_tags: parseJson(exposureRow.risk_factor_tags_json, []),
-        asset_allocation: {
-          stock_ratio: firstNumber(exposureRow.equity_exposure_pct, 0),
-          bond_ratio: firstNumber(exposureRow.bond_exposure_pct, 0),
-          cash_ratio: firstNumber(exposureRow.cash_exposure_pct, 0),
-        },
+        asset_allocation: compactObject({
+          stock_ratio: firstNumber(exposureRow.equity_exposure_pct, null),
+          bond_ratio: firstNumber(exposureRow.bond_exposure_pct, null),
+          cash_ratio: firstNumber(exposureRow.cash_exposure_pct, null),
+        }),
       });
       const missing = [
         ...(profileRows.length ? [] : ["fund_profiles"]),
         ...(dailyRows.length ? [] : ["fund_nav_daily"]),
         ...(performanceRows.length ? [] : ["fund_performance_snapshots"]),
         ...(exposureRows.length ? [] : ["fund_exposure_profiles"]),
+        ...(authoritativeScore === null ? ["score_history"] : []),
       ];
-      const score = firstNumber(performance.score, 0);
+      const score = authoritativeScore;
       const name = firstText(profile.fund_name, profile.name, code);
       return {
         status: missing.length ? "partial" : "ready",
@@ -7534,6 +7960,8 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
         data_quality: {
           level: missing.length ? "partial_cache" : "cache",
           freshness: firstText(
+            fundScoreRow.score_date,
+            fundScoreDetails.score_date,
             performance.snapshot_date,
             latestDaily.nav_date,
             exposure.profile_date,
@@ -7544,7 +7972,7 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
         },
         summary: {
           score,
-          rating: firstText(performance.rating, "watch"),
+          rating: firstText(performance.rating, fundScoreDetails.rating, "watch"),
           rating_color: firstText(performance.rating_color),
           risk_level: firstText(profile.risk_level, "unknown"),
           title: `${name} fund analysis`,
@@ -7582,7 +8010,15 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
       ...(profileRows.length ? [] : ["bond_profiles"]),
       ...(dailyRows.length ? [] : ["bond_daily_snapshot"]),
     ];
-    const totalScore = firstNumber(scoreRow.total_score, scoreRow.score, 0);
+    const bondScoreDetails = parseJson(scoreRow.public_details || scoreRow.details || "{}", {});
+    const bondComponentScores = safeJsonObject(bondScoreDetails.scores || {});
+    const totalScore = firstNumber(
+      scoreRow.total_score,
+      scoreRow.score,
+      bondScoreDetails.total_score,
+      bondScoreDetails.score,
+      null
+    );
     const detail = compactObject({
       ...profile,
       ...latestDaily,
@@ -7591,6 +8027,8 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
       bond_price: firstNumber(latestDaily.bond_price, latestDaily.price),
       premium_rate: firstNumber(latestDaily.premium_rate),
       convert_value: firstNumber(latestDaily.convert_value),
+      stock_code: firstText(profile.stock_code, profile.underlying_code),
+      stock_name: firstText(profile.stock_name, profile.underlying_name),
     });
     return {
       status: missing.length ? "partial" : "ready",
@@ -7607,7 +8045,7 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
       },
       summary: {
         score: totalScore,
-        rating: firstText(scoreRow.rating, scoreRow.level, "watch"),
+        rating: firstText(bondScoreDetails.rating, scoreRow.rating, scoreRow.level, "watch"),
         risk_level: "unknown",
         title: `${firstText(detail.bond_name, code)} bond analysis`,
         brief: missing.length
@@ -7617,10 +8055,16 @@ async function analysisFallbackAssetBundle(env, request, options, reason = "cach
       sections: {
         detail,
         scores: {
+          ...bondComponentScores,
           total_score: totalScore,
-          rating: firstText(scoreRow.rating, scoreRow.level, "watch"),
+          rating_label: firstText(bondScoreDetails.rating, scoreRow.rating, scoreRow.level, "watch"),
         },
-        advice: firstText(scoreRow.advice),
+        advice: firstText(
+          bondScoreDetails.advice,
+          bondScoreDetails.research_summary,
+          bondScoreDetails.summary,
+          scoreRow.advice
+        ),
       },
       items: [],
       risk_flags: missing.map((item) => `missing:${item}`),
@@ -7818,12 +8262,13 @@ async function publishedRows(env, tableName, license, options = {}) {
   }
   const scopes = dataSyncEditionScopes(license && license.edition ? license.edition : "personal_pro");
   const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const editionScopeFilter = `r.edition_scope IN (${scopePlaceholders})`;
   const scopePriority = scopes
     .map((scope, index) => `WHEN ? THEN ${index}`)
     .join(" ");
   const where = [
     "r.table_name = ?",
-    `r.edition_scope IN (${scopePlaceholders})`,
+    editionScopeFilter,
     "b.status = 'committed'",
   ];
   const params = [tableName, ...scopes];
@@ -7832,10 +8277,23 @@ async function publishedRows(env, tableName, license, options = {}) {
     where.push("r.module = ?");
     params.push(module);
   }
-  const dataDate = tableName === "score_history" ? normalizeMobileDataDate(options.data_date || "") : "";
+  const dataDate = ["score_history","stock_signal_observation_daily","market_score_daily","market_sentiment_daily","market_fund_flow_cache","industry_fund_flow_cache",
+    "industry_member_observation_daily","sector_classification_snapshots","industry_risk_daily",
+    "sector_rotation_daily"].includes(tableName)
+    ? normalizeMobileDataDate(options.data_date || "") : "";
   if (dataDate) {
     where.push("r.data_date = ?");
     params.push(dataDate);
+  }
+  if (["stock_hourly_history", "stock_daily_latest", "stock_daily_ohlcv", "stock_risk_metrics", "stock_financial_metrics",
+    "financial_income_statement", "financial_cashflow_statement", "financial_balance_sheet"].includes(tableName) && options.as_of_date) {
+    where.push("r.data_date <= ?");
+    params.push(normalizeMobileDataDate(options.as_of_date));
+  }
+  if (tableName === "stock_hourly_history") {
+    const retained = hourlyRetentionPredicate();
+    where.push(retained.sql);
+    params.push(...retained.params);
   }
   const codePatterns = Array.isArray(options.code_patterns) ? options.code_patterns.filter(Boolean) : [];
   const assetCodes = Array.isArray(options.asset_codes) ? options.asset_codes.filter(Boolean) : [];
@@ -7858,23 +8316,119 @@ async function publishedRows(env, tableName, license, options = {}) {
       params.push(`%${pattern}%`);
     }
   }
-  const limit = Math.max(1, Math.min(Number(options.limit || 50), 500));
-  const rows = await env.DB.prepare(
-    `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
-            r.edition_scope, r.module, r.batch_id, r.updated_at
-      FROM production_table_rows r
-       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+  const limit = Math.max(1, Math.min(Number(options.limit || 50),
+    tableName === "sector_rotation_daily" ? SECTOR_DELIVERY_LIMIT : 500));
+  if (tableName === "industry_fund_flow_cache" && options.latest_partition) {
+    where.push(`r.data_date = (SELECT MAX(d.data_date) FROM production_table_rows d
+      JOIN production_upload_batches db ON db.batch_id=d.batch_id
+      WHERE d.table_name=? AND d.module=? AND d.edition_scope IN (${scopePlaceholders}) AND db.status='committed')`);
+    params.push(tableName, module, ...scopes);
+  }
+  // Edition scopes are delivery copies, not additional industries. Resolve the
+  // same published row_key before LIMIT so duplicate copies cannot crowd out
+  // genuine rows. Retain the existing date/scope/update authority order.
+  const deduplicateScopes = ["stock_signal_observation_daily", "industry_fund_flow_cache", "industry_member_observation_daily", "sector_classification_snapshots", "industry_risk_daily",
+    "sector_rotation_daily", "stock_hourly_history"].includes(tableName);
+  let readSql;
+  let readParams;
+  if (deduplicateScopes) {
+    // The primary key permits at most one copy of a row_key in each edition.
+    // Therefore the first `limit` rows from every authorized edition contain
+    // every row that can possibly survive into the first `limit` delivery rows.
+    // Bound each indexed edition stream before ROW_NUMBER so D1 ranks at most
+    // limit * scope_count rows instead of materializing the whole publication
+    // table. The final authority and display orders intentionally match the
+    // previous full-table window query.
+    const singleScopeWhere = where
+      .map((clause) => clause === editionScopeFilter ? "r.edition_scope = ?" : clause)
+      .join(" AND ");
+    const paramsWithoutEditionScopes = [params[0], ...params.slice(1 + scopes.length)];
+    const candidateReadSource = tableName === "sector_rotation_daily"
+      ? "production_table_rows r INDEXED BY idx_production_table_rows_lookup"
+      : "production_table_rows r";
+    const scopeCandidates = scopes.map((scope, index) => `scope_${index} AS (
+      SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+             r.edition_scope, r.module, r.batch_id, r.updated_at,
+             ${index} AS scope_rank
+      FROM ${candidateReadSource}
+      JOIN production_upload_batches b ON b.batch_id = r.batch_id
+      WHERE ${singleScopeWhere}
+      ORDER BY r.data_date DESC, r.updated_at DESC, r.row_key ASC, r.row_hash ASC
+      LIMIT ?
+    )`);
+    const candidateUnion = scopes.map((_, index) => `SELECT * FROM scope_${index}`).join(" UNION ALL ");
+    readSql = `WITH ${scopeCandidates.join(", ")}, candidates AS (
+      ${candidateUnion}
+    ), ranked AS (
+      SELECT candidates.*, ROW_NUMBER() OVER (
+        PARTITION BY table_name, module, row_key
+        ORDER BY data_date DESC, scope_rank ASC, updated_at DESC, row_hash ASC
+      ) AS delivery_rank
+      FROM candidates
+    )
+    SELECT table_name, row_key, row_hash, row_json, data_date,
+           edition_scope, module, batch_id, updated_at
+    FROM ranked
+    WHERE delivery_rank = 1
+    ORDER BY data_date DESC, scope_rank ASC, updated_at DESC, row_key ASC
+    LIMIT ?`;
+    readParams = [
+      ...scopes.flatMap((scope) => [
+        paramsWithoutEditionScopes[0],
+        scope,
+        ...paramsWithoutEditionScopes.slice(1),
+        limit,
+      ]),
+      limit,
+    ];
+  } else {
+    readSql = `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+              r.edition_scope, r.module, r.batch_id, r.updated_at
+        FROM production_table_rows r
+        JOIN production_upload_batches b ON b.batch_id = r.batch_id
+        WHERE ${where.join(" AND ")}
+        ORDER BY r.data_date DESC,
+                 CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
+                 r.updated_at DESC,
+                 r.row_key ASC
+        LIMIT ?`;
+    readParams = [...params, ...scopes, limit];
+  }
+  if (tableName === "industry_fund_flow_cache") {
+    // Historical raw and subsequently materialized snapshots have distinct IDs.
+    // Choose one whole date/source/level partition BEFORE limiting, not one
+    // attractive row per industry. Use source evidence time, not upload time.
+    readSql = `WITH eligible AS (
+      SELECT r.*, CASE r.edition_scope ${scopePriority} ELSE 99 END AS scope_rank,
+        CASE WHEN json_valid(r.row_json) THEN COALESCE(json_extract(r.row_json,'$.source'), json_extract(r.row_json,'$.data_source'), '') ELSE '' END AS flow_source,
+        CASE WHEN json_valid(r.row_json) THEN COALESCE(json_extract(r.row_json,'$.industry_level'), '') ELSE '' END AS flow_level,
+        CASE WHEN json_valid(r.row_json) THEN COALESCE(json_extract(r.row_json,'$.updated_at'), json_extract(r.row_json,'$.created_at'), r.updated_at) ELSE r.updated_at END AS evidence_updated
+      FROM production_table_rows r JOIN production_upload_batches b ON b.batch_id=r.batch_id
       WHERE ${where.join(" AND ")}
-      ORDER BY r.data_date DESC,
-               CASE r.edition_scope ${scopePriority} ELSE 99 END ASC,
-               r.updated_at DESC,
-               r.row_key ASC
-      LIMIT ?`
-  ).bind(...params, ...scopes, limit).all();
+    ), delivery AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY table_name,module,row_key
+        ORDER BY data_date DESC,scope_rank,evidence_updated DESC,row_hash) AS delivery_rank FROM eligible
+    ), partitions AS (
+      SELECT *, MAX(evidence_updated) OVER (PARTITION BY data_date,flow_source,flow_level) AS partition_updated
+      FROM delivery WHERE delivery_rank=1
+    ), selected AS (
+      SELECT *, DENSE_RANK() OVER (PARTITION BY data_date
+        ORDER BY partition_updated DESC,flow_source,flow_level) AS partition_rank FROM partitions
+    ) SELECT table_name,row_key,row_hash,row_json,data_date,edition_scope,module,batch_id,updated_at
+      FROM selected WHERE partition_rank=1
+      ORDER BY data_date DESC,scope_rank,updated_at DESC,row_key LIMIT ?`;
+    readParams = [...scopes, ...params, limit];
+  }
+  const rows = await env.DB.prepare(readSql).bind(...readParams).all();
   return (rows.results || []).map((row) => {
     const payload = dataSyncRowPayload(row);
+    const payloadRow = payload.row || {};
+    const inferredAmountUnit = tableName === "industry_fund_flow_cache"
+      ? inferredIndustryAmountUnit(payloadRow)
+      : "";
     return {
-      ...(payload.row || {}),
+      ...payloadRow,
+      ...(inferredAmountUnit ? {amount_unit: inferredAmountUnit} : {}),
       _data_date: payload.data_date || "",
       _updated_at: payload.updated_at || "",
       _table_name: payload.table_name || tableName,
@@ -8436,8 +8990,9 @@ function activationCode() {
 }
 
 function canUseActivationCode(user, code) {
-  if (!["active", "assigned"].includes(String(code.status || ""))) return false;
+  if (!["active", "assigned", "used"].includes(String(code.status || ""))) return false;
   if (code.assigned_to_user_id && Number(code.assigned_to_user_id) !== Number(user.id)) return false;
+  if (code.used_by_user_id && Number(code.used_by_user_id) !== Number(user.id)) return false;
   if (code.customer_email && normalizeEmail(code.customer_email) !== normalizeEmail(user.email)) return false;
   return true;
 }
@@ -8646,6 +9201,9 @@ function normalizeDataSyncRequest(params) {
     ...normalizeDataPackageRequest(params),
     module: normalizeDataSyncModule(params.get("module") || "target_research"),
     since: safeText(params.get("since") || "", 64),
+    until: safeText(params.get("until") || "", 64),
+    pagination: safeText(params.get("pagination") || "offset_v1", 32),
+    cursor: safeText(params.get("cursor") || "", 768),
     limit: Math.max(1, positiveInteger(params.get("limit"), 2000, 2000)),
     offset: positiveInteger(params.get("offset"), 0, 10000000),
   };
@@ -8775,6 +9333,8 @@ async function getDataSyncTableRows(ctx) {
   const request = normalizeDataSyncRequest(ctx.url.searchParams);
   const license = await verifyDataPackageLicense(ctx.env, user, request);
   const tableName = safeText(ctx.tableName || "", 96);
+  // Rich score payloads can exceed Worker memory with a 2,000-row page.
+  request.limit = dataSyncPageLimit(tableName, request.limit);
   if (!PRODUCTION_UPLOAD_TABLES.has(tableName)) {
     throwHttp(404, "data_sync_table_not_found");
   }
@@ -8794,25 +9354,91 @@ async function getDataSyncTableRows(ctx) {
     where.push("r.module = ?");
     params.push(request.module);
   }
+  if (tableName === "stock_hourly_history") {
+    const retained = hourlyRetentionPredicate();
+    where.push(retained.sql);
+    params.push(...retained.params);
+  }
   if (request.since) {
     where.push("r.updated_at > ?");
     params.push(request.since);
   }
+  const cursorMode = request.pagination === "cursor_v1";
+  const snapshotUntil = cursorMode ? (request.until || nowIso()) : "";
+  if (cursorMode) {
+    where.push("r.updated_at <= ?");
+    params.push(snapshotUntil);
+  }
+  const cursor = cursorMode ? decodeDataSyncCursor(request.cursor) : null;
+  if (cursor) {
+    where.push(`(
+      r.updated_at > ? OR
+      (r.updated_at = ? AND r.row_key > ?) OR
+      (r.updated_at = ? AND r.row_key = ? AND r.edition_scope > ?)
+    )`);
+    params.push(
+      cursor.updated_at,
+      cursor.updated_at,
+      cursor.row_key,
+      cursor.updated_at,
+      cursor.row_key,
+      cursor.edition_scope
+    );
+  }
   const filter = where.join(" AND ");
-  const total = await ctx.env.DB.prepare(
-    `SELECT COUNT(*) AS total
+  if (cursorMode) {
+    return getCursorDataSyncTableRows(ctx, {
+      request,
+      license,
+      tableName,
+      scopes,
+      filter,
+      params,
+      snapshotUntil,
+    });
+  }
+
+  // Sort only page identifiers/lengths. Sorting full JSON at a high OFFSET
+  // materializes hundreds of MB in D1 even when the returned page is small.
+  const order = "r.updated_at ASC, r.table_name ASC, r.row_key ASC, r.edition_scope ASC";
+  const pageRows = await ctx.env.DB.prepare(
+    `SELECT length(CAST(r.row_json AS BLOB)) AS payload_bytes
      FROM production_table_rows r
      JOIN production_upload_batches b ON b.batch_id = r.batch_id
-     WHERE ${filter}`
-  ).bind(...params).first();
+     WHERE ${filter}
+     ORDER BY ${order}
+     LIMIT ? OFFSET ?`
+  ).bind(...params, request.limit, request.offset).all();
+  let pageBytes = 0;
+  let pageLimit = 0;
+  for (const row of pageRows.results || []) {
+    if (pageLimit >= request.limit) break;
+    const bytes = Number(row.payload_bytes || 0) + 1024;
+    if (pageLimit && pageBytes + bytes > 2 * 1024 * 1024) break;
+    pageBytes += bytes;
+    pageLimit += 1;
+  }
+  // The D1 read itself must stay within the same bounded page contract. When
+  // a full identifier page is returned, conservatively expose has_more; an
+  // exact-multiple dataset may cause one final empty request but never skips
+  // or duplicates a row. Payload-byte truncation is detected independently.
+  const hasMore = (pageRows.results || []).length >= request.limit
+    || (pageRows.results || []).length > pageLimit;
+  // Keep progress for a single large row; preserve the requested limit on an
+  // empty page so callers never receive a zero pagination limit.
+  request.limit = pageLimit || request.limit;
   const rows = await ctx.env.DB.prepare(
     `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
             r.edition_scope, r.module, r.batch_id, r.updated_at
      FROM production_table_rows r
-     JOIN production_upload_batches b ON b.batch_id = r.batch_id
-     WHERE ${filter}
-     ORDER BY r.updated_at ASC, r.table_name ASC, r.row_key ASC
-     LIMIT ? OFFSET ?`
+     WHERE r.rowid IN (
+       SELECT r.rowid FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+       WHERE ${filter}
+       ORDER BY ${order}
+       LIMIT ? OFFSET ?
+     )
+     ORDER BY ${order}`
   ).bind(...params, request.limit, request.offset).all();
 
   const results = (rows.results || []).map(dataSyncRowPayload);
@@ -8826,10 +9452,93 @@ async function getDataSyncTableRows(ctx) {
     page: {
       limit: request.limit,
       offset: request.offset,
-      total: numberField(total, "total"),
-      has_more: request.offset + results.length < numberField(total, "total"),
+      total: null,
+      total_known: false,
+      has_more: hasMore,
     },
   });
+}
+
+async function getCursorDataSyncTableRows(ctx, options) {
+  const { request, license, tableName, scopes, filter, params, snapshotUntil } = options;
+  const order = "r.updated_at ASC, r.row_key ASC, r.edition_scope ASC";
+  // Read one lightweight sentinel beyond the requested page. This replaces a
+  // full COUNT and lets the service prove has_more without OFFSET rescans.
+  const pageRows = await ctx.env.DB.prepare(
+    `SELECT length(CAST(r.row_json AS BLOB)) AS payload_bytes
+     FROM production_table_rows r
+     JOIN production_upload_batches b ON b.batch_id = r.batch_id
+     WHERE ${filter}
+     ORDER BY ${order}
+     LIMIT ?`
+  ).bind(...params, request.limit + 1).all();
+  let pageBytes = 0;
+  let pageLimit = 0;
+  for (const row of pageRows.results || []) {
+    if (pageLimit >= request.limit) break;
+    const bytes = Number(row.payload_bytes || 0) + 1024;
+    if (pageLimit && pageBytes + bytes > 2 * 1024 * 1024) break;
+    pageBytes += bytes;
+    pageLimit += 1;
+  }
+  const hasMore = (pageRows.results || []).length > pageLimit;
+  const rows = pageLimit
+    ? await ctx.env.DB.prepare(
+      `SELECT r.table_name, r.row_key, r.row_hash, r.row_json, r.data_date,
+              r.edition_scope, r.module, r.batch_id, r.updated_at
+       FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id = r.batch_id
+       WHERE ${filter}
+       ORDER BY ${order}
+       LIMIT ?`
+    ).bind(...params, pageLimit).all()
+    : { results: [] };
+  const results = (rows.results || []).map(dataSyncRowPayload);
+  const tail = (rows.results || []).at(-1);
+  const nextCursor = hasMore && tail ? encodeDataSyncCursor(tail) : "";
+  return json({
+    ok: true,
+    table_name: tableName,
+    module: request.module,
+    edition: license.edition,
+    edition_scopes: scopes,
+    results,
+    page: {
+      mode: "cursor_v1",
+      limit: pageLimit || request.limit,
+      offset: request.offset,
+      total: null,
+      total_known: false,
+      has_more: hasMore,
+      next_cursor: nextCursor,
+      snapshot_until: snapshotUntil,
+    },
+  });
+}
+
+function encodeDataSyncCursor(row) {
+  return base64UrlJson({
+    v: 1,
+    u: safeText(row && row.updated_at ? row.updated_at : "", 64),
+    k: safeText(row && row.row_key ? row.row_key : "", 160),
+    e: safeText(row && row.edition_scope ? row.edition_scope : "", 64),
+  });
+}
+
+function decodeDataSyncCursor(value) {
+  if (!value) return null;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(value)));
+    const updatedAt = safeText(payload && payload.u ? payload.u : "", 64);
+    const rowKey = safeText(payload && payload.k ? payload.k : "", 160);
+    const editionScope = safeText(payload && payload.e ? payload.e : "", 64);
+    if (Number(payload && payload.v) !== 1 || !updatedAt || !rowKey || !editionScope) {
+      throw new Error("invalid_cursor");
+    }
+    return { updated_at: updatedAt, row_key: rowKey, edition_scope: editionScope };
+  } catch {
+    throwHttp(400, "data_sync_cursor_invalid");
+  }
 }
 
 async function dataSyncManifest(env, license, request) {
@@ -9277,11 +9986,20 @@ const PRODUCTION_UPLOAD_TABLES = new Map([
   ["industry_info", "target_research"],
   ["stock_daily_latest", "market_context"],
   ["stock_daily_ohlcv", "market_context"],
+  ["stock_hourly_history", "market_context"],
+  ["market_index_session_snapshots", "market_context"],
   ["stock_financial_metrics", "market_context"],
+  ["financial_income_statement", "market_context"],
+  ["financial_cashflow_statement", "market_context"],
+  ["financial_balance_sheet", "market_context"],
   ["stock_risk_metrics", "market_context"],
+  ["stock_signal_observation_daily", "market_context"],
   ["sector_rotation_daily", "market_context"],
   ["market_fund_flow_cache", "market_context"],
   ["industry_fund_flow_cache", "market_context"],
+  ["industry_member_observation_daily", "market_context"],
+  ["sector_classification_snapshots", "market_context"],
+  ["industry_risk_daily", "market_context"],
   ["market_sentiment_daily", "market_context"],
   ["market_score_daily", "market_context"],
   ["market_public_brief_daily", "market_context"],
@@ -9367,7 +10085,7 @@ async function listProductionUploadChunks(env, batchId) {
   return rows.results || [];
 }
 
-function normalizeProductionUploadChunk(body) {
+function normalizeProductionUploadChunk(body, retainedPrevious = '', now = new Date()) {
   const batchId = safeText(body.batch_id || "", 96);
   const tableName = safeText(body.table_name || "", 96);
   if (!batchId) {
@@ -9375,6 +10093,9 @@ function normalizeProductionUploadChunk(body) {
   }
   if (!PRODUCTION_UPLOAD_TABLES.has(tableName)) {
     throwHttp(400, "production_upload_table_not_allowed");
+  }
+  if (tableName === "stock_hourly_history" && body.module && body.module !== "market_context") {
+    throwHttp(400, "hourly_history_module_invalid");
   }
   const rows = Array.isArray(body.rows) ? body.rows : [];
   if (!rows.length) {
@@ -9391,7 +10112,85 @@ function normalizeProductionUploadChunk(body) {
     edition_scope: normalizeProductionEditionScope(body.edition_scope || "standard_pro"),
     chunk_index: Math.max(Number(body.chunk_index || 1), 1),
     chunk_hash: safeText(body.chunk_hash || "", 128),
-    rows: rows.map(normalizeProductionUploadRow),
+    rows: rows.map((row) => {
+      if (tableName === "stock_hourly_history") {
+        validateHourlyHistoryRow(row.row);
+        const [first, next] = hourlyRetentionWindow(now);
+        const today = new Date(now.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+        if (row.data_date !== row.row.trade_date || row.data_date > today ||
+            !((row.data_date>=first && row.data_date<next) || (retainedPrevious && row.data_date===retainedPrevious))) {
+          throwHttp(400, "hourly_history_outside_retained_dates");
+        }
+      }
+      return normalizeProductionUploadRow(row);
+    }),
+  };
+}
+
+export function validateHourlyHistoryRow(row) {
+  const fail = () => { throwHttp(400, "hourly_history_payload_invalid"); };
+  const fields = new Set(["code", "trade_date", "interval_minutes", "data_source", "price_basis",
+    "snapshot_id", "available_at", "quality_status", "bars_json", "updated_at"]);
+  if (!row || Object.keys(row).some((key) => !fields.has(key)) || row.interval_minutes !== 60
+      || row.data_source !== "tushare.stk_mins" || row.price_basis !== "unadjusted"
+      || !/^\d{6}$/.test(row.code) || !/^\d{4}-\d{2}-\d{2}$/.test(row.trade_date)
+      || !row.snapshot_id || !row.available_at || !row.updated_at) fail();
+  let bars;
+  try { bars = JSON.parse(row.bars_json); } catch { fail(); }
+  if (!Array.isArray(bars) || bars.length > 5) fail();
+  if (row.quality_status === "unavailable") {
+    if (bars.length) fail();
+    return [];
+  }
+  if (row.quality_status !== "complete") fail();
+  const seen = new Set();
+  const regular = ["10:30:00", "11:30:00", "14:00:00", "15:00:00"];
+  for (const bar of bars) {
+    const time = String(bar.bar_time || "");
+    if (time.slice(0, 11) !== `${row.trade_date} ` || !["09:30:00", ...regular].includes(time.slice(11))
+        || seen.has(time) || Object.keys(bar).some((key) => !["bar_time", "open", "high", "low", "close", "volume", "amount"].includes(key))
+        || ["open", "high", "low", "close", "volume", "amount"].some((key) => typeof bar[key] !== "number" || !Number.isFinite(bar[key]))
+        || Math.min(bar.open, bar.high, bar.low, bar.close) <= 0 || Math.min(bar.volume, bar.amount) < 0
+        || bar.low > Math.min(bar.open, bar.close) || bar.high < Math.max(bar.open, bar.close)) fail();
+    seen.add(time);
+  }
+  if (regular.some((time) => !seen.has(`${row.trade_date} ${time}`))) fail();
+  return bars.sort((a, b) => a.bar_time.localeCompare(b.bar_time));
+}
+
+export function hourlyHistoryPresentation(rows) {
+  const seen = new Set();
+  const sessions = [];
+  let unavailable = 0;
+  // publishedRows already resolves delivery scope and version authority.
+  for (const row of rows) {
+    if (seen.has(row.trade_date)) continue;
+    seen.add(row.trade_date);
+    const clean = Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith("_")));
+    try {
+      const bars = validateHourlyHistoryRow(clean);
+      if (bars.length) sessions.push({ row, bars });
+      else unavailable += 1;
+    } catch { unavailable += 1; }
+  }
+  const bars = sessions.flatMap((session) => session.bars).sort((a, b) => a.bar_time.localeCompare(b.bar_time));
+  const change = bars.length > 1 ? (bars.at(-1).close / bars[0].close - 1) * 100 : null;
+  return {
+    status: bars.length ? (unavailable ? "partial" : "available") : "unavailable",
+    code: sessions[0]?.row.code || "",
+    interval_minutes: 60, data_source: "tushare.stk_mins", price_basis: "unadjusted",
+    available_at: sessions.map((s) => s.row.available_at).sort().at(-1) || "",
+    // Licensed 60-minute OHLCV only. Opening boundary is not a full interval.
+    bars: bars.filter((bar) => !bar.bar_time.endsWith("09:30:00")).map((bar) => ({
+      bar_time:bar.bar_time, open:bar.open, high:bar.high, low:bar.low, close:bar.close, volume:bar.volume,
+      amplitudePct:(bar.high - bar.low) / bar.open * 100,
+    })),
+    portrait: hourlyPortrait(bars, { availableAt: sessions.map((s) => s.row.available_at).sort().at(-1) || "", incomplete: unavailable > 0 }),
+    note: bars.length ? `60分钟历史行情 · 不复权 · 非实时${unavailable ? ` · ${unavailable}个交易日暂不可用` : ""}`
+      : "暂无完整60分钟历史行情，请稍后刷新。",
+    trend: { title: "60分钟历史收盘走势", values: bars.map((bar) => bar.close), dates: bars.map((bar) => bar.bar_time),
+      latest_price: bars.length ? bars.at(-1).close.toFixed(2) : "--",
+      period_change: change === null ? "--" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%` },
   };
 }
 
@@ -9412,69 +10211,119 @@ function normalizeProductionUploadRow(row) {
   };
 }
 
+function productionUploadFailure(error) {
+  // D1 often wraps its useful message in error.cause. Never return that text:
+  // it can contain SQL/row contents. Unknown failures remain explicitly unknown.
+  const messages = [];
+  let current = error;
+  for (let depth = 0; current && depth < 4; depth += 1, current = current.cause) {
+    messages.push(String(current.message || current));
+  }
+  const text = messages.join(" ").toLowerCase();
+  if (/daily.*(?:limit|quota)|(?:limit|quota).*per day/.test(text)) {
+    return { status: 429, error: "production_upload_daily_quota_exceeded", retryable: false };
+  }
+  if (/sqlite_full|database or disk is full|maximum (?:database|db) size|storage.*(?:limit|full)/.test(text)) {
+    return { status: 507, error: "production_upload_storage_full", retryable: false };
+  }
+  if (/too many (?:sql variables|api requests|queries|subrequests)|too many.*(?:bind|bound)|query.*limit.*exceeded/.test(text)) {
+    return { status: 500, error: "production_upload_query_limit_exceeded", retryable: false };
+  }
+  if (/overloaded|database is (?:locked|busy)|sqlite_busy|timed out|timeout/.test(text)) {
+    return { status: 503, error: "production_upload_storage_busy", retryable: true };
+  }
+  return { status: 500, error: "internal_server_error", retryable: true };
+}
+
 async function storeProductionUploadChunk(env, chunk) {
   const now = nowIso();
-  const statements = [
-    env.DB.prepare(
-    `INSERT INTO production_upload_chunks
-       (batch_id, table_name, chunk_index, row_count, chunk_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(batch_id, table_name, chunk_index) DO UPDATE SET
-       row_count = excluded.row_count,
-       chunk_hash = excluded.chunk_hash,
-       created_at = excluded.created_at`
-    ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index, chunk.rows.length, chunk.chunk_hash, now),
-  ];
-
-  for (const row of chunk.rows) {
-    statements.push(env.DB.prepare(
-      `INSERT INTO production_upload_staging_rows
+  const rowStatements = [];
+  // Splitting one-row INSERTs into DB.batch groups does NOT reduce the per-request
+  // D1 query count. Share five context bindings and use four per row: 23 rows
+  // consume 97/100 bindings. Even a 500-row chunk needs only 22 INSERTs.
+  for (const rows of chunkArray(chunk.rows, 23)) {
+    rowStatements.push(env.DB.prepare(
+      `WITH upload_context(batch_id, table_name, edition_scope, module, updated_at) AS (VALUES (?, ?, ?, ?, ?)),
+            payload(row_key, row_hash, row_json, data_date) AS (VALUES ${rows.map(() => "(?, ?, ?, ?)").join(", ")})
+       INSERT INTO production_upload_staging_rows
          (batch_id, table_name, row_key, row_hash, row_json, data_date, edition_scope, module, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       SELECT c.batch_id, c.table_name, p.row_key, p.row_hash, p.row_json, p.data_date,
+              c.edition_scope, c.module, c.updated_at
+       FROM upload_context c CROSS JOIN payload p WHERE 1
        ON CONFLICT(batch_id, table_name, row_key, edition_scope) DO UPDATE SET
          row_hash = excluded.row_hash,
          row_json = excluded.row_json,
          data_date = excluded.data_date,
-       module = excluded.module,
-       updated_at = excluded.updated_at`
+         module = excluded.module,
+         updated_at = excluded.updated_at`
     ).bind(
       chunk.batch_id,
       chunk.table_name,
-      row.row_key,
-      row.row_hash,
-      row.row_json,
-      row.data_date,
       chunk.edition_scope,
       chunk.module,
-      now
+      now,
+      ...rows.flatMap(row => [row.row_key, row.row_hash, row.row_json, row.data_date])
     ));
   }
-  statements.push(env.DB.prepare(
+
+  // D1 batch is transactional: rows, receipt and counters succeed or roll back
+  // together. This also safely overwrites partial rows left by older Workers.
+  await env.DB.batch([
+    ...rowStatements,
+    env.DB.prepare(
+      `INSERT INTO production_upload_chunks
+         (batch_id, table_name, chunk_index, row_count, chunk_hash, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(batch_id, table_name, chunk_index) DO NOTHING`
+    ).bind(chunk.batch_id, chunk.table_name, chunk.chunk_index, chunk.rows.length, chunk.chunk_hash, now),
+    env.DB.prepare(
     `UPDATE production_upload_batches
      SET status = 'receiving',
          received_row_count = received_row_count + ?,
          received_chunk_count = received_chunk_count + 1,
          updated_at = ?
-     WHERE batch_id = ?`
-  ).bind(chunk.rows.length, now, chunk.batch_id));
-  await env.DB.batch(statements);
+     WHERE batch_id = ? AND changes() = 1`
+    ).bind(chunk.rows.length, now, chunk.batch_id),
+  ]);
 }
 
-async function commitProductionUploadBatch(env, batch, batchId) {
-  const fullReplaceTables = productionUploadFullReplaceTables(batch.manifest_json);
-  for (const tableName of fullReplaceTables) {
-    await env.DB.prepare(
-      "DELETE FROM production_table_rows WHERE table_name = ? AND edition_scope = ?"
-    ).bind(tableName, batch.edition_scope).run();
+function chunkArray(items, size) {
+  const chunkSize = Math.max(Number(size || 0), 1);
+  const groups = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    groups.push(items.slice(index, index + chunkSize));
   }
-  await env.DB.prepare(
+  return groups;
+}
+
+async function commitProductionUploadBatch(env, batch, batchId, rowCount, chunkCount, now = nowIso()) {
+  const fullReplaceTables = productionUploadFullReplaceTables(batch.manifest_json);
+  const statements = [];
+  for (const tableName of fullReplaceTables) {
+    statements.push(env.DB.prepare(
+      `DELETE FROM production_table_rows WHERE table_name = ? AND edition_scope = ?
+       AND EXISTS (SELECT 1 FROM production_upload_batches WHERE batch_id = ? AND status = 'committing')`
+    ).bind(tableName, batch.edition_scope, batchId));
+  }
+  statements.push(env.DB.prepare(
     `INSERT OR REPLACE INTO production_table_rows
        (table_name, row_key, row_hash, row_json, data_date, edition_scope, module, batch_id, updated_at)
      SELECT table_name, row_key, row_hash, row_json, data_date, edition_scope, module, batch_id, updated_at
        FROM production_upload_staging_rows
-      WHERE batch_id = ?`
-  ).bind(batchId).run();
-  await env.DB.prepare("DELETE FROM production_upload_staging_rows WHERE batch_id = ?").bind(batchId).run();
+      WHERE batch_id = ?
+        AND EXISTS (SELECT 1 FROM production_upload_batches WHERE batch_id = ? AND status = 'committing')`
+  ).bind(batchId, batchId));
+  statements.push(env.DB.prepare(
+    `DELETE FROM production_upload_staging_rows WHERE batch_id = ?
+     AND EXISTS (SELECT 1 FROM production_upload_batches WHERE batch_id = ? AND status = 'committing')`
+  ).bind(batchId, batchId));
+  statements.push(env.DB.prepare(
+    `UPDATE production_upload_batches SET status = 'committed', received_row_count = ?,
+     received_chunk_count = ?, committed_at = ?, updated_at = ? WHERE batch_id = ? AND status = 'committing'`
+  ).bind(rowCount, chunkCount, now, now, batchId));
+  // D1 batch is transactional: publication, staging cleanup and its receipt
+  // succeed together. A lost HTTP response can then be retried idempotently.
+  await env.DB.batch(statements);
 }
 
 async function rollbackProductionUploadBatch(env, batchId, reason = "") {

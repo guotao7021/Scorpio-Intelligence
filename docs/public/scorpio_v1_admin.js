@@ -1,5 +1,5 @@
 (function () {
-  const API_BASE = "https://api.scorpio-intelligence.tech/v1";
+  const API_BASE = document.querySelector('meta[name="scorpio-api-base"]')?.content || "https://api.scorpio-intelligence.tech/v1";
   const ADMIN_PATH = "/scorpio_v1_admin";
   const TOKEN_KEY = "scorpio_admin_token";
   localStorage.removeItem(TOKEN_KEY);
@@ -81,6 +81,9 @@
   init();
 
   function init() {
+    window.ScorpioAdminAccounts?.init({request, invalidSession: () => clearSession("管理员身份已失效，请重新登录。"),
+      async onMutation() { try { await loadCodes(); await loadLicenses(); await loadOverview(); renderAllTables(); renderMetrics(); } catch (error) { setMessage(error.message, "warn"); } },
+    });
     els.adminToken.value = state.token;
     els.adminLoginToken.value = state.token;
 
@@ -641,6 +644,10 @@
   async function editActivationCode(code) {
     const row = state.codes.find((item) => item.code === code);
     if (!row) return;
+    if (row.assigned_to_user_id || row.used_by_user_id) {
+      await window.ScorpioAdminAccounts.editCode(row.assigned_to_user_id || row.used_by_user_id, row.id, "edit");
+      return;
+    }
     const days = promptNumber("授权天数。已使用授权码不会反向修改已签发授权。", row.license_days || 365);
     if (days === null) return;
     const maxDevices = promptNumber("设备数。已使用授权码不会反向修改已签发授权。", row.max_devices || 1);
@@ -668,6 +675,10 @@
   async function revokeActivationCode(code) {
     const row = state.codes.find((item) => item.code === code);
     if (!row) return;
+    if (row.assigned_to_user_id || row.used_by_user_id) {
+      await window.ScorpioAdminAccounts.editCode(row.assigned_to_user_id || row.used_by_user_id, row.id, "revoke");
+      return;
+    }
     if (row.status === "used") {
       setMessage("已使用授权码不能直接撤销，请在授权记录中撤销或延期对应授权。", "warn");
       return;
@@ -697,50 +708,26 @@
 
   async function downloadLicense(licenseId) {
     if (!licenseId || licenseId === "-") return;
-    window.open(`${API_BASE}/license/download/${encodeURIComponent(licenseId)}`, "_blank", "noopener");
+    const row = state.licenses.find((item) => item.license_id === licenseId);
+    if (!row) return;
+    await runAdminAction("正在读取授权文件...", async () => {
+      const data = await apiGet(`${ADMIN_PATH}/users/license-file?user_id=${row.user_id}&license_id=${encodeURIComponent(licenseId)}`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data.license_file, null, 2)], {type: "application/json"}));
+      const link = document.createElement("a"); link.href = url; link.download = "license.json";
+      document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+      setMessage("授权文件已下载。", "success");
+    });
   }
 
   async function extendLicense(licenseId) {
     const row = state.licenses.find((item) => item.license_id === licenseId);
     if (!row) return;
-    const mode = window.prompt("输入延期天数，或直接输入新的到期日 YYYY-MM-DD。", "30");
-    if (mode === null) return;
-    const payload = {
-      is_active: true,
-      revoked: false,
-      approval_status: row.approval_status || "auto",
-    };
-    if (/^\d{4}-\d{2}-\d{2}$/.test(mode.trim())) {
-      payload.expires_at = mode.trim();
-    } else {
-      const days = Number(mode);
-      if (!Number.isFinite(days) || days <= 0) {
-        setMessage("延期天数必须大于 0，或输入 YYYY-MM-DD 格式到期日。", "warn");
-        return;
-      }
-      payload.extend_days = days;
-    }
-    const machine = window.prompt("机器码。如不调整请保持原值。", row.machine_fingerprint || "");
-    if (machine === null) return;
-    payload.machine_fingerprint = machine.trim();
-    await runAdminAction("正在更新并重新签名授权...", async () => {
-      await apiPut(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`, payload);
-      await loadLicenses();
-      renderLicenses();
-      renderMetrics();
-      setMessage("授权已更新并重新签名。客户端在线校验或重新下载授权文件后生效。", "success");
-    });
+    await window.ScorpioAdminAccounts.editLicense(row.user_id, licenseId, "extend");
   }
 
   async function revokeLicense(licenseId) {
-    if (!window.confirm(`确认撤销授权 ${licenseId}？`)) return;
-    await runAdminAction("正在撤销授权...", async () => {
-      await apiDelete(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`);
-      await loadLicenses();
-      renderLicenses();
-      renderMetrics();
-      setMessage("授权已撤销。", "success");
-    });
+    const row = state.licenses.find((item) => item.license_id === licenseId);
+    if (row) await window.ScorpioAdminAccounts.editLicense(row.user_id, licenseId, "revoke");
   }
 
   async function forceDeleteLicense(licenseId) {
@@ -759,19 +746,7 @@
   async function restoreLicense(licenseId) {
     const row = state.licenses.find((item) => item.license_id === licenseId);
     if (!row) return;
-    await runAdminAction("正在恢复并重新签名授权...", async () => {
-      await apiPut(`${ADMIN_PATH}/licenses/${encodeURIComponent(licenseId)}`, {
-        expires_at: String(row.expires_at || "").slice(0, 10) || undefined,
-        is_active: true,
-        revoked: false,
-        revoke_reason: "",
-        approval_status: row.approval_status || "auto",
-      });
-      await loadLicenses();
-      renderLicenses();
-      renderMetrics();
-      setMessage("授权已恢复。", "success");
-    });
+    await window.ScorpioAdminAccounts.editLicense(row.user_id, licenseId, "restore");
   }
 
   function renderMetrics() {
@@ -979,6 +954,7 @@
   }
 
   function showLogin() {
+    window.ScorpioAdminAccounts?.sessionChanged(false);
     els.adminLogin.classList.remove("hidden");
     els.adminTopbar.classList.add("hidden");
     els.adminConsole.classList.add("hidden");
@@ -988,6 +964,7 @@
     els.adminLogin.classList.add("hidden");
     els.adminTopbar.classList.remove("hidden");
     els.adminConsole.classList.remove("hidden");
+    window.ScorpioAdminAccounts?.sessionChanged(true);
   }
 
   function clearSession(message) {
@@ -1012,7 +989,8 @@
   }
 
   function setLoginMessage(message, type) {
-    els.loginMessage.textContent = message || "";
+    const english = {"请输入 Admin Token。": "Enter your administrator token.", "正在验证管理员身份...": "Verifying administrator access...", "后台连接失败。": "Unable to connect to administration.", "管理员 Token 无效或已过期。": "Your administrator token is invalid or expired.", "已退出管理员后台。": "Signed out.", "管理员身份已失效，请重新登录。": "Your administrator session has expired. Sign in again."};
+    els.loginMessage.textContent = document.documentElement.lang.startsWith("en") ? english[message] || message || "" : message || "";
     els.loginMessage.className = `admin-message ${type || ""}`;
   }
 
