@@ -44,6 +44,7 @@
       if (value in states) byId("deliveryStatus").value = value;
     }
     config.changeTab(activeTable()); icons();
+    root.querySelectorAll("[data-delivery-log]").forEach((button) => button.classList.toggle("active", button.dataset.deliveryLog === logView));
     if (fetch) refresh(); else render();
   }
   async function refresh() {
@@ -174,6 +175,7 @@
     },
     query(type) { const params = new URLSearchParams({limit: "25", offset: String(offsets[type] || 0)}); const q = type === "customers" ? byId("customerSearch").value.trim() : byId("deliverySearchInput").value.trim(); if (q) params.set("q", q); if (type === "customers" && byId("customerStatusFilter").value) params.set("status", byId("customerStatusFilter").value); if (type === "releases" && byId("deliveryPlatform").value) params.set("platform", byId("deliveryPlatform").value); if (["codes", "releases"].includes(type) && byId("deliveryStatus").value) params.set("status", byId("deliveryStatus").value); return params.toString(); },
     activate(value) { if (value) select(current, !loaded); }, render, setBusy, input,
+    openView(view, log) { if (["audit", "usage", "analysis", "licenses"].includes(log)) logView = log; select(view); },
     openCustomer() { open("customer"); },
     saved(kind) { if (kind !== "code") dialogs[kind].close(); render(); },
     async saveRelease(payload) {

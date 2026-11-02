@@ -2,6 +2,7 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { registerAuthSecurity, protectAuth } from "./auth-security.mjs";
 import {registerFeedbackCenter, submitFeedback, listFeedback, updateFeedback} from "./feedback-center.mjs";
 import { registerAccountCenterRoutes, effectiveLicenseStatus } from "./account-center.mjs";
+import {registerAdminOperations} from "./admin-operations.mjs";
 import { registerMonitoringRoutes } from './monitoring-bridge.mjs';
 import { resolveMarketScore, dateScope, businessDate, observedNumber } from "./market-display-contract.mjs";
 import { hourlyPortrait } from "./hourly-portrait.js";
@@ -6365,6 +6366,7 @@ registerFeedbackCenter({route, json, requireAdmin, requireUser});
 registerAccountCenterRoutes({route, requireUser, requireAdmin, readJson, json, throwHttp,
   todayIso, addDays, issueLicensePayload, uniqueActivationCode, normalizeEdition,
   allowRateLimit, sha256Hex, audit});
+registerAdminOperations({route, requireAdmin, json, throwHttp, todayIso, addDays, realUserFilter: REAL_USER_SQL_FILTER});
 registerMonitoringRoutes({route, requireUser, readJson, json, throwHttp, verifyMobileLicense,
   verifyAnalysisLicense, applyAnalysisSecurity, sha256Hex});
 registerMinuteDeliveryRoutes({route, requireAdmin, requireUser, verifyMobileLicense, applyAnalysisSecurity,

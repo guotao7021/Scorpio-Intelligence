@@ -16,11 +16,15 @@
     catch (error) { if (error.status === 403) config.invalidSession(); throw error; }
   }
   function navigate(view) {
+    window.ScorpioAdminOverview?.activate(view === "overview");
+    byId("adminOverviewView")?.classList.toggle("hidden", view !== "overview");
+    byId("adminAccountNotice").classList.add("hidden");
     window.ScorpioSupportCenter?.navigate(view);
     window.ScorpioAdminDelivery?.activate(view === "legacy");
     history.replaceState(null, "", `${location.pathname}${location.search}#${view}`);
     document.querySelector(".admin-command-bar h1").textContent = {licenses: t("用户与软件授权", "Users & software licenses"), users: t("注册用户", "Registered users"), requests: t("续期申请", "Renewal requests"), legacy: t("交付与发行", "Delivery & releases"), feedback: t("问题反馈", "Feedback inbox")}[view] || t("用户与软件授权", "Users & software licenses");
     document.querySelector(".admin-command-bar p:not(.section-kicker)").hidden = view === "feedback";
+    if (view === "overview") document.querySelector(".admin-command-bar h1").textContent = t("运营概览", "Operations overview");
     document.querySelectorAll("[data-account-admin-view]").forEach((button) => {
       const selected = button.dataset.accountAdminView === view;
       button.classList.toggle("active", selected);
@@ -269,6 +273,7 @@
     if (!document.documentElement.lang.startsWith("en")) return;
     const translations = {"授权管理": "License management", "授权概览": "Grant overview", "搜索用户或授权": "Search users or grants", "搜索邮箱、用户名或授权码": "Search email, username or code", "待审批": "Awaiting approval", "激活暂停": "Activation paused", "发放授权": "Assign license", "刷新授权": "Refresh grants", "用户与软件授权": "Users & software licenses", "注册用户": "Registered users", "搜索注册用户": "Search users", "授权状态": "License status", "全部授权状态": "All license states", "尚未授权": "No license", "待激活": "Ready to activate", "试用中": "Trial", "授权有效": "Active", "已到期": "Expired", "已撤销": "Revoked", "待处理": "Pending", "已批准": "Approved", "已拒绝": "Declined", "续期申请": "Renewal requests", "交付与发行": "Delivery & releases", "显示测试用户": "Include test users", "搜索邮箱或用户名": "Search email or username", "刷新用户": "Refresh users", "刷新申请": "Refresh requests", "上一页": "Previous page", "下一页": "Next page", "关闭": "Close", "取消": "Cancel", "确认": "Confirm", "管理员登录": "Administrator sign-in", "登录后台": "Sign in", "退出登录": "Sign out", "官网首页": "Website", "用户中心": "My account", "运营后台": "Administration"};
     Object.assign(translations, {"运营管理": "Operations", "返回官网": "Back to website", "运营后台导航": "Operations navigation", "记录范围": "Record scope", "正常记录": "Current records", "回收站": "Recycle bin"});
+    translations["运营概览"] = "Operations overview";
     Object.assign(translations, {"客户台账": "Customers", "授权码": "License codes", "发行包": "Releases", "搜索客户": "Search customers", "客户名、邮箱、版本或备注": "Name, email, edition or notes", "状态": "Status", "全部状态": "All states", "草稿": "Draft", "活跃": "Active", "已交付": "Delivered", "暂停": "Paused", "取消": "Cancel", "可选": "Optional", "例如 1.0.0": "e.g. 1.0.0", "不关联台账": "No customer record", "绑定 License 用户": "Licensed users", "官网访问": "Site visits", "授权记录": "Device licenses", "Windows 客户端下载": "Windows downloads", "APK 下载": "APK downloads", "API 状态": "API status", "服务端校验": "Server validation"});
     function walk(node) {
       if (node.nodeType === Node.TEXT_NODE) { const key = node.nodeValue.trim(); if (translations[key]) node.nodeValue = node.nodeValue.replace(key, translations[key]); return; }
@@ -332,8 +337,9 @@
       const changed = authorized !== value; authorized = value;
       if (changed) window.ScorpioSupportCenter?.sessionChanged(value);
       if (changed) window.ScorpioAdminDelivery?.sessionChanged(value);
+      if (changed) window.ScorpioAdminOverview?.sessionChanged(value);
       if (value && changed) { loadUsers(); loadLicenses(); loadRequests(); }
-      if (value && changed) navigate(["licenses", "users", "requests", "legacy", "feedback"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "licenses");
+      if (value && changed) navigate(["overview", "licenses", "users", "requests", "legacy", "feedback"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview");
       if (!value) {
         ++sequence; ++detailSequence; ++licenseSequence; ++requestSequence; detail = null; currentUser = null;
         modal.close(); byId("adminUserDrawer").close();
@@ -341,6 +347,8 @@
         byId("adminUserDetail").textContent = ""; byId("adminUserEmail").textContent = "";
       }
     },
+    navigate(view, status = "") { if (view === "licenses") { byId("adminLicenseStatus").value = status; licensePage.offset = 0; } if (view === "requests" && status) byId("adminRequestStatus").value = status; if (view === "feedback" && byId("supportStatus")) byId("supportStatus").value = ""; navigate(view); },
+    viewUser: openUser,
     async editLicense(userId, licenseId, action) { if (await openUser(userId)) licenseCommand(licenseId, action); },
     async editCode(userId, codeId, action) {
       if (!(await openUser(userId))) return;

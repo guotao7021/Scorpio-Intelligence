@@ -9,7 +9,7 @@ import {issueCode, PNG, memoryFeedbackBucket} from "./helpers/feedback-fixture.m
 const publicRoot = new URL("../../../docs/public/", import.meta.url);
 const read = (file) => readFileSync(new URL(file, publicRoot), "utf8");
 const accountScripts = ["account-i18n.js", "account-center-ui.js", "auth-controls.js", "support-center.js", "account.js"];
-const adminScripts = ["account-center-ui.js", "support-center.js", "admin-delivery.js", "admin-accounts.js", "scorpio_v1_admin.js"];
+const adminScripts = ["account-center-ui.js", "support-center.js", "admin-delivery.js", "admin-overview.js", "admin-accounts.js", "scorpio_v1_admin.js"];
 const feedbackScripts = ["account-center-ui.js", "feedback-center-ui.js", "feedback-uploads.js", "feedback.js"];
 
 async function until(check, description) {
@@ -248,4 +248,33 @@ test("unassigned inventory editing uses a labelled form rather than native promp
   submit(ui, "deliveryInputForm");
   await until(() => f.sql.prepare("SELECT license_days FROM activation_codes WHERE id=10").get().license_days === 45, "inventory terms saved");
   assert.equal(f.sql.prepare("SELECT max_devices FROM activation_codes WHERE id=10").get().max_devices, 3); assert.deepEqual(ui.errors, []);
+});
+
+test("operations overview is the default admin view, switches periods and drills into the existing workflows", async (t) => {
+  const f = setup(t), stamp = new Date(Date.now() - 1000).toISOString();
+  f.sql.prepare("INSERT INTO site_visit_events(event_id,event_date,page_path,visitor_hash,user_agent_hash,created_at) VALUES('screen-fixture',?,'/','one-visitor','fixture',?)").run(stamp.slice(0, 10), stamp);
+  const ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true});
+  await until(() => ui.d.querySelectorAll("[data-ops-day]").length === 7, "default dashboard loaded");
+  assert.equal(ui.d.getElementById("adminOverviewView").classList.contains("hidden"), false);
+  assert.equal(ui.d.getElementById("opsFullscreen"), null, "the dashboard must stay inside the administration frame");
+  assert.equal(ui.d.querySelector('[data-account-admin-view="overview"]').getAttribute("aria-current"), "page");
+  ui.d.querySelector('[data-ops-days="30"]').click();
+  await until(() => ui.d.querySelectorAll("[data-ops-day]").length === 30, "30-day history loaded");
+  ui.d.querySelector("[data-ops-day]").click(); assert.match(ui.d.getElementById("opsSelectedDay").textContent, /PV 0/);
+  ui.d.querySelector('[data-ops-go="releases"]').click();
+  assert.equal(ui.d.getElementById("adminOverviewView").classList.contains("hidden"), true);
+  assert.equal(ui.d.querySelector('[data-delivery-view="releases"]').getAttribute("aria-selected"), "true");
+  ui.d.querySelector('[data-account-admin-view="overview"]').click(); ui.d.querySelector('[data-ops-go="requests"]').click();
+  assert.equal(ui.d.getElementById("adminRequestsView").classList.contains("hidden"), false); assert.equal(ui.d.getElementById("adminRequestStatus").value, "pending");
+  assert.deepEqual(ui.errors, []);
+});
+
+test("dashboard refresh errors retain the last successful measurements and logout clears sensitive data", async (t) => {
+  const f = setup(t), ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true, lang: "en"});
+  await until(() => ui.d.querySelectorAll("[data-ops-day]").length === 7, "dashboard ready");
+  const old = ui.d.querySelector(".ops-kpi-band").innerHTML, original = ui.w.fetch;
+  ui.w.fetch = async (url, options) => new URL(url).pathname.endsWith("/operations") ? Response.json({error: "temporary_failure"}, {status: 503}) : original(url, options);
+  click(ui, "opsRefresh"); await until(() => ui.d.getElementById("opsNotice").textContent.includes("retained"), "refresh failure marked stale");
+  assert.equal(ui.d.querySelector(".ops-kpi-band").innerHTML, old); assert.match(ui.d.getElementById("opsFreshness").textContent, /stale/); assert.equal(ui.d.getElementById("opsApiState").textContent, "Unknown");
+  click(ui, "logoutButton"); assert.equal(ui.d.getElementById("opsBody").textContent, ""); assert.deepEqual(ui.errors, []);
 });

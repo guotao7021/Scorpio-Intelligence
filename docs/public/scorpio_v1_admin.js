@@ -84,6 +84,11 @@
   init();
 
   function init() {
+    window.ScorpioAdminOverview?.init({request,
+      navigate: (view, status) => window.ScorpioAdminAccounts.navigate(view, status),
+      viewUser: (id) => window.ScorpioAdminAccounts.viewUser(id),
+      invalidSession: () => clearSession("管理员身份已失效，请重新登录。"),
+    });
     window.ScorpioAdminDelivery?.init({request, changeTab: switchTab, clearCustomer: clearCustomerForm,
       snapshot: () => ({customers: state.customers, codes: state.codes, releases: state.releases, pages: state.pages}),
       async refresh(type) { await ({customers: loadCustomers, codes: loadCodes, releases: loadReleases, licenses: loadLicenses, audit: loadAuditEvents, usage: loadUsageReports, analysis: loadAnalysisRequests}[type] || loadCustomers)(); renderAllTables(); renderMetrics(); renderCustomerOptions(); },

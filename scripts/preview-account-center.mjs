@@ -35,6 +35,16 @@ fixture.env.RELEASE_BUCKET = {async head(key) {
   const bytes = new TextEncoder().encode("Local preview only. This is not a software installer.\n");
   return {body: bytes, size: bytes.byteLength, writeHttpMetadata(headers) { headers.set("content-type", "text/plain"); }};
 }};
+// Fictional dashboard observations stay in the isolated in-memory preview only.
+for (let offset = 6; offset >= 0; offset--) {
+  const stamp = new Date(Date.now() - offset * 86400000 - 120000).toISOString(), day = stamp.slice(0, 10);
+  const count = [14, 21, 18, 32, 24, 38, 27][6 - offset];
+  for (let index = 0; index < count; index++) fixture.sql.prepare("INSERT INTO site_visit_events(event_id,event_date,page_path,visitor_hash,user_agent_hash,created_at) VALUES(?,?,?,?,?,?)")
+    .run(`local-${offset}-${index}`, day, ["/", "/index-cn", "/account", "/faq-cn"][index % 4], `local-visitor-${index % 9}`, "isolated-preview", stamp);
+  for (let index = 0; index < offset + 2; index++) fixture.sql.prepare("INSERT INTO release_download_events(event_id,event_date,release_id,file_name,created_at) VALUES(?,?,?,?,?)")
+    .run(`local-download-${offset}-${index}`, day, index % 3 === 0 ? 3 : 1, index % 3 === 0 ? "Preview.apk" : "Preview.exe", stamp);
+}
+fixture.sql.prepare("INSERT INTO account_service_requests(public_id,user_id,license_id,requested_days,note,created_at,updated_at) VALUES('PREVIEW-RENEWAL',3,'LICENSE-4',30,'Local preview only',?,?)").run(new Date().toISOString(), new Date().toISOString());
 issueCode(fixture);
 const sample = multipartFeedback({...feedbackBody, title: "续期后到期日未刷新（本地演示）", description: "此记录仅用于隔离验收，不代表线上故障。管理员可在问题反馈中处理，用户可在我的反馈中查看进展。"}, [new File([readFileSync(path.join(root, "assets/scorpio-workbench-preview.png"))], "preview.png", {type: "image/png"})]);
 const seeded = await worker.fetch(new Request(base + "/v1/feedback", {method: "POST", headers: {authorization: `Bearer ${fixture.jwt()}`, "CF-IPCountry": "CN"}, body: sample}), fixture.env);

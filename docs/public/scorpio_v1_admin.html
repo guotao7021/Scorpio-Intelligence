@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="account-center.css?v=20261102-account-center">
   <link rel="stylesheet" href="support-features.css?v=20261102-support">
   <link rel="stylesheet" href="admin-workbench.css?v=20261102-operations">
+  <link rel="stylesheet" href="admin-overview.css?v=20261102-screen">
   <script>if (new URLSearchParams(location.search).get("lang") === "en") document.documentElement.lang = "en";</script>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
@@ -66,6 +67,7 @@
     <aside class="operations-sidebar" aria-label="运营后台导航">
       <div class="operations-identity"><span>SCORPIO WORKSPACE</span><strong>运营管理</strong><small>ADMINISTRATION</small></div>
       <nav class="portal-admin-tabs" aria-label="管理视图">
+        <button type="button" data-account-admin-view="overview"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>运营概览</span></button>
         <button type="button" class="active" data-account-admin-view="licenses" aria-current="page"><i data-lucide="badge-check" aria-hidden="true"></i><span>授权管理</span></button>
         <button type="button" data-account-admin-view="users"><i data-lucide="users" aria-hidden="true"></i><span>注册用户</span></button>
         <button type="button" data-account-admin-view="requests"><i data-lucide="calendar-clock" aria-hidden="true"></i><span>续期申请</span><span id="adminPendingCount"></span></button>
@@ -90,6 +92,7 @@
     </section>
 
     <p id="adminAccountNotice" class="portal-notice hidden" role="status" aria-live="polite"></p>
+    <section id="adminOverviewView" class="hidden ops-screen" aria-label="运营概览"></section>
     <section id="adminLicensesView" aria-label="授权管理">
       <div id="adminLicenseMetrics" class="portal-license-metrics" aria-label="授权概览"></div>
       <div class="portal-toolbar">
@@ -381,8 +384,9 @@
   </dialog>
   <script src="account-center-ui.js?v=20261102-operations"></script>
   <script src="support-center.js?v=20261102-operations"></script>
-  <script src="admin-delivery.js?v=20261102-operations"></script>
-  <script src="admin-accounts.js?v=20261102-operations"></script>
-  <script src="scorpio_v1_admin.js?v=20261102-operations"></script>
+  <script src="admin-delivery.js?v=20261102-screen"></script>
+  <script src="admin-overview.js?v=20261102-screen"></script>
+  <script src="admin-accounts.js?v=20261102-screen"></script>
+  <script src="scorpio_v1_admin.js?v=20261102-screen"></script>
 </body>
 </html>
