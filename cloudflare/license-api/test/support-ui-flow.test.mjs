@@ -9,7 +9,7 @@ import {issueCode, PNG, memoryFeedbackBucket} from "./helpers/feedback-fixture.m
 const publicRoot = new URL("../../../docs/public/", import.meta.url);
 const read = (file) => readFileSync(new URL(file, publicRoot), "utf8");
 const accountScripts = ["account-i18n.js", "account-center-ui.js", "auth-controls.js", "support-center.js", "account.js"];
-const adminScripts = ["account-center-ui.js", "support-center.js", "admin-accounts.js", "scorpio_v1_admin.js"];
+const adminScripts = ["account-center-ui.js", "support-center.js", "admin-delivery.js", "admin-accounts.js", "scorpio_v1_admin.js"];
 const feedbackScripts = ["account-center-ui.js", "feedback-center-ui.js", "feedback-uploads.js", "feedback.js"];
 
 async function until(check, description) {
@@ -188,4 +188,64 @@ test("English feedback keeps its content and screenshot on upload failure and ne
   await until(() => ui.d.getElementById("feedbackMessage").textContent.includes("storage is not ready"), "storage error displayed in English");
   assert.equal(ui.d.getElementById("fb-title").value, "Image retention test"); assert.equal(ui.w.ScorpioFeedbackUploads.files().length, 1);
   assert.equal(ui.d.getElementById("feedbackSubmit").disabled, false); assert.equal(ui.d.getElementById("feedbackReceipt").hidden, true); assert.deepEqual(ui.errors, []);
+});
+
+test("the operations workspace creates a customer, issues codes and validates, publishes and unpublishes a package through real routes", async (t) => {
+  const f = setup(t); f.env.RELEASE_BUCKET = {head: async (key) => key === "releases/windows/Setup.exe" ? {size: 120000, etag: "fixture-etag"} : null};
+  const ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true});
+  await until(() => !ui.d.getElementById("adminConsole").classList.contains("hidden"), "admin authenticated");
+  ui.d.querySelector('[data-account-admin-view="legacy"]').click(); click(ui, "deliveryCreate");
+  assert.equal(ui.d.getElementById("deliveryEditor-customer").open, true);
+  const customer = ui.d.getElementById("customerForm"); customer.elements.customer_name.value = "Delivery QA"; customer.elements.customer_email.value = "newuser@example.test";
+  submit(ui, "customerForm"); await until(() => !ui.d.getElementById("deliveryEditor-customer").open, "customer saved and editor closed");
+  assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM customers WHERE customer_name='Delivery QA'").get().n, 1);
+  await until(() => ui.d.querySelector("[data-deliver-customer]"), "customer delivery action available"); ui.d.querySelector("[data-deliver-customer]").click();
+  assert.equal(ui.d.getElementById("codeForm").elements.email.value, "newuser@example.test"); submit(ui, "codeForm");
+  await until(() => ui.d.getElementById("generatedCodes").querySelector("code"), "generated code receipt displayed");
+  ui.d.getElementById("deliveryEditor-code").querySelector("[data-delivery-close]").click();
+  ui.d.querySelector('[data-delivery-view="releases"]').click(); click(ui, "deliveryCreate");
+  const release = ui.d.getElementById("releaseForm"); release.elements.version.value = "9.9.9"; release.elements.r2_key.value = "missing.exe"; release.elements.file_name.value = "Setup.exe";
+  submit(ui, "releaseForm"); await until(() => ui.d.getElementById("deliveryEditor-release").textContent.includes("未找到安装包"), "failed package validation visible in the editor");
+  assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM release_versions").get().n, 0); assert.equal(ui.d.getElementById("deliveryEditor-release").open, true);
+  release.elements.r2_key.value = "releases/windows/Setup.exe"; submit(ui, "releaseForm");
+  await until(() => !ui.d.getElementById("deliveryEditor-release").open, "verified package published");
+  assert.equal(f.sql.prepare("SELECT file_size_bytes FROM release_versions WHERE version='9.9.9'").get().file_size_bytes, 120000);
+  await until(() => ui.d.querySelector('[data-release-command="detail"]'), "release list shows package actions");
+  ui.d.querySelector('[data-release-command="detail"]').click(); assert.match(ui.d.getElementById("deliveryReleaseDetail").textContent, /Setup\.exe/);
+  ui.d.getElementById("deliveryEditor-detail").querySelector("[data-delivery-close]").click();
+  ui.d.querySelector('[data-release-command="disable"]').click(); submit(ui, "deliveryConfirmForm");
+  await until(() => f.sql.prepare("SELECT is_active FROM release_versions WHERE version='9.9.9'").get().is_active === 0, "release unpublished without deleting its row");
+  await until(() => !ui.d.getElementById("deliveryEditor-confirm").open && ui.d.querySelector('[data-release-command="disable"]')?.textContent.includes("重新发布"), "republish action available");
+  ui.d.querySelector('[data-release-command="disable"]').click(); submit(ui, "deliveryConfirmForm");
+  await until(() => f.sql.prepare("SELECT is_active FROM release_versions WHERE version='9.9.9'").get().is_active === 1, "release republished after validation");
+  assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM release_versions").get().n, 1); assert.deepEqual(ui.errors, []);
+});
+
+test("registered-user deletion and recovery are visible operations in the same administrator workspace", async (t) => {
+  const f = setup(t), ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true});
+  await until(() => ui.d.querySelector('#adminUsersTable [data-record-kind="user"]'), "user cleanup actions loaded");
+  ui.d.querySelector('[data-account-admin-view="users"]').click();
+  const row = [...ui.d.querySelectorAll("#adminUsersTable tbody tr")].find((item) => item.textContent.includes("expired@example.test"));
+  const remove = row.querySelector('[data-record-kind="user"]'); assert.equal(remove.disabled, false); remove.click();
+  ui.d.getElementById("portalDialogForm").elements.reason.value = "Expired account cleanup"; submit(ui, "portalDialogForm");
+  await until(() => !ui.d.getElementById("portalDialog").open, "account moved to recycle bin");
+  set(ui, "adminUserArchive", "1"); ui.d.getElementById("adminUserArchive").dispatchEvent(new ui.w.Event("change"));
+  await until(() => ui.d.querySelector('#adminUsersTable [data-record-action="restore"]'), "recycle bin lists archived account");
+  ui.d.querySelector('#adminUsersTable [data-record-action="restore"]').click(); ui.d.getElementById("portalDialogForm").elements.reason.value = "Restore account record"; submit(ui, "portalDialogForm");
+  await until(() => !ui.d.getElementById("portalDialog").open, "account restored from recycle bin");
+  assert.equal(f.sql.prepare("SELECT archived_at FROM users WHERE id=3").get().archived_at, null); assert.deepEqual(ui.errors, []);
+});
+
+test("unassigned inventory editing uses a labelled form rather than native prompts", async (t) => {
+  const f = setup(t); f.addCode({id: 10, userId: 2, status: "active"});
+  f.sql.prepare("UPDATE activation_codes SET assigned_to_user_id=NULL,used_by_user_id=NULL,customer_email='' WHERE id=10").run();
+  const ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true, lang: "en"});
+  await until(() => ui.d.querySelector('[data-code-action="edit"][data-code="CODE-10"]'), "inventory loaded");
+  ui.d.querySelector('[data-account-admin-view="legacy"]').click(); ui.d.querySelector('[data-delivery-view="codes"]').click();
+  ui.d.querySelector('[data-code-action="edit"][data-code="CODE-10"]').click();
+  assert.equal(ui.d.getElementById("deliveryEditor-input").open, true);
+  const form = ui.d.getElementById("deliveryInputForm"); form.elements.days.value = "45"; form.elements.max_devices.value = "3";
+  submit(ui, "deliveryInputForm");
+  await until(() => f.sql.prepare("SELECT license_days FROM activation_codes WHERE id=10").get().license_days === 45, "inventory terms saved");
+  assert.equal(f.sql.prepare("SELECT max_devices FROM activation_codes WHERE id=10").get().max_devices, 3); assert.deepEqual(ui.errors, []);
 });

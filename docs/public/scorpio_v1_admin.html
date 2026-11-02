@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>用户授权管理 | Scorpio Intelligence</title>
+  <title>运营管理 | Scorpio Intelligence</title>
   <meta name="scorpio-api-base" content="https://api.scorpio-intelligence.tech/v1">
   <meta name="description" content="Scorpio Intelligence 商业授权运营后台，用于客户台账、授权码、授权记录和安装包发行管理。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="site.css?v=20260819-platform-downloads">
   <link rel="stylesheet" href="account-center.css?v=20261102-account-center">
   <link rel="stylesheet" href="support-features.css?v=20261102-support">
+  <link rel="stylesheet" href="admin-workbench.css?v=20261102-operations">
   <script>if (new URLSearchParams(location.search).get("lang") === "en") document.documentElement.lang = "en";</script>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
 </head>
@@ -62,6 +63,17 @@
   </header>
 
   <main class="admin-console hidden" id="adminConsole">
+    <aside class="operations-sidebar" aria-label="运营后台导航">
+      <div class="operations-identity"><span>SCORPIO WORKSPACE</span><strong>运营管理</strong><small>ADMINISTRATION</small></div>
+      <nav class="portal-admin-tabs" aria-label="管理视图">
+        <button type="button" class="active" data-account-admin-view="licenses" aria-current="page"><i data-lucide="badge-check" aria-hidden="true"></i><span>授权管理</span></button>
+        <button type="button" data-account-admin-view="users"><i data-lucide="users" aria-hidden="true"></i><span>注册用户</span></button>
+        <button type="button" data-account-admin-view="requests"><i data-lucide="calendar-clock" aria-hidden="true"></i><span>续期申请</span><span id="adminPendingCount"></span></button>
+        <button type="button" data-account-admin-view="legacy"><i data-lucide="package" aria-hidden="true"></i><span>交付与发行</span></button>
+      </nav>
+      <a class="operations-website" href="index-cn.html"><i data-lucide="arrow-up-right" aria-hidden="true"></i><span>返回官网</span></a>
+    </aside>
+    <div class="operations-content">
     <section class="admin-command-bar">
       <div>
         <p class="section-kicker">Operations Console</p>
@@ -77,12 +89,6 @@
       </div>
     </section>
 
-    <nav class="portal-admin-tabs" aria-label="管理视图">
-      <button type="button" class="active" data-account-admin-view="licenses" aria-current="page">授权管理</button>
-      <button type="button" data-account-admin-view="users">注册用户</button>
-      <button type="button" data-account-admin-view="requests">续期申请 <span id="adminPendingCount"></span></button>
-      <button type="button" data-account-admin-view="legacy">交付与发行</button>
-    </nav>
     <p id="adminAccountNotice" class="portal-notice hidden" role="status" aria-live="polite"></p>
     <section id="adminLicensesView" aria-label="授权管理">
       <div id="adminLicenseMetrics" class="portal-license-metrics" aria-label="授权概览"></div>
@@ -90,6 +96,7 @@
         <label class="portal-search"><span class="visually-hidden">搜索用户或授权</span><i data-lucide="search" aria-hidden="true"></i><input id="adminLicenseSearch" type="search" placeholder="搜索邮箱、用户名或授权码" autocomplete="off"></label>
         <label class="visually-hidden" for="adminLicenseStatus">授权状态</label><select id="adminLicenseStatus"><option value="">全部授权状态</option><option value="unactivated">待激活</option><option value="active">授权有效</option><option value="trial">试用中</option><option value="pending">待审批</option><option value="expired">已到期</option><option value="suspended">激活暂停</option><option value="revoked">已撤销</option></select>
         <label class="portal-check"><input type="checkbox" id="adminIncludeTestLicenses">显示测试用户</label>
+        <label class="visually-hidden" for="adminLicenseArchive">记录范围</label><select id="adminLicenseArchive"><option value="0">正常记录</option><option value="1">回收站</option></select>
         <button class="button primary" id="adminAssignLicense" type="button"><i data-lucide="plus" aria-hidden="true"></i>发放授权</button>
         <button class="portal-icon" id="adminLicensesRefresh" type="button" title="刷新授权" aria-label="刷新授权"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
       </div>
@@ -102,6 +109,7 @@
         <label class="visually-hidden" for="adminUserStatus">授权状态</label>
         <select id="adminUserStatus"><option value="">全部授权状态</option><option value="unlicensed">尚未授权</option><option value="unactivated">待激活</option><option value="trial">试用中</option><option value="active">授权有效</option><option value="expired">已到期</option><option value="suspended">激活暂停</option><option value="revoked">已撤销</option><option value="pending">待处理</option></select>
         <label class="portal-check"><input type="checkbox" id="adminIncludeTestUsers">显示测试用户</label>
+        <label class="visually-hidden" for="adminUserArchive">记录范围</label><select id="adminUserArchive"><option value="0">正常记录</option><option value="1">回收站</option></select>
         <button class="portal-icon" id="adminUsersRefresh" type="button" title="刷新用户" aria-label="刷新用户"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
       </div>
       <div id="adminUsersTable" aria-live="polite"></div>
@@ -359,6 +367,7 @@
         </article>
       </section>
     </section>
+    </div>
   </main>
 
   <dialog id="adminUserDrawer" class="portal-dialog portal-drawer" aria-labelledby="adminUserTitle">
@@ -370,9 +379,10 @@
     <div class="portal-dialog-head"><h2 id="portalDialogTitle"></h2><button class="portal-icon" type="button" id="portalDialogClose" aria-label="关闭" title="关闭"><i data-lucide="x" aria-hidden="true"></i></button></div>
     <form id="portalDialogForm"><div id="portalDialogBody"></div><p id="portalDialogError" class="portal-notice error hidden" role="alert"></p><div class="portal-dialog-actions"><button class="button secondary" type="button" id="portalDialogCancel">取消</button><button class="button primary" type="submit" id="portalDialogSubmit">确认</button></div></form>
   </dialog>
-  <script src="account-center-ui.js?v=20261102-support"></script>
-  <script src="support-center.js?v=20261102-support"></script>
-  <script src="admin-accounts.js?v=20261102-support"></script>
-  <script src="scorpio_v1_admin.js?v=20261102-support"></script>
+  <script src="account-center-ui.js?v=20261102-operations"></script>
+  <script src="support-center.js?v=20261102-operations"></script>
+  <script src="admin-delivery.js?v=20261102-operations"></script>
+  <script src="admin-accounts.js?v=20261102-operations"></script>
+  <script src="scorpio_v1_admin.js?v=20261102-operations"></script>
 </body>
 </html>

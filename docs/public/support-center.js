@@ -75,7 +75,7 @@
       config = options; root = config.admin ? "/scorpio_v1_admin/feedback" : "/account/feedback";
       const en = document.documentElement.lang.startsWith("en");
       const nav = document.createElement("button"); nav.type = "button";
-      if (config.admin) { nav.dataset.accountAdminView = "feedback"; nav.textContent = t("问题反馈", "Feedback inbox"); document.querySelector(".portal-admin-tabs").append(nav); }
+      if (config.admin) { nav.dataset.accountAdminView = "feedback"; nav.innerHTML = `${icon("messages-square")}<span>${t("问题反馈", "Feedback inbox")}</span>`; document.querySelector(".portal-admin-tabs").append(nav); }
       else { nav.dataset.accountView = "feedback"; nav.innerHTML = `${icon("messages-square")}<span>${t("我的反馈", "My feedback")}</span>`; document.querySelector(".portal-nav").append(nav); }
       section = document.createElement("section"); section.id = "supportCenterView"; section.className = "hidden"; section.ariaLabel = config.admin ? t("问题反馈", "Feedback inbox") : t("我的反馈", "My feedback");
       if (!config.admin) section.dataset.accountSection = "feedback";

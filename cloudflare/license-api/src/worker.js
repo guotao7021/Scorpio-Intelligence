@@ -300,7 +300,7 @@ route("POST", "/v1/auth/login", async (ctx) => {
     .bind(email)
     .first();
 
-  if (!user || !(await verifyPassword(password, user.password_hash))) {
+  if (!user || user.archived_at || !(await verifyPassword(password, user.password_hash))) {
     return json({ error: "invalid_credentials" }, 401);
   }
   if (!Number(user.email_verified)) {
@@ -337,6 +337,7 @@ route("POST", "/v1/auth/refresh", async (ctx) => {
   if (!user) {
     return json({ error: "invalid_token" }, 401);
   }
+  if (user.archived_at) return json({error: "account_archived"}, 401);
   return json(await tokenResponse(ctx.env, user));
 });
 
@@ -470,7 +471,7 @@ route("POST", "/v1/license/activate", async (ctx) => {
   const code = await ctx.env.DB.prepare("SELECT * FROM activation_codes WHERE code = ?")
     .bind(activationCode)
     .first();
-  if (!code || ["suspended", "revoked"].includes(code.status)) {
+  if (!code || code.archived_at || ["suspended", "revoked"].includes(code.status)) {
     return json({ error: "activation_code_invalid_or_used" }, 400);
   }
 
@@ -553,6 +554,7 @@ route("POST", "/v1/license/activate", async (ctx) => {
        SELECT ?, ac.id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        FROM activation_codes ac
        WHERE ac.id = ?
+         AND ac.archived_at IS NULL
          AND ac.status IN ('active', 'assigned', 'used')
          AND ac.edition = ? AND ac.license_days = ? AND ac.max_devices = ?
          AND (ac.assigned_to_user_id IS NULL OR ac.assigned_to_user_id = ?)
@@ -2162,6 +2164,7 @@ async function redeemAssignedMobileEntitlement(env, user) {
   const code = await env.DB.prepare(
     `SELECT * FROM activation_codes
      WHERE assigned_to_user_id = ?
+       AND archived_at IS NULL
        AND status IN ('active', 'assigned')
        AND (customer_email IS NULL OR customer_email = '' OR lower(customer_email) = ?)
      ORDER BY created_at DESC, id DESC
@@ -2183,6 +2186,7 @@ async function redeemAssignedMobileEntitlement(env, user) {
   const previous = await env.DB.prepare(
     `SELECT * FROM licenses
      WHERE user_id = ? AND edition = ?
+       AND archived_at IS NULL
      ORDER BY created_at DESC, id DESC
      LIMIT 1`
   ).bind(user.id, normalizeEdition(code.edition)).first();
@@ -2213,6 +2217,7 @@ async function redeemAssignedMobileEntitlement(env, user) {
          AND EXISTS (
            SELECT 1 FROM activation_codes ac
            WHERE ac.id = ? AND ac.assigned_to_user_id = ? AND ac.status IN ('active', 'assigned')
+             AND ac.archived_at IS NULL
              AND (ac.customer_email IS NULL OR ac.customer_email = '' OR lower(ac.customer_email) = ?)
          )`
     ).bind(
@@ -2239,6 +2244,7 @@ async function redeemAssignedMobileEntitlement(env, user) {
        SELECT ?, ac.id, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'auto', ?, ?, ?
        FROM activation_codes ac
        WHERE ac.id = ? AND ac.assigned_to_user_id = ? AND ac.status IN ('active', 'assigned')
+         AND ac.archived_at IS NULL
          AND (ac.customer_email IS NULL OR ac.customer_email = '' OR lower(ac.customer_email) = ?)
          AND NOT EXISTS (
            SELECT 1 FROM licenses existing
@@ -5314,7 +5320,7 @@ route("GET", "/v1/scorpio_v1_admin/signing/health", async (ctx) => {
 route("GET", "/v1/scorpio_v1_admin/activation-codes", async (ctx) => {
   requireAdmin(ctx);
   const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
-  const where = [];
+  const where = ["archived_at IS NULL", "NOT EXISTS(SELECT 1 FROM users au WHERE au.archived_at IS NOT NULL AND (au.id=activation_codes.assigned_to_user_id OR au.id=activation_codes.used_by_user_id))"];
   const params = [];
   addListTextSearch(where, params, ["code", "customer_name", "customer_email", "notes"], options.q);
   if (options.status) {
@@ -5522,6 +5528,7 @@ async function updateAdminActivationCode(ctx) {
   if (!existing) {
     return json({ error: "activation_code_not_found" }, 404);
   }
+  if (existing.archived_at) return json({error: "account_record_archived"}, 409);
 
   const body = await readJson(ctx.request);
   const status = body.status ? normalizeActivationCodeStatus(body.status, existing.status) : existing.status;
@@ -5544,14 +5551,15 @@ async function updateAdminActivationCode(ctx) {
     return json({ error: "used_activation_code_status_locked" }, 409);
   }
 
-  await ctx.env.DB.prepare(
+  const changed = await ctx.env.DB.prepare(
     `UPDATE activation_codes
      SET edition = ?, license_days = ?, max_devices = ?, status = ?, customer_name = ?,
          customer_email = ?, machine_fingerprint_prebind = ?, notes = ?
-     WHERE code = ?`
+     WHERE code = ? AND archived_at IS NULL`
   )
     .bind(edition, licenseDays, maxDevices, status, customerName, customerEmail, machineFingerprintPrebind, notes, codeText)
     .run();
+  if (Number(changed.meta?.changes) !== 1) return json({error: "account_state_changed_refresh_required"}, 409);
   await audit(ctx.env, "update_activation_code", "admin_api", {
     code: codeText,
     status,
@@ -5604,7 +5612,7 @@ async function updateAdminLicense(ctx) {
     return json({ error: "license_id_required" }, 400);
   }
   const existing = await ctx.env.DB.prepare(
-    `SELECT l.*, u.email, u.username
+    `SELECT l.*, u.email, u.username, u.archived_at AS user_archived_at
      FROM licenses l
      JOIN users u ON u.id = l.user_id
      WHERE l.license_id = ?`
@@ -5614,6 +5622,7 @@ async function updateAdminLicense(ctx) {
   if (!existing) {
     return json({ error: "license_not_found" }, 404);
   }
+  if (existing.archived_at || existing.user_archived_at) return json({error: "account_record_archived"}, 409);
 
   const body = await readJson(ctx.request);
   const currentPayload = parseJson(existing.signed_payload, {});
@@ -5640,11 +5649,11 @@ async function updateAdminLicense(ctx) {
     features: currentPayload.features || {},
   });
 
-  await ctx.env.DB.prepare(
+  const changed = await ctx.env.DB.prepare(
     `UPDATE licenses
      SET machine_fingerprint = ?, signed_payload = ?, signature = ?, nonce = ?, expires_at = ?,
          is_active = ?, revoked = ?, revoke_reason = ?, approval_status = ?
-     WHERE license_id = ?`
+     WHERE license_id = ? AND archived_at IS NULL AND EXISTS(SELECT 1 FROM users WHERE id=licenses.user_id AND archived_at IS NULL)`
   )
     .bind(
       machineFingerprint,
@@ -5659,6 +5668,7 @@ async function updateAdminLicense(ctx) {
       licenseId
     )
     .run();
+  if (Number(changed.meta?.changes) !== 1) return json({error: "account_state_changed_refresh_required"}, 409);
   await audit(ctx.env, "update_license", "admin_api", {
     license_id: licenseId,
     expires_at: issued.expires_at,
@@ -5715,7 +5725,7 @@ async function updateAdminFeedback(ctx) {
 route("GET", "/v1/scorpio_v1_admin/licenses", async (ctx) => {
   requireAdmin(ctx);
   const options = adminListOptions(ctx.url, { defaultLimit: 50, maxLimit: 200 });
-  const where = [];
+  const where = ["l.archived_at IS NULL", "u.archived_at IS NULL"];
   const params = [];
   addListTextSearch(
     where,
@@ -5825,6 +5835,8 @@ route("GET", "/v1/scorpio_v1_admin/releases", async (ctx) => {
     where.push("platform = ?");
     params.push(normalizeReleasePlatform(ctx.url.searchParams.get("platform")));
   }
+  if (options.status === "active") where.push("is_active = 1");
+  if (options.status === "inactive") where.push("is_active = 0");
   const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM release_versions ${filter}`).bind(...params).first();
   const rows = await ctx.env.DB.prepare(
@@ -5969,7 +5981,9 @@ route("GET", "/v1/scorpio_v1_admin/analysis-requests", async (ctx) => {
 
 route("POST", "/v1/scorpio_v1_admin/releases", async (ctx) => {
   requireAdmin(ctx);
-  const record = normalizeAdminRelease(await readJson(ctx.request));
+  const body = await readJson(ctx.request, 16 * 1024);
+  const record = normalizeAdminRelease(body);
+  if (body.require_validation) await preflightRelease(ctx.env, record, body.r2_etag);
   await upsertRelease(ctx.env, record);
 
   await audit(ctx.env, "upsert_release", "admin_api", {
@@ -5984,6 +5998,25 @@ route("POST", "/v1/scorpio_v1_admin/releases", async (ctx) => {
     is_required: Boolean(record.is_required),
   }, 201);
 });
+
+route("POST", "/v1/scorpio_v1_admin/releases/preflight", async (ctx) => {
+  requireAdmin(ctx);
+  const body = await readJson(ctx.request, 16 * 1024);
+  return json(await preflightRelease(ctx.env, normalizeAdminRelease(body)), 200, {"cache-control": "no-store"});
+});
+
+async function preflightRelease(env, record, etag = "") {
+  if (record.platform === "android" && !/\.apk$/i.test(record.file_name)) throwHttp(400, "release_platform_file_mismatch");
+  if (record.platform === "desktop" && /\.apk$/i.test(record.file_name)) throwHttp(400, "release_platform_file_mismatch");
+  if (!record.r2_key) return {ok: true, source: "https", file_size_bytes: record.file_size_bytes, content_verified: false};
+  if (!env.RELEASE_BUCKET?.head) throwHttp(503, "release_storage_unavailable");
+  const object = await env.RELEASE_BUCKET.head(record.r2_key);
+  if (!object) throwHttp(404, "release_object_not_found");
+  if (etag && etag !== object.etag) throwHttp(409, "release_object_changed");
+  if (record.file_size_bytes && Number(record.file_size_bytes) !== object.size) throwHttp(409, "release_size_mismatch");
+  if (record.file_hash_sha256 && object.customMetadata?.sha256 && record.file_hash_sha256 !== object.customMetadata.sha256.toLowerCase()) throwHttp(409, "release_hash_mismatch");
+  return {ok: true, source: "r2", etag: object.etag, file_size_bytes: object.size, file_name: record.file_name, content_verified: false};
+}
 
 route("POST", "/v1/scorpio_v1_admin/data-packages", async (ctx) => {
   requireAdmin(ctx);
@@ -6391,6 +6424,7 @@ async function requireUser(ctx) {
   if (!user) {
     throwHttp(401, "user_not_found");
   }
+  if (user.archived_at) throwHttp(401, "account_archived");
   return user;
 }
 
@@ -9015,14 +9049,16 @@ async function updateAdminRelease(ctx) {
   if (!existing) {
     return json({ error: "release_not_found" }, 404);
   }
+  const body = await readJson(ctx.request, 16 * 1024);
   const record = normalizeAdminRelease({
     ...existing,
-    ...(await readJson(ctx.request)),
+    ...body,
     version: existing.version,
     channel: existing.channel,
     edition: existing.edition,
     platform: existing.platform,
   });
+  if (body.require_validation) await preflightRelease(ctx.env, record, body.r2_etag);
   await ctx.env.DB.prepare(
     `UPDATE release_versions
      SET release_notes = ?,

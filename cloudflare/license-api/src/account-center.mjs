@@ -32,10 +32,11 @@ export function registerAccountCenterRoutes(deps) {
     if (!result) fail(400, "account_reason_required");
     return result;
   };
-  async function findUser(env, id) {
-    const user = await env.DB.prepare("SELECT id, email, username, email_verified, created_at FROM users WHERE id = ?")
+  async function findUser(env, id, allowArchived = false) {
+    const user = await env.DB.prepare("SELECT id, email, username, email_verified, created_at, archived_at, record_operation_id FROM users WHERE id = ?")
       .bind(ownerId(id)).first();
     if (!user) fail(404, "user_not_found");
+    if (user.archived_at && !allowArchived) fail(409, "account_record_archived");
     return user;
   }
   async function rateLimit(env, userId, scope) {
@@ -50,20 +51,21 @@ export function registerAccountCenterRoutes(deps) {
       days_left: Math.max(0, Math.round((Date.parse(row.expires_at?.slice(0, 10)) - Date.parse(todayIso())) / 86400000)) || 0,
       machine_fingerprint: row.machine_fingerprint || "", last_online_check: row.last_online_check || "",
       max_devices: Number(row.max_devices) || 1, activation_code: row.code || "", code_id: row.activation_code_id,
-      approval_status: row.approval_status || "auto", revoke_reason: row.revoke_reason || "",
+      approval_status: row.approval_status || "auto", revoke_reason: row.revoke_reason || "", archived_at: row.archived_at || null,
     };
   }
-  async function accountOverview(env, user) {
+  async function accountOverview(env, user, includeArchived = false) {
     const rows = list(await env.DB.prepare(
       `SELECT l.*, ac.code, ac.notes AS grant_notes, ac.max_devices
        FROM licenses l LEFT JOIN activation_codes ac ON ac.id = l.activation_code_id
-       WHERE l.user_id = ? ORDER BY l.created_at DESC, l.id DESC`
+       WHERE l.user_id = ? ${includeArchived ? "" : "AND l.archived_at IS NULL"} ORDER BY l.created_at DESC, l.id DESC`
     ).bind(user.id).all());
     const codes = list(await env.DB.prepare(
-      `SELECT ac.id, ac.code, ac.edition, ac.status, ac.license_days, ac.max_devices, ac.notes, ac.created_at,
+      `SELECT ac.id, ac.code, ac.edition, ac.status, ac.license_days, ac.max_devices, ac.notes, ac.created_at, ac.archived_at,
         (SELECT COUNT(*) FROM licenses used WHERE used.activation_code_id = ac.id) AS activation_count
-       FROM activation_codes ac WHERE ac.assigned_to_user_id = ? OR ac.used_by_user_id = ?
-         OR EXISTS (SELECT 1 FROM licenses l WHERE l.activation_code_id = ac.id AND l.user_id = ?)
+       FROM activation_codes ac WHERE (ac.assigned_to_user_id = ? OR ac.used_by_user_id = ?
+         OR EXISTS (SELECT 1 FROM licenses l WHERE l.activation_code_id = ac.id AND l.user_id = ?))
+         ${includeArchived ? "" : "AND ac.archived_at IS NULL"}
        ORDER BY ac.id DESC`
     ).bind(user.id, user.id, user.id).all());
     const licenses = rows.map(publicLicense);
@@ -72,7 +74,7 @@ export function registerAccountCenterRoutes(deps) {
               b.client_version, b.revoked, b.created_at, b.last_seen_at,
               l.is_active, l.expires_at, l.approval_status, l.revoked AS license_revoked, l.edition
        FROM mobile_device_bindings b JOIN licenses l ON l.license_id = b.license_id AND l.user_id = b.user_id
-       WHERE b.user_id = ? ORDER BY b.id DESC`
+       WHERE b.user_id = ? ${includeArchived ? "" : "AND l.archived_at IS NULL"} ORDER BY b.id DESC`
     ).bind(user.id).all());
     const devices = [
       ...licenses.filter((item) => item.machine_fingerprint).map((item) => ({
@@ -103,7 +105,7 @@ export function registerAccountCenterRoutes(deps) {
     const awaitingActivation = !active.length && pendingCodes.length > 0;
     const inactiveGrant = !primary ? codes.find((item) => !item.activation_count) : null;
     return {
-      user: {id: user.id, email: user.email, username: user.username, created_at: user.created_at, email_verified: Boolean(Number(user.email_verified))},
+      user: {id: user.id, email: user.email, username: user.username, created_at: user.created_at, archived_at: user.archived_at || null, email_verified: Boolean(Number(user.email_verified))},
       summary: {
         status: active.length ? (primary.kind === "trial" ? "trial" : "active") : pendingCodes.length ? "unactivated" : primary?.status || inactiveGrant?.status || "unlicensed",
         edition: awaitingActivation ? pendingCodes[0].edition : primary?.edition || inactiveGrant?.edition || "",
@@ -131,6 +133,7 @@ export function registerAccountCenterRoutes(deps) {
     return {sql: "EXISTS (SELECT 1 FROM account_operations WHERE operation_id = ? AND mutation_token = ?)", args: [op.id, op.token]};
   }
   async function commit(ctx, op, result, mutations, checks, events = []) {
+    if (!["archive_user", "restore_user"].includes(op.action)) checks = {sql: `(${checks.sql}) AND EXISTS(SELECT 1 FROM users WHERE id=? AND archived_at IS NULL)`, args: [...checks.args, op.userId]};
     const now = new Date().toISOString();
     const guard = owned(op);
     const statements = [ctx.env.DB.prepare(
@@ -165,7 +168,7 @@ export function registerAccountCenterRoutes(deps) {
     if (op.cached) return respond(op.cached);
     await rateLimit(ctx.env, user.id, "account_redeem");
     const code = await ctx.env.DB.prepare("SELECT * FROM activation_codes WHERE code = ?").bind(codeText).first();
-    if (!code || !["active", "assigned"].includes(code.status)
+    if (!code || code.archived_at || !["active", "assigned"].includes(code.status)
       || (code.assigned_to_user_id && Number(code.assigned_to_user_id) !== Number(user.id))
       || (code.used_by_user_id && Number(code.used_by_user_id) !== Number(user.id))
       || (code.customer_email && code.customer_email.toLowerCase() !== user.email.toLowerCase())) fail(409, "activation_code_unavailable");
@@ -186,7 +189,7 @@ export function registerAccountCenterRoutes(deps) {
     const op = await operation(ctx, body, user.id, "renewal_request", payload);
     if (op.cached) return respond(op.cached);
     await rateLimit(ctx.env, user.id, "account_request");
-    const license = await ctx.env.DB.prepare("SELECT license_id, revoked, activation_code_id FROM licenses WHERE user_id = ? AND license_id = ?").bind(user.id, payload.license_id).first();
+    const license = await ctx.env.DB.prepare("SELECT license_id, revoked, activation_code_id FROM licenses WHERE user_id = ? AND license_id = ? AND archived_at IS NULL").bind(user.id, payload.license_id).first();
     if (!license) fail(404, "license_not_found");
     if (Number(license.revoked)) fail(409, "account_license_restore_required");
     if (license.activation_code_id) {
@@ -204,7 +207,7 @@ export function registerAccountCenterRoutes(deps) {
       ctx.env.DB.prepare(`INSERT INTO account_service_requests(public_id, user_id, license_id, requested_days, note, created_at, updated_at)
         SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guard.sql}`)
         .bind(id, user.id, payload.license_id, payload.requested_days, payload.note, now, now, ...guard.args),
-    ], {sql: "EXISTS(SELECT 1 FROM account_service_requests WHERE public_id = ?)", args: [id]},
+    ], {sql: "EXISTS(SELECT 1 FROM account_service_requests WHERE public_id = ?) AND EXISTS(SELECT 1 FROM licenses WHERE license_id=? AND user_id=? AND archived_at IS NULL)", args: [id, payload.license_id, user.id]},
     [{license_id: payload.license_id, reason: payload.note || "renewal_requested", after: {requested_days: payload.requested_days, request: id}}]), 201);
   });
 
@@ -216,7 +219,7 @@ export function registerAccountCenterRoutes(deps) {
     const status = text(ctx.url.searchParams.get("status"), 32);
     const includeTest = ctx.url.searchParams.get("include_test") === "1";
     const base = `WITH accounts AS (
-      SELECT u.id, u.email, u.username, u.created_at, u.email_verified,
+      SELECT u.id, u.email, u.username, u.created_at, u.email_verified, u.archived_at,
         CASE WHEN pending.id IS NOT NULL AND (l.id IS NULL OR pending.status IN ('active','assigned') AND (l.revoked = 1 OR l.is_active = 0 OR substr(l.expires_at,1,10) < ?))
           THEN pending.edition ELSE COALESCE(l.edition, '') END AS edition, l.license_id, l.expires_at,
         CASE WHEN l.license_id IS NULL THEN CASE WHEN pending.id IS NULL THEN 'unlicensed' WHEN pending.status IN ('suspended','revoked') THEN pending.status ELSE 'unactivated' END
@@ -238,7 +241,7 @@ export function registerAccountCenterRoutes(deps) {
           AND NOT EXISTS(SELECT 1 FROM licenses activated WHERE activated.activation_code_id = pc.id)
         ORDER BY CASE WHEN pc.status IN ('active','assigned') THEN 0 ELSE 1 END, pc.id DESC LIMIT 1)
     )`;
-    const where = [], args = [todayIso(), todayIso(), todayIso(), todayIso()];
+    const where = [ctx.url.searchParams.get("archived") === "1" ? "archived_at IS NOT NULL" : "archived_at IS NULL"], args = [todayIso(), todayIso(), todayIso(), todayIso()];
     if (!includeTest) where.push("lower(email) NOT LIKE '%@example.com' AND lower(email) NOT LIKE '%cf-test%' AND lower(username) NOT LIKE '%cf-test%'");
     if (q) { where.push("(lower(email) LIKE ? ESCAPE '\\' OR lower(username) LIKE ? ESCAPE '\\')"); const pattern = `%${q.replace(/[\\%_]/g, "\\$&")}%`; args.push(pattern, pattern); }
     if (status) { where.push("status = ?"); args.push(status); }
@@ -251,7 +254,7 @@ export function registerAccountCenterRoutes(deps) {
 
   route("GET", "/v1/scorpio_v1_admin/users/detail", async (ctx) => {
     requireAdmin(ctx);
-    return respond(await accountOverview(ctx.env, await findUser(ctx.env, ctx.url.searchParams.get("user_id"))));
+    return respond(await accountOverview(ctx.env, await findUser(ctx.env, ctx.url.searchParams.get("user_id"), true), true));
   });
 
   route("GET", "/v1/scorpio_v1_admin/authorizations", async (ctx) => {
@@ -268,7 +271,8 @@ export function registerAccountCenterRoutes(deps) {
     ), grants AS (
       SELECT u.id AS user_id, u.username, u.email, ac.id AS code_id, ac.code, ac.edition,
         ac.license_days, ac.max_devices, ac.notes AS grant_notes, ac.created_at,
-        l.license_id, l.expires_at, l.revoked, l.is_active, l.approval_status, ac.status AS code_status
+        l.license_id, l.expires_at, l.revoked, l.is_active, l.approval_status, ac.status AS code_status,
+        ac.archived_at, u.archived_at AS user_archived_at
       FROM linked x JOIN users u ON u.id = x.user_id JOIN activation_codes ac ON ac.id = x.code_id
       LEFT JOIN licenses l ON l.id = (SELECT chosen.id FROM licenses chosen
         WHERE chosen.user_id = u.id AND chosen.activation_code_id = ac.id
@@ -277,7 +281,7 @@ export function registerAccountCenterRoutes(deps) {
           WHEN substr(chosen.expires_at,1,10) < ? THEN 2 ELSE 1 END, chosen.expires_at DESC, chosen.id DESC LIMIT 1)
       UNION ALL
       SELECT u.id, u.username, u.email, NULL, '', l.edition, 0, 1, '', l.created_at,
-        l.license_id, l.expires_at, l.revoked, l.is_active, l.approval_status, ''
+        l.license_id, l.expires_at, l.revoked, l.is_active, l.approval_status, '', l.archived_at, u.archived_at
       FROM users u JOIN licenses l ON l.user_id = u.id
       WHERE l.activation_code_id IS NULL OR NOT EXISTS(SELECT 1 FROM activation_codes ac WHERE ac.id = l.activation_code_id)
     ), authorizations AS (
@@ -289,7 +293,7 @@ export function registerAccountCenterRoutes(deps) {
         ELSE 'active' END AS status
       FROM grants
     )`;
-    const where = [], args = [todayIso(), todayIso(), todayIso()];
+    const where = ["user_archived_at IS NULL", ctx.url.searchParams.get("archived") === "1" ? "archived_at IS NOT NULL" : "archived_at IS NULL"], args = [todayIso(), todayIso(), todayIso()];
     if (ctx.url.searchParams.get("include_test") !== "1") where.push("lower(email) NOT LIKE '%@example.com' AND lower(email) NOT LIKE '%cf-test%' AND lower(username) NOT LIKE '%cf-test%'");
     if (q) {
       const pattern = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -320,6 +324,7 @@ export function registerAccountCenterRoutes(deps) {
     if (op.cached) return respond(op.cached);
     const code = await ctx.env.DB.prepare("SELECT * FROM activation_codes WHERE id = ? AND (assigned_to_user_id = ? OR used_by_user_id = ?)").bind(payload.code_id, userId, userId).first();
     if (!code) fail(404, "activation_code_not_found");
+    if (code.archived_at) fail(409, "account_record_archived");
     const activated = await ctx.env.DB.prepare("SELECT COUNT(*) AS total FROM licenses WHERE activation_code_id = ?").bind(code.id).first();
     if (Number(activated.total) || code.used_at || code.status === "used") fail(409, "account_code_already_activated");
     const allowed = {edit: ["active", "assigned", "suspended"], suspend: ["active", "assigned"], resume: ["suspended"], revoke: ["active", "assigned", "suspended"], restore: ["revoked"]};
@@ -332,7 +337,7 @@ export function registerAccountCenterRoutes(deps) {
         WHERE id = ? AND status = ? AND edition = ? AND license_days = ? AND max_devices = ?
           AND NOT EXISTS(SELECT 1 FROM licenses WHERE activation_code_id = ?) AND ${guard.sql}`)
         .bind(next.edition, next.days, next.max_devices, next.status, code.id, code.status, code.edition, code.license_days, code.max_devices, code.id, ...guard.args),
-    ], {sql: "EXISTS(SELECT 1 FROM activation_codes WHERE id = ? AND edition = ? AND license_days = ? AND max_devices = ? AND status = ?) AND NOT EXISTS(SELECT 1 FROM licenses WHERE activation_code_id = ?)",
+    ], {sql: "EXISTS(SELECT 1 FROM activation_codes WHERE id = ? AND archived_at IS NULL AND edition = ? AND license_days = ? AND max_devices = ? AND status = ?) AND NOT EXISTS(SELECT 1 FROM licenses WHERE activation_code_id = ?)",
       args: [code.id, next.edition, next.days, next.max_devices, next.status, code.id]},
     [{reason: payload.reason, before: {code: code.code, edition: code.edition, days: code.license_days, max_devices: code.max_devices, status: code.status}, after: {code: code.code, ...next}}]));
   });
@@ -374,6 +379,7 @@ export function registerAccountCenterRoutes(deps) {
     if (serviceRequest && serviceRequest.status !== "pending") fail(409, "account_request_already_resolved");
     const target = await ctx.env.DB.prepare("SELECT * FROM licenses WHERE user_id = ? AND license_id = ?").bind(user.id, payload.license_id).first();
     if (!target) fail(404, "license_not_found");
+    if (target.archived_at) fail(409, "account_record_archived");
     if (payload.action === "extend" && Number(target.revoked)) fail(409, "account_license_restore_required");
     if (payload.action === "restore" && !Number(target.revoked)) fail(409, "account_license_not_revoked");
     if (payload.action === "approve" && (Number(target.revoked) || effectiveLicenseStatus(target, todayIso()) !== "pending")) fail(409, "account_license_not_pending");
@@ -410,6 +416,7 @@ export function registerAccountCenterRoutes(deps) {
           .bind(revoked, revoked ? 0 : 1, revoked ? payload.reason : "", row.id, user.id, Number(row.revoked), ...guard.args));
         checks.push("EXISTS(SELECT 1 FROM licenses WHERE id = ? AND revoked = ?)"); checkArgs.push(row.id, revoked);
       }
+      checks.push("EXISTS(SELECT 1 FROM licenses WHERE id=? AND archived_at IS NULL)"); checkArgs.push(row.id);
       events.push({license_id: row.license_id, action: payload.action, reason: payload.reason,
         before: {expires_at: row.expires_at, revoked: Boolean(row.revoked), approval_status: row.approval_status, machine_fingerprint: row.machine_fingerprint || ""},
         after: {expires_at: expires || row.expires_at, revoked: payload.action === "revoke", approval_status: payload.action === "approve" ? "approved" : row.approval_status, sync_status: "client_refresh_required"}});
@@ -477,6 +484,61 @@ export function registerAccountCenterRoutes(deps) {
         WHERE public_id = ? AND status = 'pending' AND ${guard.sql}`).bind(note, new Date().toISOString(), item.public_id, ...guard.args),
     ], {sql: "EXISTS(SELECT 1 FROM account_service_requests WHERE public_id = ? AND status = 'rejected' AND resolution_note = ?)", args: [item.public_id, note]},
     [{license_id: item.license_id, reason: note, after: {request: item.public_id, status: "rejected"}}]));
+  });
+
+  route("POST", "/v1/scorpio_v1_admin/users/record-action", async (ctx) => {
+    requireAdmin(ctx);
+    const body = await readJson(ctx.request, 8192), user = await findUser(ctx.env, body.user_id, true);
+    const payload = {kind: text(body.kind, 16), action: text(body.action, 16), code_id: body.code_id ? ownerId(body.code_id) : null, license_id: text(body.license_id, 128), reason: reason(body.reason)};
+    if (!["user", "grant"].includes(payload.kind) || !["archive", "restore"].includes(payload.action)) fail(400, "account_action_invalid");
+    const op = await operation(ctx, body, user.id, `${payload.action}_${payload.kind}`, payload);
+    if (op.cached) return respond(op.cached);
+    const archive = payload.action === "archive", now = new Date().toISOString(), archivedAt = archive ? now : null, guard = owned(op);
+    const live = "revoked = 0 AND (expires_at IS NULL OR expires_at = '' OR substr(expires_at,1,10) >= ? OR approval_status = 'pending')";
+    let table, row, eligible = "1=1", eligibleArgs = [], rows = [];
+    if (payload.kind === "user") {
+      table = "users"; row = user;
+      eligible = `NOT EXISTS(SELECT 1 FROM licenses WHERE user_id=users.id AND ${live})
+        AND NOT EXISTS(SELECT 1 FROM account_service_requests WHERE user_id=users.id AND status='pending')
+        AND NOT EXISTS(SELECT 1 FROM activation_codes c WHERE (c.assigned_to_user_id=users.id OR c.used_by_user_id=users.id)
+          AND c.status IN ('active','assigned','suspended') AND NOT EXISTS(SELECT 1 FROM licenses l WHERE l.activation_code_id=c.id))`;
+      eligibleArgs = [todayIso()];
+    } else if (payload.code_id) {
+      if (user.archived_at) fail(409, "account_record_archived");
+      table = "activation_codes";
+      row = await ctx.env.DB.prepare(`SELECT * FROM activation_codes WHERE id=? AND (assigned_to_user_id=? OR used_by_user_id=? OR EXISTS(SELECT 1 FROM licenses WHERE activation_code_id=activation_codes.id AND user_id=?))`)
+        .bind(payload.code_id, user.id, user.id, user.id).first();
+      if (!row) fail(404, "activation_code_not_found");
+      eligible = `NOT EXISTS(SELECT 1 FROM licenses WHERE activation_code_id=activation_codes.id AND (${live} OR user_id<>?))
+        AND NOT EXISTS(SELECT 1 FROM account_service_requests r JOIN licenses l ON l.license_id=r.license_id WHERE l.activation_code_id=activation_codes.id AND r.status='pending')
+        AND (status='revoked' OR EXISTS(SELECT 1 FROM licenses WHERE activation_code_id=activation_codes.id))`;
+      eligibleArgs = [todayIso(), user.id];
+      rows = list(await ctx.env.DB.prepare("SELECT * FROM licenses WHERE activation_code_id=? ORDER BY id").bind(row.id).all());
+    } else {
+      if (user.archived_at) fail(409, "account_record_archived");
+      table = "licenses";
+      row = await ctx.env.DB.prepare("SELECT * FROM licenses WHERE user_id=? AND license_id=? AND activation_code_id IS NULL").bind(user.id, payload.license_id).first();
+      if (!row) fail(404, "license_not_found");
+      eligible = `NOT (${live}) AND NOT EXISTS(SELECT 1 FROM account_service_requests WHERE license_id=licenses.license_id AND status='pending')`;
+      eligibleArgs = [todayIso()];
+    }
+    if (Boolean(row.archived_at) === archive) fail(409, "account_state_changed_refresh_required");
+    if (archive && !await ctx.env.DB.prepare(`SELECT id FROM ${table} WHERE id=? AND ${eligible}`).bind(row.id, ...eligibleArgs).first()) fail(409, "account_record_in_use");
+    const mutations = [ctx.env.DB.prepare(`UPDATE ${table} SET archived_at=?,record_operation_id=? WHERE id=? AND record_operation_id=? AND ${archive ? eligible : "1=1"} AND ${guard.sql}`)
+      .bind(archivedAt, op.id, row.id, row.record_operation_id || "", ...(archive ? eligibleArgs : []), ...guard.args)];
+    const checks = [`EXISTS(SELECT 1 FROM ${table} WHERE id=? AND record_operation_id=?)`], checkArgs = [row.id, op.id];
+    for (const item of rows) {
+      mutations.push(ctx.env.DB.prepare(`UPDATE licenses SET archived_at=?,record_operation_id=? WHERE id=? AND record_operation_id=? AND ${guard.sql}`)
+        .bind(archivedAt, op.id, item.id, item.record_operation_id || "", ...guard.args));
+      checks.push("EXISTS(SELECT 1 FROM licenses WHERE id=? AND record_operation_id=?)"); checkArgs.push(item.id, op.id);
+    }
+    if (table === "activation_codes") {
+      checks.push("NOT EXISTS(SELECT 1 FROM licenses WHERE activation_code_id=? AND record_operation_id<>?)"); checkArgs.push(row.id, op.id);
+    }
+    if (archive) { checks.push(`EXISTS(SELECT 1 FROM ${table} WHERE id=? AND ${eligible})`); checkArgs.push(row.id, ...eligibleArgs); }
+    return respond(await commit(ctx, op, {ok: true, kind: payload.kind, archived: archive, user_id: user.id}, mutations,
+      {sql: checks.join(" AND "), args: checkArgs}, [{license_id: row.license_id || "", reason: payload.reason,
+        before: {archived: Boolean(row.archived_at)}, after: {archived: archive, kind: payload.kind, code_id: payload.code_id, license_id: payload.license_id}}]));
   });
 
   route("POST", "/v1/scorpio_v1_admin/users/device-action", async (ctx) => {

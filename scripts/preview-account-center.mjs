@@ -28,7 +28,10 @@ for (const [index, platform, edition, channel] of [[1, "desktop", "personal_pro"
   fixture.sql.prepare(`INSERT INTO release_versions(id,version,channel,edition,platform,release_notes,r2_key,file_name,content_type,released_at)
     VALUES(?,'0.0.0-local-preview',?,?,?,'Local preview','preview.txt','Scorpio-local-preview.txt','text/plain',?)`).run(index, channel, edition, platform, today);
 }
-fixture.env.RELEASE_BUCKET = {async get() {
+fixture.env.RELEASE_BUCKET = {async head(key) {
+  if (key !== "preview.txt") return null;
+  return {size: new TextEncoder().encode("Local preview only. This is not a software installer.\n").byteLength, etag: "local-preview-only", customMetadata: {}};
+}, async get() {
   const bytes = new TextEncoder().encode("Local preview only. This is not a software installer.\n");
   return {body: bytes, size: bytes.byteLength, writeHttpMetadata(headers) { headers.set("content-type", "text/plain"); }};
 }};

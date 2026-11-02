@@ -17,6 +17,7 @@
   }
   function navigate(view) {
     window.ScorpioSupportCenter?.navigate(view);
+    window.ScorpioAdminDelivery?.activate(view === "legacy");
     history.replaceState(null, "", `${location.pathname}${location.search}#${view}`);
     document.querySelector(".admin-command-bar h1").textContent = {licenses: t("用户与软件授权", "Users & software licenses"), users: t("注册用户", "Registered users"), requests: t("续期申请", "Renewal requests"), legacy: t("交付与发行", "Delivery & releases"), feedback: t("问题反馈", "Feedback inbox")}[view] || t("用户与软件授权", "Users & software licenses");
     document.querySelector(".admin-command-bar p:not(.section-kicker)").hidden = view === "feedback";
@@ -39,6 +40,7 @@
     byId("adminLicensesRefresh").disabled = true;
     try {
       const query = new URLSearchParams({limit: licensePage.limit, offset: licensePage.offset, q: byId("adminLicenseSearch").value.trim(), status: byId("adminLicenseStatus").value, include_test: byId("adminIncludeTestLicenses").checked ? "1" : "0"});
+      query.set("archived", byId("adminLicenseArchive").value);
       const data = await call(`/authorizations?${query}`);
       if (request !== licenseSequence || !authorized) return;
       licensePage = data.page;
@@ -47,6 +49,7 @@
       byId("adminLicensesTable").innerHTML = data.items.length ? `<div class="portal-table-wrap"><table class="portal-table"><thead><tr><th>${t("用户 / 授权", "User / grant")}</th><th>${t("版本与类型", "Edition & type")}</th><th>${t("授权状态", "License status")}</th><th>${t("有效期", "Validity")}</th><th class="portal-secondary">${t("设备额度", "Device allowance")}</th><th>${t("操作", "Actions")}</th></tr></thead><tbody>${data.items.map((item) => `<tr><td><strong>${escape(item.username)}</strong><small class="portal-user-email">${escape(item.email)}</small><small class="portal-grant-code">${escape(item.code || item.license_id)}</small></td><td><strong>${escape(edition(item.edition))}</strong><small>${V.kind(item.kind)}</small></td><td>${badge(item.status)}</td><td>${item.license_id ? `<strong>${date(item.expires_at)}</strong><small>${t("到期日期", "Expires on")}</small>` : `<strong>${item.license_days} ${t("天", "days")}</strong><small>${t("首次激活起计时", "Starts on first activation")}</small>`}</td><td class="portal-secondary">${item.max_devices} ${t("台 / 平台", "per platform")}</td><td><button class="portal-text-button" type="button" data-open-user="${item.user_id}" data-focus-grant="${escape(item.code || item.license_id)}">${t("管理授权", "Manage grant")}${icon("arrow-right")}</button></td></tr>`).join("")}</tbody></table></div>` : empty("暂无匹配的用户授权", "No matching account grants");
       byId("adminLicensesPageInfo").textContent = licensePage.total ? `${licensePage.offset + 1}-${Math.min(licensePage.offset + licensePage.limit, licensePage.total)} / ${licensePage.total} ${t("份授权", "grants")}` : t("0 份授权", "0 grants");
       byId("adminLicensesPrevious").disabled = licensePage.offset === 0;
+      decorateRecords("adminLicensesTable", data.items, "grant");
       byId("adminLicensesNext").disabled = !licensePage.has_more;
       icons();
     } catch (error) { if (request === licenseSequence) { byId("adminLicensesTable").innerHTML = empty("授权列表未加载", "Grants could not be loaded"); notify(errorText(error), "error"); } }
@@ -58,16 +61,44 @@
     byId("adminUsersRefresh").disabled = true;
     try {
       const query = new URLSearchParams({limit: page.limit, offset: page.offset, q: byId("adminUserSearch").value.trim(), status: byId("adminUserStatus").value, include_test: byId("adminIncludeTestUsers").checked ? "1" : "0"});
+      query.set("archived", byId("adminUserArchive").value);
       const data = await call(`/users?${query}`);
       if (request !== sequence || !authorized) return;
       page = data.page;
       byId("adminUsersTable").innerHTML = data.items.length ? `<div class="portal-table-wrap"><table class="portal-table"><thead><tr><th>${t("注册用户", "Registered user")}</th><th>${t("授权状态", "License status")}</th><th>${t("版本", "Edition")}</th><th>${t("到期日期", "Expires on")}</th><th class="portal-secondary">${t("注册时间", "Registered")}</th><th>${t("操作", "Actions")}</th></tr></thead><tbody>${data.items.map((user) => `<tr><td><strong>${escape(user.username)}</strong><small class="portal-user-email">${escape(user.email)}</small></td><td>${badge(user.status)}</td><td>${escape(edition(user.edition))}</td><td>${date(user.expires_at)}</td><td class="portal-secondary">${date(user.created_at)}</td><td><button class="portal-text-button" type="button" data-open-user="${user.id}">${t("管理", "Manage")}${icon("arrow-right")}</button></td></tr>`).join("")}</tbody></table></div>` : empty("没有匹配的注册用户", "No users match these filters");
       byId("adminUsersPageInfo").textContent = page.total ? `${page.offset + 1}-${Math.min(page.offset + page.limit, page.total)} / ${page.total} ${t("位用户", "users")}` : t("0 位用户", "0 users");
       byId("adminUsersPrevious").disabled = page.offset === 0;
+      decorateRecords("adminUsersTable", data.items, "user");
       byId("adminUsersNext").disabled = !page.has_more;
       icons();
     } catch (error) { if (request === sequence) { byId("adminUsersTable").innerHTML = empty("用户列表未加载", "Users could not be loaded"); notify(errorText(error), "error"); } }
     finally { if (request === sequence) byId("adminUsersRefresh").disabled = false; }
+  }
+  function decorateRecords(id, items, kind) {
+    const table = byId(id); table.recordItems = items;
+    const archived = byId(kind === "user" ? "adminUserArchive" : "adminLicenseArchive").value === "1";
+    table.querySelectorAll("tbody tr").forEach((row, index) => {
+      const cell = row.lastElementChild, item = items[index], actions = document.createElement("div"); actions.className = "operations-row-actions";
+      while (cell.firstChild) actions.append(cell.firstChild); cell.append(actions);
+      const button = document.createElement("button"); button.type = "button"; button.className = `portal-icon ${archived ? "" : "danger"}`;
+      button.dataset.recordKind = kind; button.dataset.recordIndex = index; button.dataset.recordTable = id; button.dataset.recordAction = archived ? "restore" : "archive";
+      const blocked = !archived && ["active", "trial", "unactivated", "pending"].includes(item.status);
+      const title = blocked ? t("有效授权或待处理记录不能删除", "Active or pending records cannot be deleted") : archived ? t("从回收站恢复", "Restore from recycle bin") : t("删除到回收站", "Move to recycle bin");
+      button.title = title; button.ariaLabel = title; button.disabled = blocked; button.innerHTML = icon(archived ? "rotate-ccw" : "trash-2"); actions.append(button);
+    });
+  }
+  function recordAction(button) {
+    const kind = button.dataset.recordKind, action = button.dataset.recordAction;
+    const item = byId(button.dataset.recordTable).recordItems?.[Number(button.dataset.recordIndex)]; if (!item) return;
+    const archive = action === "archive", userId = kind === "user" ? item.id : item.user_id, requestId = crypto.randomUUID();
+    modal.open({title: archive ? t("删除到回收站", "Move to recycle bin") : t("恢复记录", "Restore record"), label: archive ? t("确认删除", "Confirm deletion") : t("确认恢复", "Confirm restoration"),
+      body: `<p class="portal-muted">${escape(item.email)}${kind === "grant" ? `<br>${escape(item.code || item.license_id)}` : ""}</p><p class="portal-notice ${archive ? "warn" : ""}">${archive ? kind === "user" ? t("账号将停用登录并移入回收站。原授权、反馈和审计记录保留。有有效授权或待处理申请时不能删除。", "The account will be disabled and moved to the recycle bin. Licenses, feedback and audit history are retained. Active grants or pending requests prevent deletion.") : t("整份授权及其设备记录将移入回收站，不删除历史凭证，也不改变到期日期。有效授权不能删除。", "The entire grant and its device records will move to the recycle bin. Evidence and expiry dates are retained. Active grants cannot be deleted.") : t("仅恢复记录。不会发放新试用或增加授权天数。", "Restores the record only. No new trial or license days will be granted.")}</p><label>${t("处理原因", "Reason")}<textarea name="reason" required maxlength="1000" rows="3"></textarea></label>`,
+      async submit(fields) {
+        await call("/users/record-action", {method: "POST", body: {...fields, kind, action, user_id: userId, code_id: kind === "grant" ? item.code_id : null, license_id: kind === "grant" ? item.license_id || "" : "", request_id: requestId}});
+        ++detailSequence; byId("adminUserDrawer").close(); currentUser = null; detail = null; page.offset = 0; licensePage.offset = 0;
+        await loadUsers(); await loadLicenses(); notify(archive ? t("记录已移入回收站，历史数据保留。", "Moved to the recycle bin. Historical data is retained.") : t("记录已恢复，原授权期限保持不变。", "Record restored. Original license terms are unchanged."));
+      },
+    });
   }
   async function loadRequests() {
     if (!authorized) return;
@@ -106,6 +137,15 @@
       <section id="adminDetail-devices" role="tabpanel" data-user-detail-section="devices"><div class="portal-section-head"><h3>${t("设备与绑定", "Devices & bindings")}</h3><span class="portal-muted">${detail.summary.active_devices} ${t("台有效", "active")}</span></div><div>${detail.devices.map((item) => V.deviceCard(item, true)).join("") || empty("暂无设备绑定", "No devices connected")}</div></section>
       <section id="adminDetail-requests" role="tabpanel" data-user-detail-section="requests"><div class="portal-section-head"><h3>${t("续期申请", "Renewal requests")}</h3></div>${detail.requests.length ? detail.requests.map((item) => `<div>${V.requestList([item])}${item.status === "pending" ? `<button class="portal-text-button" type="button" data-resolve-request="${escape(item.public_id)}">${t("处理申请", "Review request")}${icon("arrow-right")}</button>` : ""}</div>`).join("") : V.requestList([])}</section>
       <section id="adminDetail-history" role="tabpanel" data-user-detail-section="history"><div class="portal-section-head"><h3>${t("授权变更记录", "License history")}</h3></div><div class="portal-timeline">${V.eventList(detail.events)}</div></section>`;
+    const archivedKeys = new Set([...detail.licenses.filter((item) => item.archived_at).map((item) => item.activation_code || item.license_id), ...detail.activation_codes.filter((item) => item.archived_at).map((item) => item.code)]);
+    if (user.archived_at) {
+      byId("adminGrantLicense").hidden = true;
+      const note = document.createElement("p"); note.className = "portal-notice warn"; note.textContent = t("此账号已在回收站中。恢复后方可登录或管理授权，历史记录仍可查看。", "This account is in the recycle bin. Restore it before sign-in or license changes. Historical records remain available."); byId("adminUserDetail").prepend(note);
+    }
+    for (const grant of byId("adminUserDetail").querySelectorAll("[data-grant-key]")) if (user.archived_at || archivedKeys.has(grant.dataset.grantKey)) {
+      for (const button of grant.querySelectorAll("[data-license-command],[data-code-command]")) { button.disabled = true; button.title = t("请先从回收站恢复记录", "Restore the record from the recycle bin first"); }
+    }
+    if (user.archived_at) for (const button of byId("adminUserDetail").querySelectorAll("[data-release-device]")) button.disabled = true;
     selectDetailView(detailView); icons();
   }
   async function openUser(id, focusGrant = "") {
@@ -228,6 +268,8 @@
   function translateShell() {
     if (!document.documentElement.lang.startsWith("en")) return;
     const translations = {"授权管理": "License management", "授权概览": "Grant overview", "搜索用户或授权": "Search users or grants", "搜索邮箱、用户名或授权码": "Search email, username or code", "待审批": "Awaiting approval", "激活暂停": "Activation paused", "发放授权": "Assign license", "刷新授权": "Refresh grants", "用户与软件授权": "Users & software licenses", "注册用户": "Registered users", "搜索注册用户": "Search users", "授权状态": "License status", "全部授权状态": "All license states", "尚未授权": "No license", "待激活": "Ready to activate", "试用中": "Trial", "授权有效": "Active", "已到期": "Expired", "已撤销": "Revoked", "待处理": "Pending", "已批准": "Approved", "已拒绝": "Declined", "续期申请": "Renewal requests", "交付与发行": "Delivery & releases", "显示测试用户": "Include test users", "搜索邮箱或用户名": "Search email or username", "刷新用户": "Refresh users", "刷新申请": "Refresh requests", "上一页": "Previous page", "下一页": "Next page", "关闭": "Close", "取消": "Cancel", "确认": "Confirm", "管理员登录": "Administrator sign-in", "登录后台": "Sign in", "退出登录": "Sign out", "官网首页": "Website", "用户中心": "My account", "运营后台": "Administration"};
+    Object.assign(translations, {"运营管理": "Operations", "返回官网": "Back to website", "运营后台导航": "Operations navigation", "记录范围": "Record scope", "正常记录": "Current records", "回收站": "Recycle bin"});
+    Object.assign(translations, {"客户台账": "Customers", "授权码": "License codes", "发行包": "Releases", "搜索客户": "Search customers", "客户名、邮箱、版本或备注": "Name, email, edition or notes", "状态": "Status", "全部状态": "All states", "草稿": "Draft", "活跃": "Active", "已交付": "Delivered", "暂停": "Paused", "取消": "Cancel", "可选": "Optional", "例如 1.0.0": "e.g. 1.0.0", "不关联台账": "No customer record", "绑定 License 用户": "Licensed users", "官网访问": "Site visits", "授权记录": "Device licenses", "Windows 客户端下载": "Windows downloads", "APK 下载": "APK downloads", "API 状态": "API status", "服务端校验": "Server validation"});
     function walk(node) {
       if (node.nodeType === Node.TEXT_NODE) { const key = node.nodeValue.trim(); if (translations[key]) node.nodeValue = node.nodeValue.replace(key, translations[key]); return; }
       if (node.nodeType !== Node.ELEMENT_NODE || node.matches("script,style")) return;
@@ -248,14 +290,15 @@
       let searchTimer;
       let licenseSearchTimer;
       byId("adminLicenseSearch").addEventListener("input", () => { clearTimeout(licenseSearchTimer); licenseSearchTimer = setTimeout(() => { licensePage.offset = 0; loadLicenses(); }, 250); });
-      for (const id of ["adminLicenseStatus", "adminIncludeTestLicenses"]) byId(id).addEventListener("change", () => { licensePage.offset = 0; loadLicenses(); });
+      for (const id of ["adminLicenseStatus", "adminIncludeTestLicenses", "adminLicenseArchive"]) byId(id).addEventListener("change", () => { licensePage.offset = 0; loadLicenses(); });
       byId("adminLicensesRefresh").addEventListener("click", loadLicenses);
       byId("adminLicensesPrevious").addEventListener("click", () => { licensePage.offset = Math.max(0, licensePage.offset - licensePage.limit); loadLicenses(); });
       byId("adminLicensesNext").addEventListener("click", () => { if (licensePage.has_more) { licensePage.offset += licensePage.limit; loadLicenses(); } });
       byId("adminAssignLicense").addEventListener("click", () => grant(true));
       byId("adminLicenseMetrics").addEventListener("click", (event) => { const button = event.target.closest("[data-grant-filter]"); if (button) { byId("adminLicenseStatus").value = button.dataset.grantFilter; licensePage.offset = 0; loadLicenses(); } });
       byId("adminUserSearch").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { page.offset = 0; loadUsers(); }, 250); });
-      for (const id of ["adminUserStatus", "adminIncludeTestUsers"]) byId(id).addEventListener("change", () => { page.offset = 0; loadUsers(); });
+      for (const id of ["adminUserStatus", "adminIncludeTestUsers", "adminUserArchive"]) byId(id).addEventListener("change", () => { page.offset = 0; loadUsers(); });
+      byId("adminConsole").addEventListener("click", (event) => { const button = event.target.closest("[data-record-kind]"); if (button && !button.disabled) recordAction(button); });
       byId("adminUsersRefresh").addEventListener("click", loadUsers);
       byId("adminUsersPrevious").addEventListener("click", () => { page.offset = Math.max(0, page.offset - page.limit); loadUsers(); });
       byId("adminUsersNext").addEventListener("click", () => { if (page.has_more) { page.offset += page.limit; loadUsers(); } });
@@ -288,6 +331,7 @@
     sessionChanged(value) {
       const changed = authorized !== value; authorized = value;
       if (changed) window.ScorpioSupportCenter?.sessionChanged(value);
+      if (changed) window.ScorpioAdminDelivery?.sessionChanged(value);
       if (value && changed) { loadUsers(); loadLicenses(); loadRequests(); }
       if (value && changed) navigate(["licenses", "users", "requests", "legacy", "feedback"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "licenses");
       if (!value) {

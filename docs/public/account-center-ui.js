@@ -41,6 +41,15 @@
     return [...groups.values()];
   }
   const errors = {
+    release_platform_file_mismatch: ["安装包文件名与客户端平台不一致。Android 需要 APK 文件。", "The package does not match its platform. Android requires an APK file."],
+    release_object_not_found: ["发行桶中未找到安装包，请核对 R2 对象 Key。", "The package was not found in the release bucket. Check its R2 object key."],
+    release_object_changed: ["安装包在校验后发生变化，请重新核对再发布。", "The package changed after validation. Check it again before publishing."],
+    release_size_mismatch: ["填写的文件大小与 R2 对象不一致。", "The declared file size does not match the R2 object."],
+    release_hash_mismatch: ["填写的 SHA256 与 R2 文件元数据不一致。", "The SHA256 checksum does not match the R2 metadata."],
+    release_storage_unavailable: ["发行文件存储暂不可用，请稍后重试。", "Release storage is unavailable. Please retry later."],
+    account_record_in_use: ["此记录仍有关联的有效授权、待激活授权或待处理申请，不能删除。", "This record has active grants, unactivated entitlements or pending requests and cannot be deleted."],
+    account_record_archived: ["记录已在回收站中，请先恢复再操作。", "This record is in the recycle bin. Restore it before making changes."],
+    account_archived: ["此账号已停用，请联系管理员恢复。", "This account has been disabled. Contact an administrator to restore it."],
     auth_challenge_required: ["请先完成安全验证。", "Complete security verification first."],
     auth_challenge_failed: ["安全验证已过期或未通过，请重新验证。", "Verification expired or failed. Please verify again."],
     auth_challenge_unavailable: ["安全验证暂不可用，请稍后重试。", "Security verification is unavailable. Please retry later."],
@@ -123,6 +132,7 @@
     const names = {grant: ["发放正式授权", "Commercial license assigned"], redeem: ["授权码已绑定账号", "Code linked to account"],
       extend: ["授权已延期", "License extended"], revoke: ["授权已撤销", "License revoked"], restore: ["授权已恢复", "License restored"],
       approve: ["软件授权已批准", "Software license approved"], code_edit: ["待激活授权已调整", "Pending grant updated"], code_suspend: ["授权激活已暂停", "Activation paused"], code_resume: ["授权激活已恢复", "Activation resumed"], code_revoke: ["待激活授权已撤销", "Pending grant revoked"], code_restore: ["待激活授权已恢复", "Pending grant restored"],
+      archive_user: ["账号移入回收站", "Account moved to recycle bin"], restore_user: ["账号已恢复", "Account restored"], archive_grant: ["授权记录移入回收站", "Grant record archived"], restore_grant: ["授权记录已恢复", "Grant record restored"],
       renewal_request: ["已提交续期申请", "Renewal requested"], reject_request: ["续期申请未通过", "Renewal declined"], release_mobile_device: ["设备绑定已释放", "Device binding released"]};
     return items.length ? items.map((item) => `<div class="portal-event">${icon("clock-3")}<div><strong>${escape(names[item.action] ? t(...names[item.action]) : item.action)}</strong><p>${escape(item.reason)}</p>${item.before?.expires_at && item.after?.expires_at && item.before.expires_at !== item.after.expires_at ? `<p>${escape(date(item.before.expires_at))} &rarr; ${escape(date(item.after.expires_at))}</p>` : ""}${item.after?.code && item.after.days ? `<p>${escape(edition(item.after.edition))} · ${item.after.days} ${t("天", "days")} · ${item.after.max_devices || 1} ${t("台 / 平台", "per platform")}</p>` : ""}</div><time datetime="${escape(item.created_at)}">${escape(date(item.created_at, true))}</time></div>`).join("") : empty("暂无授权变更记录", "No license changes yet");
   }

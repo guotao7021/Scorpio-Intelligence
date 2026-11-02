@@ -2,6 +2,8 @@
   const API_BASE = document.querySelector('meta[name="scorpio-api-base"]')?.content || "https://api.scorpio-intelligence.tech/v1";
   const ADMIN_PATH = "/scorpio_v1_admin";
   const TOKEN_KEY = "scorpio_admin_token";
+  const V = window.ScorpioAccountViews;
+  let actionInFlight = false;
   localStorage.removeItem(TOKEN_KEY);
 
   const state = {
@@ -19,6 +21,7 @@
     customerStatus: "",
     showTestRecords: false,
     currentTab: "customers",
+    pages: {},
   };
 
   const els = {
@@ -81,6 +84,10 @@
   init();
 
   function init() {
+    window.ScorpioAdminDelivery?.init({request, changeTab: switchTab, clearCustomer: clearCustomerForm,
+      snapshot: () => ({customers: state.customers, codes: state.codes, releases: state.releases, pages: state.pages}),
+      async refresh(type) { await ({customers: loadCustomers, codes: loadCodes, releases: loadReleases, licenses: loadLicenses, audit: loadAuditEvents, usage: loadUsageReports, analysis: loadAnalysisRequests}[type] || loadCustomers)(); renderAllTables(); renderMetrics(); renderCustomerOptions(); },
+    });
     window.ScorpioAdminAccounts?.init({request, invalidSession: () => clearSession("管理员身份已失效，请重新登录。"),
       async onMutation() { try { await loadCodes(); await loadLicenses(); await loadOverview(); renderAllTables(); renderMetrics(); } catch (error) { setMessage(error.message, "warn"); } },
     });
@@ -133,15 +140,18 @@
           ? await apiPut(`${ADMIN_PATH}/customers/${customerId}`, payload)
           : await apiPost(`${ADMIN_PATH}/customers`, payload);
         await loadCustomers();
+        await loadOverview();
         if (isTestRecord(result)) {
           state.showTestRecords = true;
-          if (els.showTestRecords) els.showTestRecords.checked = true;
+          els.showTestRecordsToggle.checked = true;
         }
         renderMetrics();
         renderCustomerOptions();
+        renderCustomers();
         clearCustomerForm();
         const suffix = isTestRecord(result) ? "；已自动打开“显示测试记录”。" : "";
         setMessage(`客户已保存：${result.customer_name || result.customer_email || result.id}${suffix}`, "success");
+        window.ScorpioAdminDelivery?.saved("customer");
       });
     });
 
@@ -161,9 +171,11 @@
         const result = await apiPost(`${ADMIN_PATH}/activation-codes`, payload);
         renderGeneratedCodes(result.codes || []);
         await Promise.all([loadCustomers(), loadCodes()]);
+        await loadOverview();
         renderMetrics();
         renderCustomerOptions();
         setMessage("授权码已生成并刷新列表。", "success");
+        renderCodes(); window.ScorpioAdminDelivery?.saved("code");
       });
     });
 
@@ -173,9 +185,12 @@
         const payload = formPayload(els.releaseForm);
         payload.file_size_bytes = Number(payload.file_size_bytes || 0);
         payload.is_required = Boolean(payload.is_required);
-        await apiPost(`${ADMIN_PATH}/releases`, payload);
+        if (window.ScorpioAdminDelivery) await window.ScorpioAdminDelivery.saveRelease(payload);
+        else await apiPost(`${ADMIN_PATH}/releases`, payload);
         await loadReleases();
+        await loadOverview();
         renderMetrics();
+        renderReleases(); window.ScorpioAdminDelivery?.saved("release");
         setMessage("发行记录已保存，对应平台客户端会读取匹配通道的最新记录。", "success");
       });
     });
@@ -335,37 +350,44 @@
   }
 
   async function loadCustomers() {
-    const data = await apiGet(`${ADMIN_PATH}/customers?limit=500`);
+    const data = await apiGet(`${ADMIN_PATH}/customers?${window.ScorpioAdminDelivery?.query("customers") || "limit=500"}`);
+    state.pages.customers = data.page;
     state.customers = listPayload(data, "customers");
   }
 
   async function loadCodes() {
-    const data = await apiGet(`${ADMIN_PATH}/activation-codes?limit=500`);
+    const data = await apiGet(`${ADMIN_PATH}/activation-codes?${window.ScorpioAdminDelivery?.query("codes") || "limit=500"}`);
+    state.pages.codes = data.page;
     state.codes = listPayload(data, "codes");
   }
 
   async function loadLicenses() {
-    const data = await apiGet(`${ADMIN_PATH}/licenses?limit=500`);
+    const data = await apiGet(`${ADMIN_PATH}/licenses?${window.ScorpioAdminDelivery?.query("licenses") || "limit=500"}`);
+    state.pages.licenses = data.page;
     state.licenses = listPayload(data, "licenses");
   }
 
   async function loadReleases() {
-    const data = await apiGet(`${ADMIN_PATH}/releases?limit=100`);
+    const data = await apiGet(`${ADMIN_PATH}/releases?${window.ScorpioAdminDelivery?.query("releases") || "limit=100"}`);
+    state.pages.releases = data.page;
     state.releases = listPayload(data, "releases");
   }
 
   async function loadAuditEvents() {
-    const data = await apiGet(`${ADMIN_PATH}/audit-events?limit=100`);
+    const data = await apiGet(`${ADMIN_PATH}/audit-events?${window.ScorpioAdminDelivery?.query("audit") || "limit=100"}`);
+    state.pages.audit = data.page;
     state.auditEvents = listPayload(data, "events");
   }
 
   async function loadUsageReports() {
-    const data = await apiGet(`${ADMIN_PATH}/usage-reports?limit=100`);
+    const data = await apiGet(`${ADMIN_PATH}/usage-reports?${window.ScorpioAdminDelivery?.query("usage") || "limit=100"}`);
+    state.pages.usage = data.page;
     state.usageReports = listPayload(data, "reports");
   }
 
   async function loadAnalysisRequests() {
-    const data = await apiGet(`${ADMIN_PATH}/analysis-requests?limit=100`);
+    const data = await apiGet(`${ADMIN_PATH}/analysis-requests?${window.ScorpioAdminDelivery?.query("analysis") || "limit=100"}`);
+    state.pages.analysis = data.page;
     state.analysisRequests = listPayload(data, "requests");
   }
 
@@ -378,44 +400,26 @@
     renderUsageReports();
     renderAnalysisRequests();
     switchTab(state.currentTab);
+    window.ScorpioAdminDelivery?.render();
   }
 
   function renderCustomers() {
-    const baseRows = visibleRows(state.customers);
-    const hiddenTestCount = state.customers.length - baseRows.length;
-    const rows = baseRows.filter((row) => {
-      const matchesStatus = !state.customerStatus || row.status === state.customerStatus;
+    const rows = visibleRows(state.customers).filter((row) => {
       const text = [row.customer_name, row.customer_email, row.edition, row.status, row.notes].join(" ").toLowerCase();
-      return matchesStatus && (!state.customerQuery || text.includes(state.customerQuery));
+      return (!state.customerStatus || row.status === state.customerStatus) && (!state.customerQuery || text.includes(state.customerQuery));
     });
-    if (!baseRows.length) {
-      const hiddenHint = hiddenTestCount > 0 ? `当前隐藏了 ${hiddenTestCount} 条测试记录，勾选右上角“显示测试记录”后可维护。` : "新增客户后会在这里维护。";
-      els.customersTable.innerHTML = `<div class="empty-state">暂无客户台账。${escapeHtml(hiddenHint)}</div>`;
-      return;
-    }
-    if (!rows.length) {
-      els.customersTable.innerHTML = '<div class="empty-state">没有匹配的客户记录，请调整搜索条件。</div>';
-      return;
-    }
+    if (!rows.length) { els.customersTable.innerHTML = V.empty("暂无匹配的客户记录", "No matching customers"); return; }
     els.customersTable.innerHTML = tableHtml(
-      ["客户", "邮箱", "版本", "天数", "状态", "授权码", "已使用", "最近发码", "更新", "操作"],
+      [V.t("客户", "Customer"), V.t("版本与期限", "Edition & term"), V.t("交付状态", "Delivery status"), V.t("授权码 / 已用", "Codes / used"), V.t("操作", "Actions")],
       rows.map((row) => [
-        `<strong>${escapeHtml(row.customer_name || `客户#${row.id}`)}</strong>`,
-        escapeHtml(row.customer_email || "-"),
-        escapeHtml(row.edition || "-"),
-        escapeHtml(row.license_days || "-"),
-        escapeHtml(customerStatusLabel(row.status)),
-        escapeHtml(row.activation_code_count || 0),
-        escapeHtml(row.used_code_count || 0),
-        escapeHtml(formatDate(row.latest_code_created_at)),
-        escapeHtml(formatDate(row.updated_at)),
-        `<div class="table-actions">
-          <button class="text-action" type="button" data-customer-action="edit" data-customer-id="${escapeAttr(row.id)}">编辑</button>
-          <button class="text-action danger" type="button" data-customer-action="delete" data-customer-id="${escapeAttr(row.id)}">删除/归档</button>
-          ${isTestRecord(row) ? `<button class="text-action danger" type="button" data-customer-action="force-delete" data-customer-id="${escapeAttr(row.id)}">硬删除测试记录</button>` : ""}
-        </div>`,
+        `<strong>${escapeHtml(row.customer_name || row.customer_email || "#"+row.id)}</strong><small>${escapeHtml(row.customer_email || "--")}</small>`,
+        `${escapeHtml(V.edition(row.edition))}<small>${Number(row.license_days)} ${V.t("天", "days")}</small>`,
+        `${escapeHtml(customerStatusLabel(row.status))}<small>${V.date(row.updated_at)}</small>`,
+        `${Number(row.activation_code_count || 0)} / ${Number(row.used_code_count || 0)}<small>${V.t("最近发码", "Last issued")} ${V.date(row.latest_code_created_at)}</small>`,
+        `<div class="table-actions"><button class="text-action" type="button" data-customer-action="edit" data-customer-id="${row.id}">${V.t("编辑", "Edit")}</button><button class="text-action danger" type="button" data-customer-action="delete" data-customer-id="${row.id}">${V.t("删除/归档", "Remove / archive")}</button>${isTestRecord(row) ? `<button class="text-action danger" type="button" data-customer-action="force-delete" data-customer-id="${row.id}">${V.t("永久删除测试记录", "Delete test record")}</button>` : ""}</div>`,
       ])
     );
+    window.ScorpioAdminDelivery?.render();
   }
 
   function renderCustomerOptions() {
@@ -434,28 +438,15 @@
 
   function renderCodes() {
     const rows = visibleRows(state.codes);
-    if (!rows.length) {
-      els.codesTable.innerHTML = '<div class="empty-state">暂无授权码。</div>';
-      return;
-    }
+    if (!rows.length) { els.codesTable.innerHTML = V.empty("暂无匹配的授权码", "No matching license codes"); return; }
     els.codesTable.innerHTML = tableHtml(
-      ["授权码", "版本", "天数", "设备", "状态", "客户", "邮箱", "创建", "使用", "操作"],
+      [V.t("授权码", "License code"), V.t("授权条款", "License terms"), V.t("状态", "Status"), V.t("交付对象", "Recipient"), V.t("操作", "Actions")],
       rows.map((row) => [
-        `<strong>${escapeHtml(row.code)}</strong>`,
-        escapeHtml(row.edition || "-"),
-        escapeHtml(row.license_days || "-"),
-        escapeHtml(row.max_devices || "-"),
-        escapeHtml(statusLabel(row.status)),
-        escapeHtml(row.customer_name || (row.customer_id ? `客户#${row.customer_id}` : "-")),
-        escapeHtml(row.customer_email || "-"),
-        escapeHtml(formatDate(row.created_at)),
-        escapeHtml(formatDate(row.used_at)),
-        `<div class="table-actions">
-          <button class="text-action" type="button" data-code-action="copy" data-code="${escapeAttr(row.code)}">复制</button>
-          <button class="text-action" type="button" data-code-action="edit" data-code="${escapeAttr(row.code)}">编辑</button>
-          <button class="text-action danger" type="button" data-code-action="revoke" data-code="${escapeAttr(row.code)}" ${row.status === "used" ? "disabled" : ""}>撤销</button>
-          ${isTestRecord(row) ? `<button class="text-action danger" type="button" data-code-action="force-delete" data-code="${escapeAttr(row.code)}">硬删除测试记录</button>` : ""}
-        </div>`,
+        `<strong>${escapeHtml(row.code)}</strong><small>${V.date(row.created_at)}</small>`,
+        `${escapeHtml(V.edition(row.edition))}<small>${Number(row.license_days)} ${V.t("天", "days")} · ${Number(row.max_devices)} ${V.t("台 / 平台", "per platform")}</small>`,
+        `<span class="portal-badge ${escapeAttr(row.status)}">${escapeHtml(statusLabel(row.status))}</span>`,
+        `${escapeHtml(row.customer_name || "--")}<small>${escapeHtml(row.customer_email || "--")}</small>`,
+        `<div class="table-actions"><button class="text-action" type="button" data-code-action="copy" data-code="${escapeAttr(row.code)}">${V.t("复制", "Copy")}</button><button class="text-action" type="button" data-code-action="edit" data-code="${escapeAttr(row.code)}">${V.t("编辑", "Edit")}</button><button class="text-action danger" type="button" data-code-action="revoke" data-code="${escapeAttr(row.code)}" ${row.status === "used" ? "disabled" : ""}>${V.t("撤销", "Revoke")}</button>${isTestRecord(row) ? `<button class="text-action danger" type="button" data-code-action="force-delete" data-code="${escapeAttr(row.code)}">${V.t("永久删除测试记录", "Delete test record")}</button>` : ""}</div>`,
       ])
     );
   }
@@ -512,6 +503,7 @@
   }
 
   function renderReleases() {
+    if (window.ScorpioAdminDelivery) { window.ScorpioAdminDelivery.render(); return; }
     renderTable(els.releasesTable, ["版本", "平台", "通道", "版本类型", "来源", "文件", "大小", "下载", "状态", "发布时间"], state.releases.map((row) => [
       `v${String(row.version || "").replace(/^v/i, "")}`,
       row.platform || "desktop",
@@ -586,6 +578,7 @@
     fields.machine_fingerprint_prebind.value = row.machine_fingerprint_prebind || "";
     fields.notes.value = row.notes || "";
     els.customerSubmitButton.textContent = "更新客户";
+    window.ScorpioAdminDelivery?.openCustomer();
     setMessage(`正在编辑客户：${row.customer_name || row.customer_email || row.id}`, "success");
     els.customerForm.scrollIntoView({ behavior: "smooth", block: "center" });
   }
@@ -607,10 +600,10 @@
     }
     const label = row.customer_name || row.customer_email || `客户#${row.id}`;
     const linked = Number(row.activation_code_count || 0);
-    const prompt = linked > 0
+    const copy = linked > 0
       ? `${label} 已有关联授权码或授权记录，将归档为“取消”以保留审计链路。确认处理？`
       : `确认删除客户 ${label}？`;
-    if (!window.confirm(prompt)) return;
+    if (!await window.ScorpioAdminDelivery.input({title: V.t("处理客户记录", "Remove customer record"), copy})) return;
     await runAdminAction("正在处理客户记录...", async () => {
       const result = await apiDelete(`${ADMIN_PATH}/customers/${customerId}`);
       await loadCustomers();
@@ -629,8 +622,8 @@
       return;
     }
     const label = row.customer_name || row.customer_email || `客户#${row.id}`;
-    const confirmation = window.prompt(`硬删除会级联删除 ${label} 的授权码、授权记录、校验日志和使用上报。仅用于清理测试数据。\n请输入 DELETE_TEST_RECORDS 确认。`);
-    if (confirmation !== "DELETE_TEST_RECORDS") {
+    const confirmation = await confirmTestDeletion(label);
+    if (!confirmation) {
       setMessage("已取消硬删除。", "warn");
       return;
     }
@@ -648,13 +641,10 @@
       await window.ScorpioAdminAccounts.editCode(row.assigned_to_user_id || row.used_by_user_id, row.id, "edit");
       return;
     }
-    const days = promptNumber("授权天数。已使用授权码不会反向修改已签发授权。", row.license_days || 365);
-    if (days === null) return;
-    const maxDevices = promptNumber("设备数。已使用授权码不会反向修改已签发授权。", row.max_devices || 1);
-    if (maxDevices === null) return;
-    const status = row.status === "used"
-      ? "used"
-      : (window.prompt("状态：active / assigned / suspended / revoked", row.status || "active") || row.status);
+    const fields = await window.ScorpioAdminDelivery.input({title: V.t("编辑授权码", "Edit license code"), copy: V.t("仅调整此授权码。已经签发的设备授权不会随之改变。", "Updates this code only. Previously issued device licenses stay unchanged."),
+      fields: `<label>${V.t("授权天数", "License days")}<input name="days" type="number" min="1" max="3660" required value="${Number(row.license_days) || 365}"></label><label>${V.t("设备额度", "Device allowance")}<input name="max_devices" type="number" min="1" max="20" required value="${Number(row.max_devices) || 1}"></label>${row.status === "used" ? "" : `<label>${V.t("状态", "Status")}<select name="status">${["active", "assigned", "suspended", "revoked"].map((value) => `<option value="${value}" ${row.status === value ? "selected" : ""}>${V.status(value)}</option>`).join("")}</select></label>`}`});
+    if (!fields) return;
+    const days = Number(fields.days), maxDevices = Number(fields.max_devices), status = row.status === "used" ? "used" : fields.status;
     await runAdminAction("正在更新授权码...", async () => {
       await apiPut(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}`, {
         license_days: days,
@@ -683,7 +673,7 @@
       setMessage("已使用授权码不能直接撤销，请在授权记录中撤销或延期对应授权。", "warn");
       return;
     }
-    if (!window.confirm(`确认撤销授权码 ${code}？`)) return;
+    if (!await window.ScorpioAdminDelivery.input({title: V.t("撤销授权码", "Revoke license code"), copy: V.t(`确认撤销 ${code}？撤销后不能使用此码激活。`, `Revoke ${code}? This code will no longer activate a license.`)})) return;
     await runAdminAction("正在撤销授权码...", async () => {
       await apiDelete(`${ADMIN_PATH}/activation-codes/${encodeURIComponent(code)}`);
       await loadCodes();
@@ -694,8 +684,8 @@
   }
 
   async function forceDeleteActivationCode(code) {
-    const confirmation = window.prompt(`硬删除会级联删除授权码 ${code} 关联的授权记录、校验日志和使用上报。仅用于清理测试数据。\n请输入 DELETE_TEST_RECORDS 确认。`);
-    if (confirmation !== "DELETE_TEST_RECORDS") {
+    const confirmation = await confirmTestDeletion(code);
+    if (!confirmation) {
       setMessage("已取消硬删除。", "warn");
       return;
     }
@@ -731,8 +721,8 @@
   }
 
   async function forceDeleteLicense(licenseId) {
-    const confirmation = window.prompt(`硬删除会删除授权记录 ${licenseId}、校验日志和使用上报。仅用于清理测试数据。\n请输入 DELETE_TEST_RECORDS 确认。`);
-    if (confirmation !== "DELETE_TEST_RECORDS") {
+    const confirmation = await confirmTestDeletion(licenseId);
+    if (!confirmation) {
       setMessage("已取消硬删除。", "warn");
       return;
     }
@@ -747,6 +737,12 @@
     const row = state.licenses.find((item) => item.license_id === licenseId);
     if (!row) return;
     await window.ScorpioAdminAccounts.editLicense(row.user_id, licenseId, "restore");
+  }
+
+  function confirmTestDeletion(label) {
+    return window.ScorpioAdminDelivery.input({title: V.t("永久删除测试记录", "Permanently delete test record"),
+      copy: V.t(`仅限测试数据：${label}。将永久删除关联授权码、设备授权、校验日志和使用上报，无法从回收站恢复。`, `Test data only: ${label}. Linked codes, device licenses, validation logs and usage reports will be permanently removed and cannot be restored.`),
+      fields: `<label>${V.t("输入 DELETE_TEST_RECORDS 确认", "Type DELETE_TEST_RECORDS to confirm")}<input name="confirmation" required pattern="DELETE_TEST_RECORDS" autocomplete="off"></label>`, label: V.t("永久删除", "Delete permanently")});
   }
 
   function renderMetrics() {
@@ -764,7 +760,7 @@
       const apkDownloads = downloads.apk || {};
 
       els.metricCustomers.textContent = String(customers.total || 0);
-      els.metricCustomersMeta.textContent = `今日 +${customers.created_today || 0} / ${customers.active || 0} 活跃`;
+      els.metricCustomersMeta.textContent = V.t(`今日 +${customers.created_today || 0} / ${customers.active || 0} 活跃`, `${customers.active || 0} active / +${customers.created_today || 0} today`);
       els.metricUsers.textContent = String(users.total || 0);
       els.metricUsersMeta.textContent = `今日 +${users.registered_today || 0} 注册`;
       els.metricLicensedUsers.textContent = String(licensedUsers.total || 0);
@@ -772,11 +768,11 @@
       els.metricVisits.textContent = String(site.visits_total || 0);
       els.metricVisitsMeta.textContent = `今日 +${site.visits_today || 0} / UV ${site.unique_visitors_today || 0}`;
       els.metricCodes.textContent = String(codes.total || 0);
-      els.metricCodesMeta.textContent = `今日 +${codes.created_today || 0} / ${codes.active || 0} 可用`;
+      els.metricCodesMeta.textContent = V.t(`今日 +${codes.created_today || 0} / ${codes.active || 0} 可用`, `${codes.active || 0} available / +${codes.created_today || 0} today`);
       els.metricLicenses.textContent = String(licenses.total || 0);
       els.metricLicensesMeta.textContent = `今日 +${licenses.issued_today || 0} / ${licenses.active || 0} 有效`;
       els.metricReleases.textContent = String(releases.total || 0);
-      els.metricReleasesMeta.textContent = `今日 +${releases.released_today || 0} 发布`;
+      els.metricReleasesMeta.textContent = V.t(`今日 +${releases.released_today || 0} 发布`, `+${releases.released_today || 0} published today`);
       els.metricWindowsDownloads.textContent = String(windowsDownloads.total || 0);
       els.metricWindowsDownloadsMeta.textContent = `今日 +${windowsDownloads.downloads_24h || 0}`;
       els.metricApkDownloads.textContent = String(apkDownloads.total || 0);
@@ -836,11 +832,15 @@
   }
 
   async function runAdminAction(label, action) {
+    if (actionInFlight) return;
+    actionInFlight = true; window.ScorpioAdminDelivery?.setBusy(true);
     try {
       setMessage(label, "loading");
       await action();
     } catch (error) {
-      setMessage(error.message || String(error), "error");
+      setMessage(V.errorText(error), "error");
+    } finally {
+      actionInFlight = false; window.ScorpioAdminDelivery?.setBusy(false);
     }
   }
 
@@ -986,7 +986,8 @@
 
   function setMessage(message, type) {
     els.adminMessage.textContent = message || "";
-    els.adminMessage.className = `admin-message ${type || ""}`;
+    els.adminMessage.className = `admin-message portal-notice ${type || ""}`;
+    window.ScorpioAdminDelivery?.message(message || "", type);
   }
 
   function setLoginMessage(message, type) {
@@ -1000,6 +1001,7 @@
   }
 
   function statusLabel(value) {
+    if (document.documentElement.lang.startsWith("en")) return {active: "Available", assigned: "Assigned", used: "Used", suspended: "Paused", revoked: "Revoked"}[value] || value;
     return {
       active: "可用",
       assigned: "已分配",
@@ -1010,6 +1012,7 @@
   }
 
   function customerStatusLabel(value) {
+    if (document.documentElement.lang.startsWith("en")) return {draft: "Draft", active: "Active", issued: "Delivered", suspended: "Paused", cancelled: "Cancelled"}[value] || value;
     return {
       draft: "草稿",
       active: "活跃",
@@ -1031,17 +1034,6 @@
       license_not_found: "未找到授权记录。",
       activation_code_not_found: "未找到授权码。",
     }[value] || value || "操作失败";
-  }
-
-  function promptNumber(message, fallback) {
-    const value = window.prompt(message, String(fallback || ""));
-    if (value === null) return null;
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      setMessage("请输入大于 0 的数字。", "warn");
-      return null;
-    }
-    return parsed;
   }
 
   function formatDate(value) {

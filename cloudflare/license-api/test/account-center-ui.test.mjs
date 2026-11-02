@@ -11,6 +11,7 @@ function views(lang = "zh-CN") {
 }
 
 test("user-center and administration scripts remain valid classic browser scripts", () => {
+  assert.doesNotThrow(() => new vm.Script(readFileSync(new URL("admin-delivery.js", source), "utf8")));
   for (const file of ["account.js", "account-i18n.js", "account-center-ui.js", "admin-accounts.js", "scorpio_v1_admin.js", "feedback.js", "feedback-center-ui.js", "auth-controls.js", "feedback-uploads.js", "support-center.js", "support-navigation.js", "feedback-admin-redirect.js"]) {
     assert.doesNotThrow(() => new vm.Script(readFileSync(new URL(file, source), "utf8"), {filename: file}));
   }
