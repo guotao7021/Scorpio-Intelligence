@@ -16,6 +16,10 @@
     catch (error) { if (error.status === 403) config.invalidSession(); throw error; }
   }
   function navigate(view) {
+    window.ScorpioSupportCenter?.navigate(view);
+    history.replaceState(null, "", `${location.pathname}${location.search}#${view}`);
+    document.querySelector(".admin-command-bar h1").textContent = {licenses: t("用户与软件授权", "Users & software licenses"), users: t("注册用户", "Registered users"), requests: t("续期申请", "Renewal requests"), legacy: t("交付与发行", "Delivery & releases"), feedback: t("问题反馈", "Feedback inbox")}[view] || t("用户与软件授权", "Users & software licenses");
+    document.querySelector(".admin-command-bar p:not(.section-kicker)").hidden = view === "feedback";
     document.querySelectorAll("[data-account-admin-view]").forEach((button) => {
       const selected = button.dataset.accountAdminView === view;
       button.classList.toggle("active", selected);
@@ -239,6 +243,7 @@
   }
   window.ScorpioAdminAccounts = {
     init(options) {
+      window.ScorpioSupportCenter?.init({...options, admin: true});
       config = options; modal = V.dialog(); translateShell();
       let searchTimer;
       let licenseSearchTimer;
@@ -282,7 +287,9 @@
     },
     sessionChanged(value) {
       const changed = authorized !== value; authorized = value;
+      if (changed) window.ScorpioSupportCenter?.sessionChanged(value);
       if (value && changed) { loadUsers(); loadLicenses(); loadRequests(); }
+      if (value && changed) navigate(["licenses", "users", "requests", "legacy", "feedback"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "licenses");
       if (!value) {
         ++sequence; ++detailSequence; ++licenseSequence; ++requestSequence; detail = null; currentUser = null;
         modal.close(); byId("adminUserDrawer").close();

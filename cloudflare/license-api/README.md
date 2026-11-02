@@ -70,6 +70,10 @@ account.
 
 ## Account Authorization Center
 
+The login security and integrated feedback/user tracking upgrade is documented
+in [SUPPORT_CENTER_RUNBOOK.md](SUPPORT_CENTER_RUNBOOK.md), including private R2,
+migration 0032, ownership boundaries and coordinated deployment requirements.
+
 The registered-user workflow is independent of the customer ledger. An existing
 website account can receive a grant without creating a customer or collecting a
 machine fingerprint first. The administration page defaults to the authorization

@@ -41,6 +41,11 @@
     return [...groups.values()];
   }
   const errors = {
+    auth_challenge_required: ["请先完成安全验证。", "Complete security verification first."],
+    auth_challenge_failed: ["安全验证已过期或未通过，请重新验证。", "Verification expired or failed. Please verify again."],
+    auth_challenge_unavailable: ["安全验证暂不可用，请稍后重试。", "Security verification is unavailable. Please retry later."],
+    feedback_not_found: ["问题不存在或不属于当前账号。", "This issue is unavailable for your account."],
+    feedback_attachment_not_found: ["截图不存在或无权查看。", "This screenshot is unavailable for your account."],
     invalid_credentials: ["邮箱或密码不正确。", "The email or password is incorrect."],
     email_exists: ["此邮箱已注册，请登录或重置密码。", "This email is already registered. Sign in or reset your password."],
     email_invalid: ["请输入有效的邮箱地址。", "Enter a valid email address."],
@@ -70,6 +75,7 @@
   const errorText = (error) => {
     const code = error.data?.error || error.code || error.message || "";
     if (errors[code]) return t(...errors[code]);
+    if (Number(error.status) === 429 || /rate_limited$/.test(code)) return t("请求较频繁，请稍后重试。", "Too many requests. Please retry later.");
     if (Number(error.status) === 404) return t("账户管理服务尚未更新，原有登录和下载仍可使用。", "The account service needs updating. Existing sign-in and downloads are still available.");
     if (Number(error.status) >= 500) return t("服务暂时不可用，请稍后刷新重试。", "The service is temporarily unavailable. Try again later.");
     return code || t("操作未完成，请重试。", "The operation could not be completed.");
@@ -169,13 +175,14 @@
   };
   function navigate(view) {
     view = {"license-console": "licenses", "software-download": "downloads"}[view] || view;
-    if (!["overview", "licenses", "devices", "history", "downloads"].includes(view)) view = "overview";
+    if (!["overview", "licenses", "devices", "history", "downloads", "feedback"].includes(view)) view = "overview";
     document.querySelectorAll("[data-account-view]").forEach((button) => {
       button.classList.toggle("active", button.dataset.accountView === view);
       if (button.dataset.accountView === view) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
     });
     document.querySelectorAll("[data-account-section]").forEach((section) => section.classList.toggle("hidden", section.dataset.accountSection !== view));
-    byId("portalPageTitle").textContent = {overview: t("账户概览", "Account overview"), licenses: t("我的授权", "My licenses"), devices: t("我的设备", "My devices"), history: t("申请与记录", "Requests & activity"), downloads: t("客户端下载", "Downloads")}[view];
+    byId("portalPageTitle").textContent = {overview: t("账户概览", "Account overview"), licenses: t("我的授权", "My licenses"), devices: t("我的设备", "My devices"), history: t("申请与记录", "Requests & activity"), downloads: t("客户端下载", "Downloads"), feedback: t("我的反馈", "My feedback")}[view];
+    window.ScorpioSupportCenter?.navigate(view);
     history.replaceState(null, "", `${location.pathname}${location.search}#${view}`);
   }
   function render() {
@@ -268,6 +275,7 @@
     sessionChanged(signedIn, email) {
       if (!options) return;
       if (identity !== email || signedIn !== isSignedIn) {
+        window.ScorpioSupportCenter?.sessionChanged(signedIn);
         ++revision; data = null; modal.close();
         byId("portalNotice").classList.add("hidden"); byId("portalApiError").classList.add("hidden");
         ["portalOverviewLicenses", "portalLicenses", "portalActivationCodes", "portalDevices", "portalEvents", "portalRecentEvents", "portalRequests"].forEach((id) => { byId(id).innerHTML = empty("正在读取...", "Loading..."); });

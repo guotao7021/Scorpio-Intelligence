@@ -1,0 +1,11 @@
+body .site-header.support-header { min-height: 76px; padding: 12px 32px; gap: 24px; background: #0c1116; }
+.support-header .brand img { width: 240px; max-width: 100%; height: auto; }
+.support-header nav { margin-left: auto; align-items: center; }
+.support-header .support-home { display: inline-flex; align-items: center; gap: 7px; color: #1fb6ff; }
+.support-home svg { width: 16px; height: 16px; flex-shrink: 0; }
+@media (max-width: 800px) {
+  body .site-header.support-header { flex-direction: row; flex-wrap: wrap; padding: 12px 18px; gap: 14px; }
+  .support-header .brand img { width: 200px; }
+  .support-header .lang-switch { margin-left: auto; }
+  body .site-header.support-header nav { order: 3; width: 100%; margin: 0; gap: 18px; font-size: 13px; }
+}

@@ -870,6 +870,7 @@
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+    if (options.blob && response.ok) return response.blob();
     const text = await response.text();
     const data = text ? parseJson(text) : {};
     if (!response.ok) {

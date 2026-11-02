@@ -74,6 +74,7 @@
   init();
 
   function init() {
+    window.ScorpioSupportCenter?.init({request, admin: false});
     window.ScorpioAccountCenter?.init({request, refreshAccount: refreshAccountData, selectActivationCode});
     document.querySelectorAll("[data-auth-tab]").forEach((button) => {
       button.addEventListener("click", () => switchAuthTab(button.dataset.authTab));
@@ -110,6 +111,7 @@
   }
 
   function switchAuthTab(tab) {
+    window.ScorpioAuthControls?.activate(tab);
     document.querySelectorAll("[data-auth-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.authTab === tab);
       button.setAttribute("aria-selected", String(button.dataset.authTab === tab));
@@ -172,7 +174,7 @@
   async function onRegister(event) {
     event.preventDefault();
     setMessage(els.authMessage, "正在注册...", "loading");
-    await request("/auth/register", {
+    const data = await request("/auth/register", {
       method: "POST",
       body: {
         email: els.registerEmail.value.trim(),
@@ -183,12 +185,13 @@
       auth: false,
     });
     els.loginEmail.value = els.registerEmail.value.trim();
-    els.loginPassword.value = els.registerPassword.value;
     els.registerPassword.value = "";
     els.registerCode.value = "";
-    try { await onLogin({preventDefault() {}}); }
-    catch {
-      els.loginPassword.value = "";
+    byId("registerPasswordConfirm").value = "";
+    if (data.access_token) {
+      Object.assign(state, {access_token: data.access_token, refresh_token: data.refresh_token, email: data.email, user_id: data.user_id});
+      saveAuth(); renderSession(); applyActivationCodePayload(data); await refreshAccountData();
+    } else {
       switchAuthTab("login");
       setMessage(els.authMessage, "注册成功，请登录以继续。", "warn");
     }
@@ -207,6 +210,7 @@
       auth: false,
     });
     els.loginEmail.value = els.resetEmail.value.trim();
+    els.resetPassword.value = ""; byId("resetPasswordConfirm").value = ""; els.resetCode.value = "";
     switchAuthTab("login");
     setMessage(els.authMessage, "密码已重置，请重新登录。", "success");
   }
@@ -477,6 +481,7 @@
     await refreshSavedLicenseStatus();
     await refreshRelease();
     await window.ScorpioAccountCenter?.refresh();
+    await window.ScorpioSupportCenter?.refresh();
   }
 
   async function ensureCurrentLicenseLoaded() {
@@ -644,6 +649,14 @@
   }
 
   async function request(path, options = {}) {
+    const tab = {"/auth/login": "login", "/auth/register": "register", "/auth/reset-password": "reset", "/auth/send-code": options.body?.purpose === "reset_password" ? "reset" : "register"}[path];
+    if (!tab) return apiRequest(path, options);
+    const proof = window.ScorpioAuthControls.proof(tab);
+    try { return await apiRequest(path, {...options, body: {...options.body, ...proof}}); }
+    finally { window.ScorpioAuthControls.reset(tab); window.ScorpioAuthControls.hidePasswords(); }
+  }
+
+  async function apiRequest(path, options = {}) {
     const headers = { "content-type": "application/json" };
     if (options.auth) {
       requireLogin();
@@ -654,6 +667,7 @@
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
+    if (options.blob && response.ok) return response.blob();
     const text = await response.text();
     let data = {}, invalidResponse = false;
     try { data = text ? JSON.parse(text) : {}; } catch { invalidResponse = true; }

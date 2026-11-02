@@ -1,4 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519";
+import { registerAuthSecurity, protectAuth } from "./auth-security.mjs";
+import {registerFeedbackCenter, submitFeedback, listFeedback, updateFeedback} from "./feedback-center.mjs";
 import { registerAccountCenterRoutes, effectiveLicenseStatus } from "./account-center.mjs";
 import { registerMonitoringRoutes } from './monitoring-bridge.mjs';
 import { resolveMarketScore, dateScope, businessDate, observedNumber } from "./market-display-contract.mjs";
@@ -232,7 +234,8 @@ export default {
 };
 
 route("POST", "/v1/auth/register", async (ctx) => {
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, 16 * 1024);
+  await protectAuth(ctx, body, "register", {enforcePublicRateLimit, sha256Hex, throwHttp});
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
   const username = safeUsername(body.username || email.split("@")[0]);
@@ -282,13 +285,15 @@ route("POST", "/v1/auth/register", async (ctx) => {
       ...trial,
       message: "registered",
       email_verified: true,
+      ...(await tokenResponse(ctx.env, {id: userId, email, email_verified: 1})),
     },
     201
   );
 });
 
 route("POST", "/v1/auth/login", async (ctx) => {
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, 16 * 1024);
+  await protectAuth(ctx, body, "login", {enforcePublicRateLimit, sha256Hex, throwHttp});
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
   const user = await ctx.env.DB.prepare("SELECT * FROM users WHERE email = ?")
@@ -351,7 +356,8 @@ route("POST", "/v1/auth/verify-email", async (ctx) => {
 });
 
 route("POST", "/v1/auth/send-code", async (ctx) => {
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, 16 * 1024);
+  await protectAuth(ctx, body, body.purpose === "reset_password" ? "reset" : "register", {enforcePublicRateLimit, sha256Hex, throwHttp});
   const email = normalizeEmail(body.email);
   const purpose = normalizeVerificationPurpose(body.purpose || "register");
 
@@ -401,17 +407,21 @@ route("POST", "/v1/auth/send-code", async (ctx) => {
 });
 
 route("POST", "/v1/auth/forgot-password", async (ctx) => {
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, 16 * 1024);
+  await protectAuth(ctx, body, "reset", {enforcePublicRateLimit, sha256Hex, throwHttp});
   const email = normalizeEmail(body.email);
   if (!isEmail(email)) {
     return json({ error: "email_invalid" }, 400);
   }
+  await enforcePublicRateLimit(ctx.env, {scope: "auth_code_ip", subject: clientIp(ctx.request) || "unknown", limit: 10, windowSeconds: 3600});
+  await enforcePublicRateLimit(ctx.env, {scope: "auth_code_email", subject: email, limit: 3, windowSeconds: 3600});
   await issueVerificationCode(ctx, email, "reset_password");
   return json({ message: "password_reset_code_sent_if_account_exists" });
 });
 
 route("POST", "/v1/auth/reset-password", async (ctx) => {
-  const body = await readJson(ctx.request);
+  const body = await readJson(ctx.request, 16 * 1024);
+  await protectAuth(ctx, body, "reset", {enforcePublicRateLimit, sha256Hex, throwHttp});
   const email = normalizeEmail(body.email);
   const code = String(body.verification_code || body.code || "").trim();
   const password = String(body.new_password || body.password || "");
@@ -986,71 +996,7 @@ route("POST", "/v1/usage/report", async (ctx) => {
 });
 
 route("POST", "/v1/feedback", async (ctx) => {
-  const body = await readJson(ctx.request, 16 * 1024);
-  if (hasFeedbackHoneypotValue(body)) {
-    return json({ accepted: true, status: "new" }, 201);
-  }
-  const clientAddress = clientIp(ctx.request) || "unknown";
-  await enforcePublicRateLimit(ctx.env, {
-    scope: "feedback_ip",
-    subject: clientAddress,
-    limit: intEnv(ctx.env.FEEDBACK_RATE_LIMIT_PER_HOUR, 5),
-    windowSeconds: 60 * 60,
-  });
-  const item = normalizeFeedbackSubmission(body);
-  if (isMainlandChinaRequest(ctx.request)) {
-    if (!item.contact_email) {
-      throwHttp(400, "feedback_email_required");
-    }
-    const verificationCode = String(body.feedback_verification_code || body.verification_code || "").trim();
-    if (!verificationCode) {
-      throwHttp(400, "feedback_verification_code_required");
-    }
-    await consumeVerificationCode(ctx.env, item.contact_email, "feedback", verificationCode);
-  } else {
-    await verifyTurnstileToken(ctx.env, body.turnstile_token, ctx.request);
-  }
-  const now = nowIso();
-  const duplicate = await ctx.env.DB.prepare(
-    `SELECT public_id FROM feedback_items
-     WHERE client_ip = ? AND title = ? AND description = ? AND created_at >= ?
-     ORDER BY id DESC LIMIT 1`
-  )
-    .bind(clientAddress, item.title, item.description, new Date(Date.now() - 15 * 60 * 1000).toISOString())
-    .first();
-  if (duplicate) {
-    return json({ accepted: true, duplicate: true, public_id: duplicate.public_id, status: "new" }, 202);
-  }
-  const publicId = `FB-${Date.now().toString(36).toUpperCase()}-${randomToken(4).toUpperCase()}`;
-
-  await ctx.env.DB.prepare(
-    `INSERT INTO feedback_items
-       (public_id, type, product_area, priority, status, title, description,
-        contact_email, page_url, client_version, environment, rating, survey_answers,
-        client_ip, user_agent, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      publicId,
-      item.type,
-      item.product_area,
-      item.priority,
-      item.title,
-      item.description,
-      item.contact_email,
-      item.page_url,
-      item.client_version,
-      item.environment,
-      item.rating,
-      JSON.stringify(item.survey_answers),
-      clientAddress,
-      safeText(ctx.request.headers.get("user-agent") || "", 400),
-      now,
-      now
-    )
-    .run();
-
-  return json({ accepted: true, public_id: publicId, status: "new" }, 201);
+  return submitFeedback(ctx, {json, clientIp, hasFeedbackHoneypotValue, enforcePublicRateLimit, normalizeFeedbackSubmission, requireUser, isMainlandChinaRequest, consumeVerificationCode, verifyTurnstileToken});
 });
 
 route("GET", "/v1/feedback/security", async (ctx) => {
@@ -1083,37 +1029,7 @@ route("POST", "/v1/feedback/send-code", async (ctx) => {
 });
 
 route("GET", "/v1/scorpio_v1_admin/feedback", async (ctx) => {
-  requireAdmin(ctx);
-  const options = adminListOptions(ctx.url, { defaultLimit: 80, maxLimit: 300 });
-  const type = normalizeFeedbackType(ctx.url.searchParams.get("type") || "", "");
-  const where = [];
-  const params = [];
-
-  addListTextSearch(where, params, ["public_id", "title", "description", "contact_email", "product_area", "admin_notes"], options.q);
-  if (options.status) {
-    where.push("status = ?");
-    params.push(normalizeFeedbackStatus(options.status, "new"));
-  }
-  if (type) {
-    where.push("type = ?");
-    params.push(type);
-  }
-  const filter = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total FROM feedback_items ${filter}`).bind(...params).first();
-  const rows = await ctx.env.DB.prepare(
-    `SELECT id, public_id, type, product_area, priority, status, title, description,
-            contact_email, page_url, client_version, environment, rating, survey_answers,
-            admin_notes, client_ip, user_agent, created_at, updated_at
-     FROM feedback_items
-     ${filter}
-     ORDER BY
-       CASE status WHEN 'new' THEN 0 WHEN 'triaged' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'resolved' THEN 3 ELSE 4 END,
-       updated_at DESC,
-       id DESC
-     LIMIT ? OFFSET ?`
-  ).bind(...params, options.limit, options.offset).all();
-
-  return json(pageResponse(rows.results || [], total, options));
+  return listFeedback(ctx, {json, requireAdmin, requireUser});
 });
 
 route("GET", "/v1/releases/latest", async (ctx) => {
@@ -5793,38 +5709,7 @@ async function revokeAdminLicense(ctx) {
 }
 
 async function updateAdminFeedback(ctx) {
-  requireAdmin(ctx);
-  const feedbackId = Number(ctx.feedbackId || 0);
-  if (!Number.isInteger(feedbackId) || feedbackId <= 0) {
-    return json({ error: "feedback_id_invalid" }, 400);
-  }
-  const existing = await ctx.env.DB.prepare("SELECT * FROM feedback_items WHERE id = ?").bind(feedbackId).first();
-  if (!existing) {
-    return json({ error: "feedback_not_found" }, 404);
-  }
-
-  const body = await readJson(ctx.request);
-  const status = normalizeFeedbackStatus(body.status || existing.status, existing.status || "new");
-  const priority = normalizeFeedbackPriority(body.priority || existing.priority, existing.priority || "normal");
-  const adminNotes = body.admin_notes !== undefined ? safeText(body.admin_notes, 2000) : existing.admin_notes || "";
-  const updatedAt = nowIso();
-
-  await ctx.env.DB.prepare(
-    `UPDATE feedback_items
-     SET status = ?, priority = ?, admin_notes = ?, updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(status, priority, adminNotes, updatedAt, feedbackId)
-    .run();
-  await audit(ctx.env, "update_feedback", "admin_api", {
-    feedback_id: feedbackId,
-    public_id: existing.public_id,
-    status,
-    priority,
-  });
-
-  const updated = await ctx.env.DB.prepare("SELECT * FROM feedback_items WHERE id = ?").bind(feedbackId).first();
-  return json(updated);
+  return updateFeedback(ctx, {json, requireAdmin, readJson, audit});
 }
 
 route("GET", "/v1/scorpio_v1_admin/licenses", async (ctx) => {
@@ -6442,6 +6327,8 @@ function compactCounts(row, keys) {
   return Object.fromEntries(keys.map((key) => [key, numberField(row, key)]));
 }
 
+registerAuthSecurity({route, json});
+registerFeedbackCenter({route, json, requireAdmin, requireUser});
 registerAccountCenterRoutes({route, requireUser, requireAdmin, readJson, json, throwHttp,
   todayIso, addDays, issueLicensePayload, uniqueActivationCode, normalizeEdition,
   allowRateLimit, sha256Hex, audit});
@@ -6464,10 +6351,19 @@ async function readJson(request, maxBytes = 0) {
     if (maxBytes && Number.isFinite(declaredLength) && declaredLength > maxBytes) {
       throwHttp(413, "request_body_too_large");
     }
-    const text = await request.text();
-    if (maxBytes && new TextEncoder().encode(text).byteLength > maxBytes) {
-      throwHttp(413, "request_body_too_large");
-    }
+    let text;
+    if (maxBytes && request.body) {
+      const reader = request.body.getReader(), decoder = new TextDecoder(); let size = 0; text = "";
+      try {
+        while (true) {
+          const {done, value} = await reader.read(); if (done) break;
+          size += value.byteLength;
+          if (size > maxBytes) { await reader.cancel(); throwHttp(413, "request_body_too_large"); }
+          text += decoder.decode(value, {stream: true});
+        }
+        text += decoder.decode();
+      } finally { reader.releaseLock(); }
+    } else text = await request.text();
     return JSON.parse(text);
   } catch (error) {
     if (error && error.status) {
@@ -11012,9 +10908,10 @@ async function consumeVerificationCode(env, email, purpose, code) {
     throwHttp(400, "verification_code_invalid");
   }
 
-  await env.DB.prepare("UPDATE auth_verification_codes SET consumed_at = ? WHERE id = ?")
-    .bind(now, row.id)
+  const consumed = await env.DB.prepare("UPDATE auth_verification_codes SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND attempt_count < 5 AND expires_at >= ?")
+    .bind(now, row.id, now)
     .run();
+  if (Number(consumed.meta?.changes) !== 1) throwHttp(400, "verification_code_invalid");
 }
 
 async function verificationCodeHash(env, email, purpose, code) {

@@ -55,3 +55,8 @@ database_id = "44338085-38a1-4283-b6c9-91fb0d78e0ac"
 [[r2_buckets]]
 binding = "RELEASE_BUCKET"
 bucket_name = "scorpio-releases"
+
+# Private: do not attach a public domain or enable r2.dev on this bucket.
+[[r2_buckets]]
+binding = "FEEDBACK_BUCKET"
+bucket_name = "website"

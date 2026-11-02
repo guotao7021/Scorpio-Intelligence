@@ -67,11 +67,13 @@ export function createAccountFixture() {
     return `${header}.${payload}.${createHmac("sha256", TEST_JWT_SECRET).update(`${header}.${payload}`).digest("base64url")}`;
   }
   async function request(path, {method = "GET", body, admin = false, userId = 1, anonymous = false, headers: extraHeaders = {}} = {}) {
-    const headers = {"content-type": "application/json", ...extraHeaders};
+    const multipart = body instanceof FormData;
+    const headers = {...(multipart ? {} : {"content-type": "application/json"}), ...extraHeaders};
     if (admin) headers["x-admin-token"] = PREVIEW_ADMIN;
     else if (!anonymous) headers.authorization = `Bearer ${jwt(userId)}`;
-    const response = await worker.fetch(new Request("https://account.example.test/v1" + path, {method, headers, body: body ? JSON.stringify(body) : undefined}), env);
-    return {response, status: response.status, data: await response.json()};
+    const response = await worker.fetch(new Request("https://account.example.test/v1" + path, {method, headers, body: body ? multipart ? body : JSON.stringify(body) : undefined}), env);
+    const copy = response.clone();
+    return {response, status: response.status, data: response.headers.get("content-type")?.includes("application/json") ? await copy.json() : null};
   }
   return {sql, DB, env, state, addCode, addLicense, jwt, request, close: () => sql.close()};
 }

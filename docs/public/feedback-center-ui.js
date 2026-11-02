@@ -43,6 +43,7 @@
   const notify = (text, type = "success") => { byId("feedbackMessage").textContent = text; byId("feedbackMessage").className = `portal-notice ${type}`; byId("feedbackMessage").setAttribute("role", type === "error" ? "alert" : "status"); };
   function summary() {
     byId("feedbackSummary").innerHTML = [[t("反馈类型", "Type"), label(types, value("type"))], [t("所属模块", "Area"), label(areas, value("product_area"))], [t("影响范围", "Impact"), label(priorities, value("priority"))], [t("标题", "Subject"), value("title") || "--"]].map(([key, val]) => `<div><dt>${key}</dt><dd>${escape(val)}</dd></div>`).join("");
+    byId("feedbackSummary").innerHTML += `<div><dt>${t("问题截图", "Screenshots")}</dt><dd>${window.ScorpioFeedbackUploads?.files().length || 0} / 3</dd></div>`;
   }
   function typeChanged() {
     const bug = value("type") === "bug", survey = value("type") === "survey";
@@ -79,7 +80,7 @@
   form.addEventListener("change", typeChanged);
   const draftFields = ["type", "product_area", "priority", "title", "description", "steps", "expected", "actual", "platform", "client_version", "environment", "rating", "role", "biggest_blocker", "expected_improvement", "contact_email"];
   byId("feedbackSaveDraft").addEventListener("click", () => {
-    try { sessionStorage.setItem(DRAFT, JSON.stringify(Object.fromEntries(draftFields.map((key) => [key, value(key)])))); byId("feedbackDraftActions").hidden = false; notify(t("草稿已暂存于当前标签页。", "Draft saved in this tab.")); }
+    try { sessionStorage.setItem(DRAFT, JSON.stringify(Object.fromEntries(draftFields.map((key) => [key, value(key)])))); byId("feedbackDraftActions").hidden = false; notify(window.ScorpioFeedbackUploads?.files().length ? t("文字草稿已保存，截图仅保留在当前页面。", "Text draft saved. Screenshots are retained only on the current page.") : t("草稿已暂存于当前标签页。", "Draft saved in this tab.")); }
     catch { notify(t("当前浏览器无法暂存草稿。", "This browser could not save the draft."), "error"); }
   });
   byId("feedbackRestoreDraft").addEventListener("click", () => { try { const draft = JSON.parse(sessionStorage.getItem(DRAFT) || "{}"); for (const key of draftFields) if (key in draft) form.elements[key].value = draft[key]; typeChanged(); showStep(0); notify(t("草稿已恢复。", "Draft restored.")); } catch { notify(t("草稿无法读取。", "The draft could not be read."), "error"); } });
@@ -91,8 +92,9 @@
   });
   try { byId("feedbackDraftActions").hidden = !sessionStorage.getItem(DRAFT); const auth = JSON.parse(localStorage.getItem("scorpio_user_auth") || "{}"); if (auth.email) form.elements.contact_email.value = auth.email; } catch {}
   window.ScorpioFeedbackCenter = {
+    summary,
     validate() { for (let i = 0; i < 3; i++) if (!validate(i)) return false; if (form.elements.allow_contact.checked && !value("contact_email")) { showStep(2); notify(t("允许联系时需填写联系邮箱。", "An email address is needed for follow-up."), "error"); form.elements.contact_email.focus(); return false; } return true; },
-    busy(value) { form.querySelectorAll("fieldset").forEach((node) => { node.disabled = value; }); document.querySelectorAll("[data-feedback-step-link],#feedbackPrevious,#feedbackNext,#feedbackSaveDraft").forEach((node) => { node.disabled = value || node.dataset.feedbackStepLink && Number(node.dataset.feedbackStepLink) > reached; }); },
+    busy(value) { form.setAttribute("aria-busy", String(value)); form.querySelectorAll("fieldset").forEach((node) => { node.disabled = value; }); document.querySelectorAll("[data-feedback-step-link],#feedbackPrevious,#feedbackNext,#feedbackSaveDraft").forEach((node) => { node.disabled = value || node.dataset.feedbackStepLink && Number(node.dataset.feedbackStepLink) > reached; }); },
     receipt(data, submitted) {
       receipt = {public_id: data.public_id, status: data.status, title: submitted.title, type: label(types, submitted.type), product_area: label(areas, submitted.product_area), submitted_at: new Date().toISOString()};
       try { sessionStorage.removeItem(DRAFT); } catch {} byId("feedbackDraftActions").hidden = true;

@@ -18,6 +18,31 @@
 
   if (!form || !message) return;
 
+  const en = document.documentElement.lang.startsWith("en");
+  const tracking = document.createElement("p"); tracking.className = "portal-notice";
+  document.querySelector(".feedback-page-head").after(tracking);
+  function session() { try { return JSON.parse(localStorage.getItem("scorpio_user_auth") || "{}"); } catch { return {}; } }
+  function renderTracking() {
+    const auth = session();
+    tracking.replaceChildren();
+    tracking.append(document.createTextNode(auth.access_token ? `${auth.email} · ` : en ? "Guest submission · " : "访客提交 · "));
+    const link = document.createElement("a"); link.href = `account.html${en ? "?lang=en" : ""}#feedback`; link.textContent = auth.access_token ? en ? "My feedback" : "我的反馈" : en ? "Sign in to track feedback" : "登录后可跟踪反馈"; tracking.append(link);
+    if (auth.access_token) { emailInput.value = auth.email; emailInput.readOnly = true; } else emailInput.readOnly = false;
+  }
+  renderTracking();
+  window.addEventListener("storage", renderTracking);
+  async function authHeader() {
+    let auth = session(); if (!auth.access_token) return {};
+    let expires = 0; try { expires = JSON.parse(atob(auth.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).exp; } catch {}
+    if (expires < Date.now() / 1000 + 30 && auth.refresh_token) {
+      const refreshToken = auth.refresh_token;
+      const response = await fetch(`${API_BASE}/auth/refresh`, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({refresh_token: refreshToken}), signal: AbortSignal.timeout(15000)});
+      if (!response.ok || session().refresh_token !== refreshToken) throw new Error(en ? "Your session expired. Sign in again before submitting." : "登录已过期，请重新登录后提交。");
+      const data = await response.json(); auth = {...auth, ...data}; localStorage.setItem("scorpio_user_auth", JSON.stringify(auth));
+    }
+    return {authorization: `Bearer ${auth.access_token}`};
+  }
+
   if (pageUrl) pageUrl.value = window.location.origin + window.location.pathname;
   initializeProtection();
 
@@ -27,6 +52,7 @@
     if (!protectionReady) { setMessage("安全验证组件加载失败，请检查网络后刷新页面。", "error"); return; }
     if (!validateProtectionInput()) return;
     const submitted = buildPayload(new FormData(form));
+    const attachments = window.ScorpioFeedbackUploads?.files() || [];
 
     setMessage("正在提交反馈…", "loading");
     const submitButton = form.querySelector('button[type="submit"]');
@@ -34,23 +60,32 @@
     submitting = true; UI?.busy(true);
 
     try {
+      const headers = await authHeader();
+      let body = JSON.stringify(submitted);
+      if (attachments.length) { body = new FormData(); body.set("payload", JSON.stringify(submitted)); attachments.forEach((file) => body.append("attachments", file)); }
+      else headers["content-type"] = "application/json";
       const response = await fetch(`${API_BASE}/feedback`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(submitted),
-        signal: AbortSignal.timeout(30000),
+        headers, body,
+        signal: AbortSignal.timeout(60000),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data.error || `HTTP ${response.status}`));
       if (!data.public_id) throw new Error("未收到反馈编号，提交结果尚未确认。");
 
       form.reset();
+      window.ScorpioFeedbackUploads?.clear(); renderTracking();
       if (pageUrl) pageUrl.value = window.location.origin + window.location.pathname;
       resetTurnstile();
       if (codeInput) codeInput.value = "";
       clearInterval(codeTimer);
       sendCodeButton.disabled = false; sendCodeButton.textContent = translate("发送验证码");
       UI?.receipt(data, submitted);
+      const follow = document.createElement("p"); follow.className = "portal-notice";
+      const link = document.createElement("a"); link.href = `account.html${en ? "?lang=en" : ""}#feedback`;
+      link.textContent = data.tracked ? en ? "View this issue in My feedback" : "前往“我的反馈”查看处理进展" : en ? "Guest submission is not linked to an account. Contact support using your reference." : "本次为访客提交，未关联账号。可凭反馈编号联系支持。";
+      if (data.tracked) follow.append(link); else follow.textContent = link.textContent;
+      document.getElementById("feedbackReceipt").append(follow);
       setMessage(`已收到，反馈编号：${data.public_id || "已生成"}。感谢你把问题说清楚。`, "success");
     } catch (error) {
       resetTurnstile();
@@ -64,6 +99,7 @@
   });
 
   sendCodeButton?.addEventListener("click", sendVerificationCode);
+  document.getElementById("feedbackReceipt").addEventListener("click", (event) => { if (event.target.closest("#feedbackNew")) { window.ScorpioFeedbackUploads?.clear(); renderTracking(); } });
   document.getElementById("feedbackRetryVerification")?.addEventListener("click", initializeProtection);
 
   async function initializeProtection() {
@@ -252,6 +288,18 @@
   }
 
   function errorText(code) {
+    const uploadErrors = {
+      feedback_attachment_count: ["最多可添加 3 张截图。", "You can attach up to 3 screenshots."],
+      feedback_attachment_size: ["每张截图不能超过 5 MB。", "Each screenshot must be no larger than 5 MB."],
+      feedback_attachment_invalid: ["截图格式或尺寸无效，请选择 PNG、JPG 或 WebP 图片。", "Invalid image format or dimensions. Select a PNG, JPG or WebP image."],
+      feedback_payload_too_large: ["提交内容过大，请缩小截图后重试。", "The submission is too large. Resize your screenshots and retry."],
+      feedback_storage_unavailable: ["截图服务尚未就绪，内容已保留，请稍后重试。", "Screenshot storage is not ready. Your content is retained. Please retry later."],
+      feedback_account_email_mismatch: ["联系邮箱需与当前登录账号一致。", "The contact email must match your signed-in account."],
+      feedback_duplicate_with_attachments: ["相同问题已提交。本次截图尚未上传，内容已保留；请在“我的反馈”核对原记录。", "This issue was already submitted. These images were not uploaded and your content is retained. Check the original in My feedback."],
+      invalid_token: ["登录已过期，请重新登录后提交。", "Your session expired. Sign in again before submitting."],
+      token_expired: ["登录已过期，请重新登录后提交。", "Your session expired. Sign in again before submitting."],
+    };
+    if (uploadErrors[code]) return uploadErrors[code][en ? 1 : 0];
     const map = {
       feedback_title_required: "请填写反馈标题。",
       feedback_description_required: "请填写详细说明。",
