@@ -19,9 +19,14 @@ import {
   RiskLevel, mobileRiskLevelFromScore, normalizeRiskLevel, riskLevelIsAtLeast,
   riskLevelLabel, riskLevelScore,
 } from './risk-level-enum.mjs';
-import { registerMinuteDeliveryRoutes, readPublication as readMinutePublication } from "./minute-delivery.mjs";
+import { registerMinuteDeliveryRoutes, readPublication as readMinutePublication, canonical as accountCanonicalJson } from "./minute-delivery.mjs";
 import { authorizeStockRead } from "./mobile-stock-access.mjs";
 import { hourlyRetentionWindow, hourlyRetentionPredicate, validateHourlyUploadRetention } from './hourly-retention.mjs';
+import { registerSignalStorageRoutes, assertUploadStorageBudget } from './signal-history-storage.mjs';
+import { registerAccountPortfolioRoutes, assertLegacyPortfolioWritable, saveLegacyPortfolioInput } from './account-portfolio.mjs';
+import {instrument as accountInstrument} from './account-portfolio-model.mjs';
+import {loadBootstrapWorkloads} from './mobile-startup.mjs';
+import {runtimeHealth} from './runtime-contract.mjs';
 export { hourlyRetentionWindow } from './hourly-retention.mjs';
 
 const JSON_HEADERS = {
@@ -43,12 +48,54 @@ const REAL_USER_SQL_FILTER = `
 
 const ROUTES = new Map();
 
-const MOBILE_COMPLIANCE_VERSION = "2026-08-19.v1";
-const MOBILE_COMPLIANCE_COPY = Object.freeze({
+const MOBILE_COMPLIANCE_VERSION = "2026-11-03.v4";
+const MOBILE_LEGACY_COMPLIANCE_COPY = Object.freeze({
   title: "使用前请确认",
   investment_notice: "本应用提供研究信息与分析工具，不构成投资建议、收益承诺或交易指令。投资决策及其风险由用户自行承担。",
   data_delay_notice: "A 股行情、资金流与研究数据通常按 T+1 更新，节假日、数据源维护或网络波动可能造成进一步延迟，请以交易所及持牌机构披露为准。",
   confirm_label: "我已阅读并理解以上说明",
+});
+// 说明按「用户最可能踩到的坑」排序，而不是按法律模板的习惯顺序：
+// 先讲这个 APP 做什么、明确不做什么，再讲数据什么时候才算可信，
+// 然后是模型输出与 AI 文字的性质、账号与设备的真实边界，最后才是责任划分。
+// 每一节都对应界面上真实存在的功能，避免写成读完仍不知道边界在哪的通用免责。
+const MOBILE_USAGE_SCOPE_SECTION = Object.freeze({
+  title: "这是什么，不是什么",
+  text: "本说明适用于整个 APP：概览、市场、标的（股票 / 基金 / 可转债）、报告中心、组合与「我的」。APP 提供研究信息与测算工具，不代客理财、不执行交易、不读取你的券商账户。组合中的持仓、现金与费用由你手工录入并保存在账号下，是记录而不是真实账户，不会随券商变动自动更新；「参考计划」按当前已取得的价格测算调整后的结构，保存和预演都不改动持仓与现金，也不产生任何委托。",
+});
+const MOBILE_USAGE_DATA_SECTION = Object.freeze({
+  title: "数据来源与更新节奏",
+  text: "数据来自已授权的商业数据源，经批量加工后按批次发布，不是实时行情。日线、资金、评分、分钟研究、信号与报告各自按来源与批次更新，部分为 T+1 或更长；基金净值、财报按各自披露周期更新。判断数据是否可用，请以页面标注的数据日、生成时间与质量状态为准，而不是以「刷新是否成功」为准：刷新成功只表示本次请求取到了服务端已发布的内容，不代表全部研究都已更新。分钟级图表由样本与批次加工得出，不能当作分时行情的准确定价。页面上的「--」「未评估」「数据日较早」表示信息缺失或过期，不等于零风险；研究覆盖不保证全市场、全部历史周期与全部指标。涉及交易的信息请以交易所及持牌机构披露为准。",
+});
+const MOBILE_USAGE_MODEL_SECTION = Object.freeze({
+  title: "评分、信号与 AI 输出的性质",
+  text: "评分、阶段判断、信号、风险画像与「深度分析」都是模型基于已发布数据计算或生成的结果，不是投资建议、收益承诺或买卖指令。模型可能因数据缺失、口径差异与参数假设而出错，AI 生成的文字同样可能有误；请核对原始数据与券商报价后再决定是否行动。历史表现、回测与评分不保证未来收益，「参考计划」中的假设情景也不是成交或收益预测。",
+});
+const MOBILE_USAGE_ACCOUNT_SECTION = Object.freeze({
+  title: "账号、设备与你的数据",
+  text: "授权有到期日并与设备绑定，一个账号可用的移动设备数量有上限；换机或重装可能需要解绑，由服务人员处理。账号授权不可转让、不可多人共用。APP 保存注册邮箱、授权标识、设备识别信息，以及你录入的持仓、现金与费用记录，用于登录校验、授权核验与组合同步。除此之外，APP 不读取通讯录、相册、位置信息，也不读取券商账户。退出登录只清除本机登录状态，不删除账号下已保存的数据。",
+});
+const MOBILE_USAGE_RISK_SECTION = Object.freeze({
+  title: "风险与责任",
+  text: "股市有风险，交易需谨慎。价格波动、流动性、停牌、交易限制等可能造成本金损失。你应结合自身风险承受能力独立决策，核对券商报价、费用与交易规则，并自行承担自主交易的结果。APP 不代你操作，不对你的自主交易作收益担保或亏损兜底，也不对因依赖上述研究信息或模型输出所作决策产生的交易损失承担责任。本说明不免除服务方依法应承担的责任，也不替代正式服务协议、隐私政策、投资者适当性程序与业务资质要求。",
+});
+const MOBILE_USAGE_SECTIONS = Object.freeze([
+  MOBILE_USAGE_SCOPE_SECTION,
+  MOBILE_USAGE_DATA_SECTION,
+  MOBILE_USAGE_MODEL_SECTION,
+  MOBILE_USAGE_ACCOUNT_SECTION,
+  MOBILE_USAGE_RISK_SECTION,
+]);
+const MOBILE_COMPLIANCE_COPY = Object.freeze({
+  title: "使用须知",
+  // 旧版 APK 只认这两个平铺字段且不可滚动，所以必须把全部实质条款塞进去：
+  // 数据节走 data_delay_notice（旧界面第二段），其余四节全部并入 investment_notice。
+  investment_notice: [MOBILE_USAGE_SCOPE_SECTION, MOBILE_USAGE_MODEL_SECTION,
+    MOBILE_USAGE_ACCOUNT_SECTION, MOBILE_USAGE_RISK_SECTION]
+    .map(s=>`${s.title}\n${s.text}`).join('\n\n'),
+  data_delay_notice: MOBILE_USAGE_DATA_SECTION.text,
+  confirm_label: "我已阅读并知晓以上使用边界与风险",
+  sections: MOBILE_USAGE_SECTIONS,
 });
 
 export const __mobilePresentationTest = {
@@ -71,8 +118,12 @@ export const __mobilePresentationTest = {
   mobileMarketPresentation,
   publishedMarketRegime,
   publishedRows,
+  publishedRowsForCode,
+  loadMobileStockRiskContext,
+  analysisFallbackStockBundle,
   mobileDeepAnalysisQuotaPayload,
   mergeMobilePortfolioPositions,
+  loadMobileAccountFacts,
   analysisFallbackPortfolioBundle,
   analysisFallbackAssetBundle,
   mobileAssetSearchKeyword,
@@ -200,7 +251,7 @@ export default {
           return withCors(await runAdminRequest({ request, env, url, releaseId }, deactivateAdminRelease), corsHeaders);
         }
         if (request.method === "GET" && path === "/health") {
-          return json({ ok: true, service: "scorpio-license-api" }, 200, corsHeaders);
+          return json(runtimeHealth(ROUTES, env), 200, {...corsHeaders, "cache-control": "no-store"});
         }
         return json({ error: "not_found" }, 404, corsHeaders);
       }
@@ -1430,30 +1481,34 @@ route("POST", "/v1/mobile/bootstrap", async (ctx) => {
     endpoint: "/v1/mobile/bootstrap",
   });
 
-  const rawPositions = request.positions.length
-    ? request.positions
-    : await loadMobilePortfolioPositions(ctx.env, user.id);
-  const positionsPromise = enrichMobilePortfolioPositions(ctx.env, license, rawPositions);
-  const [savedPositions, market, portfolio, latestPackageRow, watchlist, sampleRows, compliance, marketBriefRows] = await Promise.all([
-    positionsPromise,
-    mobileMarketAnalysis(ctx, { user, license, request, startedAt }),
-    positionsPromise.then((positions) => mobilePortfolioAnalysis(ctx, {
+  const homeFirst = body.bootstrap_scope === 'home' && body.portfolio_api_version === 2;
+  const {savedPositions, market, portfolio, latestPackageRow, watchlist, sampleRows, compliance, marketBriefRows} = await loadBootstrapWorkloads({
+    positions: async () => enrichMobilePortfolioPositions(ctx.env, license, request.positions.length
+      ? request.positions : await loadMobilePortfolioPositions(ctx.env, user.id)),
+    market: () => mobileMarketAnalysis(ctx, { user, license, request, startedAt }),
+    publishedMarket: () => analysisFallbackSharedBundle(ctx.env, request, {
+      user,license,endpoint:'/v1/mobile/bootstrap',feature:'market_overview',assetType:'market'}, 'published_startup'),
+    deferredPortfolio: () => analysisFallbackPortfolioBundle({positions:[]}, {user,license,
+      endpoint:'/v1/mobile/bootstrap',feature:'portfolio_analyze'}, 'account_deferred'),
+    portfolio: (positions) => body.portfolio_api_version === 2
+      ? analysisFallbackPortfolioBundle({positions}, {user,license,feature:'portfolio_analyze',endpoint:'/v1/mobile/bootstrap'}, 'mobile_account_v2_separate_read')
+      : mobilePortfolioAnalysis(ctx, {
       user,
       license,
       request: { ...request, positions },
       startedAt,
-    })),
-    latestDataPackage(ctx.env, license.edition, "stable", request.client_version).catch(() => null),
-    loadMobileWatchlist(ctx.env, user.id).catch(() => []),
-    loadMobileSamplePoolRows(ctx.env, license, {
+    }),
+    package: () => latestDataPackage(ctx.env, license.edition, "stable", request.client_version).catch(() => null),
+    watchlist: () => loadMobileWatchlist(ctx.env, user.id).catch(() => []),
+    samples: () => loadMobileSamplePoolRows(ctx.env, license, {
       strategy: "balanced",
       keyword: "",
       industry: "",
       limit: 3,
     }).catch(() => []),
-    mobileComplianceNotice(ctx.env, user, request.machine_fingerprint),
-    loadMobileMarketBriefRows(ctx.env, license, 30),
-  ]);
+    compliance: () => mobileComplianceNotice(ctx.env, user, request.machine_fingerprint, body.compliance_format_version || 1),
+    briefs: () => loadMobileMarketBriefRows(ctx.env, license, 30),
+  }, homeFirst);
 
   return json(mobileBootstrapPayload({
     user,
@@ -1469,6 +1524,7 @@ route("POST", "/v1/mobile/bootstrap", async (ctx) => {
     compliance,
     marketBriefRows,
     canPublishMarketBrief: isMobileBriefAdmin(ctx.env, user),
+    homeFirst,
   }));
 });
 
@@ -1489,7 +1545,9 @@ route("POST", "/v1/mobile/compliance/accept", async (ctx) => {
     endpoint: "/v1/mobile/compliance/accept",
   });
   const version = safeText(body.compliance_version || "", 64);
-  if (version !== MOBILE_COMPLIANCE_VERSION) {
+  const formatVersion = Number(body.compliance_format_version || 1);
+  const currentNotice = mobileCompliancePayload(false, formatVersion);
+  if (version !== currentNotice.version) {
     throwHttp(409, "compliance_version_outdated");
   }
   await recordMobileComplianceAcceptance(ctx.env, {
@@ -1501,7 +1559,7 @@ route("POST", "/v1/mobile/compliance/accept", async (ctx) => {
   });
   return json({
     ok: true,
-    compliance: mobileCompliancePayload(true),
+    compliance: mobileCompliancePayload(true, formatVersion),
   });
 });
 
@@ -1521,6 +1579,7 @@ route("PUT", "/v1/mobile/portfolio", async (ctx) => {
     requestBody: body,
     endpoint: "/v1/mobile/portfolio",
   });
+  await assertLegacyPortfolioWritable(ctx.env, user.id);
   const positions = await enrichMobilePortfolioPositions(ctx.env, license, request.positions);
   await saveMobilePortfolioPositions(ctx.env, user.id, positions);
   return json({
@@ -2059,14 +2118,39 @@ function mobilePortfolioRowPrice(assetType, row) {
 }
 
 async function saveMobilePortfolioPositions(env, userId, positions) {
-  const now = nowIso();
-  await env.DB.prepare(
-    `INSERT INTO mobile_portfolio_snapshots (user_id, positions_json, updated_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET
-       positions_json = excluded.positions_json,
-       updated_at = excluded.updated_at`
-  ).bind(userId, JSON.stringify(positions || []), now).run();
+  await saveLegacyPortfolioInput(env,userId,positions,nowIso());
+}
+
+async function loadMobileAccountFacts(ctx,license,positions) {
+  const pairs={stock:['stock_daily_latest','stock_info'],fund:['fund_nav_daily','fund_profiles'],bond:['bond_daily_snapshot','bond_profiles']};
+  const facts=[];
+  for(const [type,tables] of Object.entries(pairs)){
+    const items=positions.filter(p=>p.asset_type===type);if(!items.length)continue;
+    const latest=await publishedRows(ctx.env,tables[0],license,{limit:1});
+    const session=firstText(latest[0]?._data_date,latest[0]?.trade_date,latest[0]?.nav_date).slice(0,10);
+    // Keep every IN query below D1's bind limit, even with exchange aliases.
+    for(const chunk of chunkArray(items,8)){
+      const codes=uniqueStrings(chunk.flatMap(p=>assetCodeCandidates(p.code)));
+      const [prices,profiles]=await Promise.all(tables.map(table=>publishedRows(ctx.env,table,license,{asset_codes:codes,limit:240})));
+      for(const p of chunk){
+        const row=findMobilePortfolioRow(prices,p.code),profile=findMobilePortfolioRow(profiles,p.code);
+        if(!row)continue;
+        const raw=type==='fund'?row.unit_nav:type==='bond'?firstNumber(row.close,row.latest_price,null):firstNumber(row.close,row.latest_price,null);
+        const day=firstText(row.trade_date,row.nav_date,row._data_date).slice(0,10);
+        const rawIndustry=firstText(profile?.industry_name,profile?.industry);
+        const industry=type==='stock'&&typeof rawIndustry==='string'&&rawIndustry!=='--'?rawIndustry.slice(0,80):null;
+        const board=firstText(profile?.listing_board_label,profile?.listing_board,profile?.board_label)||null;
+        const fact={...accountInstrument(type,p.code),name:firstText(profile?.name,profile?.stock_name,profile?.fund_name,row.name,p.name),price:raw,currency:'CNY',price_basis:'unadjusted',price_as_of:day,
+          available_at:firstText(row._updated_at,row.available_at),quality:Number(raw)>0?'complete':'unavailable',
+          current_session_date:session||null,industry,board,
+          classification_scope:'published_profile_labels; funds_not_looked_through'};
+        fact.source_ref='sha256:'+await sha256Hex(accountCanonicalJson({table:tables[0],edition:row._edition_scope,
+          day,price:raw,available_at:fact.available_at,industry,board,profile_date:profile?._data_date||null}));
+        facts.push(fact);
+      }
+    }
+  }
+  return facts;
 }
 
 async function authorizeMobileCompanionDevice(env, options) {
@@ -4489,23 +4573,26 @@ async function responseJsonObject(response) {
   }
 }
 
-function mobileCompliancePayload(accepted = false) {
+function mobileCompliancePayload(accepted = false, formatVersion = 2) {
+  if (![1,2].includes(Number(formatVersion))) throwHttp(400,"compliance_format_unsupported");
   return {
-    version: MOBILE_COMPLIANCE_VERSION,
+    version: Number(formatVersion) === 2 ? MOBILE_COMPLIANCE_VERSION : "2026-08-19.v1",
+    format_version: Number(formatVersion),
     required: true,
     accepted: Boolean(accepted),
-    ...MOBILE_COMPLIANCE_COPY,
+    ...(Number(formatVersion) === 2 ? MOBILE_COMPLIANCE_COPY : MOBILE_LEGACY_COMPLIANCE_COPY),
   };
 }
 
-async function mobileComplianceNotice(env, user, machineFingerprint) {
+async function mobileComplianceNotice(env, user, machineFingerprint, formatVersion = 1) {
+  const notice = mobileCompliancePayload(false, formatVersion);
   const row = await env.DB.prepare(
     `SELECT 1 AS accepted
      FROM mobile_compliance_acceptances
      WHERE user_id = ? AND compliance_version = ? AND machine_fingerprint = ?
      LIMIT 1`
-  ).bind(user.id, MOBILE_COMPLIANCE_VERSION, machineFingerprint).first();
-  return mobileCompliancePayload(Boolean(row && row.accepted));
+  ).bind(user.id, notice.version, machineFingerprint).first();
+  return mobileCompliancePayload(Boolean(row && row.accepted), formatVersion);
 }
 
 async function recordMobileComplianceAcceptance(env, options) {
@@ -4607,12 +4694,12 @@ function mobileBootstrapPayload(options) {
   const packageStatus = packagePayload
     ? `正式数据 ${firstText(packagePayload.version, packagePayload.package_id)} · 已校验`
     : "正式数据已准备";
-  const headline = reviews.length
+  const headline = options.homeFirst ? "市场研究摘要" : reviews.length
     ? reviews[0].title
     : positionCount
       ? firstText(portfolioSummary.title, "组合分析已更新")
       : "尚未同步组合持仓";
-  const headlineSummary = reviews.length
+  const headlineSummary = options.homeFirst ? firstText(marketDetail, "研究内容以各段数据日与质量状态为准。") : reviews.length
     ? reviews[0].detail
     : positionCount
       ? firstText(portfolioSummary.brief, "正式服务端结果已返回")
@@ -4639,8 +4726,9 @@ function mobileBootstrapPayload(options) {
     source: {
       provider: "cloudflare_worker",
       market_status: firstText(options.market.status, "unknown"),
-      portfolio_status: firstText(options.portfolio.status, "unknown"),
+      portfolio_status: options.homeFirst ? 'deferred' : firstText(options.portfolio.status, "unknown"),
       demo: false,
+      ...(options.homeFirst ? {bootstrap_scope:'home',deferred_sections:['account_portfolio','market_details']} : {}),
     },
     compliance: options.compliance || mobileCompliancePayload(false),
     home: {
@@ -4650,7 +4738,7 @@ function mobileBootstrapPayload(options) {
       market_detail: marketDetail,
       score_observation: marketPresentation.score_observation,
       block_dates: marketPresentation.block_dates,
-      portfolio_risk: risk.label,
+      portfolio_risk: options.homeFirst ? '组合读取中' : risk.label,
       review_count: reviews.length,
       changes,
       indices: homeIndices,
@@ -6115,6 +6203,7 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/chunks", async (ctx) => {
     }
     throwHttp(409, "production_upload_chunk_conflict");
   }
+  await assertUploadStorageBudget(ctx.env, chunk.rows.reduce((n,r)=>n+new TextEncoder().encode(r.row_json).length,0));
   await storeProductionUploadChunk(ctx.env, chunk);
   return json({
     ok: true,
@@ -6220,7 +6309,7 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/row-hashes", async (ctx) 
   if (rowKeys.length > 500) throwHttp(400, "production_upload_hash_lookup_too_large");
   if (!rowKeys.length) {
     const count = await ctx.env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM production_table_rows WHERE table_name = ? AND edition_scope = ?"
+      "SELECT COUNT(*) AS n FROM production_table_rows r JOIN production_upload_batches b ON b.batch_id=r.batch_id WHERE r.table_name = ? AND r.edition_scope = ? AND b.status='committed'"
     ).bind(tableName, editionScope).first();
     return json({ ok: true, table_name: tableName, edition_scope: editionScope,
       table_row_count: Number(count?.n || 0), matched: 0, rows: {} });
@@ -6233,8 +6322,9 @@ route("POST", "/v1/scorpio_v1_admin/production-uploads/row-hashes", async (ctx) 
   // D1 allows 100 bound parameters: two fixed parameters + at most 98 keys.
   for (const group of chunkArray(rowKeys, 98)) {
     const result = await ctx.env.DB.prepare(
-      `SELECT row_key, row_hash FROM production_table_rows
-       WHERE table_name = ? AND edition_scope = ? AND row_key IN (${placeholders(group.length)})`
+      `SELECT r.row_key, r.row_hash FROM production_table_rows r
+       JOIN production_upload_batches b ON b.batch_id=r.batch_id
+       WHERE r.table_name = ? AND r.edition_scope = ? AND b.status='committed' AND r.row_key IN (${placeholders(group.length)})`
     ).bind(tableName, editionScope, ...group).all();
     for (const row of result.results || []) {
       rows[row.row_key] = row.row_hash;
@@ -6371,6 +6461,14 @@ registerMonitoringRoutes({route, requireUser, readJson, json, throwHttp, verifyM
   verifyAnalysisLicense, applyAnalysisSecurity, sha256Hex});
 registerMinuteDeliveryRoutes({route, requireAdmin, requireUser, verifyMobileLicense, applyAnalysisSecurity,
   authorizeMobileStockRead, editionScopes: dataSyncEditionScopes, readJson, json});
+registerSignalStorageRoutes({route, requireAdmin, readJson, json});
+registerAccountPortfolioRoutes({route,readJson,json,
+  authorize:async(ctx,body,endpoint)=>{
+    const user=await requireUser(ctx),request=normalizeMobileBootstrapRequest(body);
+    const license=await verifyMobileLicense(ctx.env,user,request.license_id,request.machine_fingerprint);
+    await applyAnalysisSecurity(ctx,{user,license,requestBody:body,endpoint});
+    return {user,license};
+  },resolveFacts:loadMobileAccountFacts});
 
 function firstBatchRow(result) {
   return result && Array.isArray(result.results) ? result.results[0] || null : null;
@@ -7680,11 +7778,16 @@ async function analysisFallbackSharedBundle(env, request, options, reason = "cac
       },
     });
   }
-  const marketScoreRows = latestDateRows(await publishedRows(env, "market_score_daily", options.license, { limit: 20 }));
+  const [rawScoreRows,rawSentimentRows,rawFlowRows] = await Promise.all([
+    publishedRows(env, "market_score_daily", options.license, { limit: 20 }),
+    publishedRows(env, "market_sentiment_daily", options.license, { limit: 10 }),
+    publishedRows(env, "market_fund_flow_cache", options.license, { limit: 10 }),
+  ]);
+  const marketScoreRows = latestDateRows(rawScoreRows);
   const marketScore = preferredMarketScoreRow(marketScoreRows);
   const marketScoreReady = marketScore && String(marketScore.score_status || "").toLowerCase() === "ready";
-  const sentimentRows = latestDateRows(await publishedRows(env, "market_sentiment_daily", options.license, { limit: 10 }));
-  const flowRows = latestDateRows(await publishedRows(env, "market_fund_flow_cache", options.license, { limit: 10 }));
+  const sentimentRows = latestDateRows(rawSentimentRows);
+  const flowRows = latestDateRows(rawFlowRows);
   const sentiment = sentimentRows[0] || {};
   const flow = flowRows[0] || {};
   return sharedFallbackPayload(request, options, reason, {

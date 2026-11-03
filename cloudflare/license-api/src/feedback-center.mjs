@@ -103,7 +103,8 @@ export async function listFeedback(ctx, d, admin = true) {
   const total = await ctx.env.DB.prepare(`SELECT COUNT(*) AS n FROM feedback_items f ${filter}`).bind(...args).first();
   const rows = await ctx.env.DB.prepare(`SELECT ${USER_FIELDS},${COUNT_FILES}${admin ? ",f.contact_email,f.user_id" : ""} FROM feedback_items f ${filter} ORDER BY f.updated_at DESC,f.id DESC LIMIT ? OFFSET ?`).bind(...args, limit, offset).all();
   const metrics = await ctx.env.DB.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN status IN ('new','triaged','in_progress') THEN 1 ELSE 0 END) AS open,SUM(CASE WHEN priority IN ('high','urgent') AND status NOT IN ('closed','resolved') THEN 1 ELSE 0 END) AS high FROM feedback_items${user ? " WHERE user_id=?" : ""}`).bind(...(user ? [user.id] : [])).first();
-  return d.json({items: rows.results || [], results: rows.results || [], page: {total: total.n, offset, limit, has_more: offset + limit < total.n}, metrics}, 200, {"cache-control": "no-store"});
+  const counts = Object.fromEntries(["total", "open", "high"].map((key) => [key, Number(metrics?.[key]) || 0]));
+  return d.json({items: rows.results || [], results: rows.results || [], page: {total: total.n, offset, limit, has_more: offset + limit < total.n}, metrics: counts}, 200, {"cache-control": "no-store"});
 }
 
 export function registerFeedbackCenter(d) {

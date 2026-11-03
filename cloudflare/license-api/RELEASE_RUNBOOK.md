@@ -51,3 +51,18 @@ The command refuses to replace an existing `version + channel + edition`. Pass `
 2. Download from an authorized account outside mainland China (R2 path).
 3. Download from an authorized account inside mainland China (signed Hong Kong CDN path).
 4. Verify the downloaded SHA-256 against the command output.
+## Shared Worker Deployment Check
+
+`scorpio-license-api` serves both the public website/account center and the desktop/Android clients. A deployment from either checkout replaces the same Worker. Do not deploy a client-only or website-only source tree to this Worker.
+
+The 2026-11-03 incident was caused by a client deployment omitting the account center, operations dashboard and feedback modules and the private `FEEDBACK_BUCKET` binding. `/health` still returned 200, even though new website routes were absent.
+
+Before publishing:
+
+1. Compare this checkout with `D:\dev\stock\cloudflare\license-api` and the active Cloudflare version. Preserve changes from both sources. Do not overwrite the other checkout's uncommitted work.
+2. Keep all migrations, `RELEASE_BUCKET`, private `FEEDBACK_BUCKET` (`website`), JWT/signing secrets, runtime variables and the existing scheduled trigger.
+3. Use `npm run deploy` from this API directory. Its lifecycle runs the regression suite before publishing, preserves remote variables with `--keep-vars`, then checks the deployed API contracts and screenshot binding. A direct `wrangler deploy` bypasses these lifecycle checks.
+4. `npm run deploy:verify` must pass after any deployment from another checkout. A plain HTTP 200 from `/health` is not sufficient: `contracts` must include account, operations, feedback, auth, mobile portfolio and storage support.
+5. Publish static pages only after API verification succeeds. Verify authenticated read-only admin screens using an existing authorized session; never create/delete live users just to test a deployment.
+
+The verification script sends no credentials and makes no business writes. Its 401/403 checks prove protected routes are present, not that authenticated database queries have succeeded.

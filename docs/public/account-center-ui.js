@@ -41,6 +41,7 @@
     return [...groups.values()];
   }
   const errors = {
+    service_contract_mismatch: ["当前服务版本与页面不兼容，数据未加载。请刷新页面后重试；若持续出现，请检查云端部署版本。", "The service version is incompatible with this page. Refresh and retry; if this persists, check the API deployment."],
     release_platform_file_mismatch: ["安装包文件名与客户端平台不一致。Android 需要 APK 文件。", "The package does not match its platform. Android requires an APK file."],
     release_object_not_found: ["发行桶中未找到安装包，请核对 R2 对象 Key。", "The package was not found in the release bucket. Check its R2 object key."],
     release_object_changed: ["安装包在校验后发生变化，请重新核对再发布。", "The package changed after validation. Check it again before publishing."],
@@ -85,10 +86,15 @@
     const code = error.data?.error || error.code || error.message || "";
     if (errors[code]) return t(...errors[code]);
     if (Number(error.status) === 429 || /rate_limited$/.test(code)) return t("请求较频繁，请稍后重试。", "Too many requests. Please retry later.");
-    if (Number(error.status) === 404) return t("账户管理服务尚未更新，原有登录和下载仍可使用。", "The account service needs updating. Existing sign-in and downloads are still available.");
+    if (Number(error.status) === 404) return t("请求的服务接口不可用。请刷新重试；若持续出现，请检查云端部署版本。", "The requested service endpoint is unavailable. Refresh and retry; if this persists, check the API deployment.");
     if (Number(error.status) >= 500) return t("服务暂时不可用，请稍后刷新重试。", "The service is temporarily unavailable. Try again later.");
     return code || t("操作未完成，请重试。", "The operation could not be completed.");
   };
+  function requireContract(data, valid) {
+    if (!valid(data)) throw Object.assign(new Error("service_contract_mismatch"), {code: "service_contract_mismatch", status: 502});
+    return data;
+  }
+  const validPage = (page) => page && ["total", "offset", "limit"].every((key) => Number.isSafeInteger(page[key]) && page[key] >= 0) && page.limit > 0 && typeof page.has_more === "boolean";
   const expiry = (value, days, serverTime) => {
     const today = (serverTime || new Date().toISOString()).slice(0, 10);
     const current = value && value.slice(0, 10) > today ? value.slice(0, 10) : today;
@@ -175,7 +181,7 @@
       close() { node.close(); },
     };
   }
-  window.ScorpioAccountViews = {t, escape, icon, icons, edition, status, badge, date, empty, kind, errorText, expiry, groupLicenses, licenseCard, deviceCard, eventList, requestList, dialog};
+  window.ScorpioAccountViews = {t, escape, icon, icons, edition, status, badge, date, empty, kind, errorText, requireContract, validPage, expiry, groupLicenses, licenseCard, deviceCard, eventList, requestList, dialog};
 
   let options, data, isSignedIn = false, identity = "", revision = 0, modal;
   const byId = (id) => document.getElementById(id);

@@ -16,7 +16,7 @@ async function until(check, description) {
   for (let i = 0; i < 600; i++) { if (check()) return; await new Promise((resolve) => setTimeout(resolve, 5)); }
   assert.fail(description);
 }
-function page(t, f, file, scripts, {lang = "zh-CN", auth, admin = false, brokenSecurity = false} = {}) {
+function page(t, f, file, scripts, {lang = "zh-CN", auth, admin = false, brokenSecurity = false, responseOverrides = {}} = {}) {
   const dom = new JSDOM(read(file), {url: `https://scorpio-intelligence.tech/${file}${lang === "en" ? "?lang=en" : ""}`, runScripts: "outside-only"});
   f.windows.push(dom.window);
   const w = dom.window, d = w.document, removed = [];
@@ -39,6 +39,7 @@ function page(t, f, file, scripts, {lang = "zh-CN", auth, admin = false, brokenS
     const resolved = new URL(url, w.location.href);
     assert.equal(resolved.hostname, "api.scorpio-intelligence.tech", "UI tests must never contact a live service");
     if (brokenSecurity && resolved.pathname === "/v1/auth/security") throw new Error("local simulated outage");
+    if (responseOverrides[resolved.pathname]) return responseOverrides[resolved.pathname]();
     const headers = new Headers(options.headers); headers.set("Origin", "https://scorpio-intelligence.tech"); headers.set("CF-IPCountry", "CN");
     const pending = worker.fetch(new Request(resolved, {...options, headers}), f.env); f.pending.add(pending);
     try { return await pending; } finally { f.pending.delete(pending); }
@@ -277,4 +278,33 @@ test("dashboard refresh errors retain the last successful measurements and logou
   click(ui, "opsRefresh"); await until(() => ui.d.getElementById("opsNotice").textContent.includes("retained"), "refresh failure marked stale");
   assert.equal(ui.d.querySelector(".ops-kpi-band").innerHTML, old); assert.match(ui.d.getElementById("opsFreshness").textContent, /stale/); assert.equal(ui.d.getElementById("opsApiState").textContent, "Unknown");
   click(ui, "logoutButton"); assert.equal(ui.d.getElementById("opsBody").textContent, ""); assert.deepEqual(ui.errors, []);
+});
+
+for (const lang of ["zh-CN", "en"]) test(`partial cloud deployments show actionable errors instead of undefined-property exceptions (${lang})`, async (t) => {
+  const f = setup(t), responseOverrides = {};
+  for (const path of ["users", "authorizations", "account-requests", "operations"]) responseOverrides[`/v1/scorpio_v1_admin/${path}`] = () => Response.json({error: "not_found"}, {status: 404});
+  responseOverrides["/v1/scorpio_v1_admin/feedback"] = () => Response.json({results: [], page: {total: 0, offset: 0, limit: 25, has_more: false}});
+  const ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true, lang, responseOverrides});
+  await until(() => ui.d.getElementById("opsNotice").textContent.includes(lang === "en" ? "endpoint is unavailable" : "服务接口不可用"), "missing dashboard API explained");
+  await until(() => ui.d.getElementById("supportNotice").textContent.includes(lang === "en" ? "incompatible" : "不兼容"), "legacy feedback schema explained");
+  assert.equal(ui.d.getElementById("supportMetrics").classList.contains("hidden"), true);
+  assert.match(ui.d.getElementById("supportInbox").textContent, lang === "en" ? /could not be loaded/ : /未加载/);
+  ui.d.querySelector('[data-account-admin-view="users"]').click();
+  await until(() => ui.d.getElementById("adminAccountNotice").textContent.includes(lang === "en" ? "endpoint is unavailable" : "服务接口不可用"), "missing user API explained");
+  assert.doesNotMatch(ui.d.body.textContent, /Cannot read properties|reading 'total'|Existing sign-in and downloads are still available|原有登录和下载仍可使用/);
+  delete responseOverrides["/v1/scorpio_v1_admin/feedback"];
+  ui.d.querySelector('[data-account-admin-view="feedback"]').click(); click(ui, "supportRefresh");
+  await until(() => !ui.d.getElementById("supportMetrics").classList.contains("hidden"), "same session recovers after the API is fixed");
+  assert.equal(ui.d.getElementById("supportNotice").classList.contains("hidden"), true);
+  assert.deepEqual(ui.errors, []);
+});
+
+test("invalid successful dashboard responses retain good data and do not expose JavaScript exceptions", async (t) => {
+  const f = setup(t), responseOverrides = {}, ui = page(t, f, "scorpio_v1_admin.html", adminScripts, {admin: true, lang: "en", responseOverrides});
+  await until(() => ui.d.querySelectorAll("[data-ops-day]").length === 7, "dashboard ready");
+  const old = ui.d.querySelector(".ops-kpi-band").innerHTML;
+  responseOverrides["/v1/scorpio_v1_admin/operations"] = () => Response.json({ok: true});
+  click(ui, "opsRefresh"); await until(() => ui.d.getElementById("opsNotice").textContent.includes("incompatible"), "incomplete payload rejected");
+  assert.equal(ui.d.querySelector(".ops-kpi-band").innerHTML, old);
+  assert.equal(ui.d.getElementById("opsApiState").textContent, "Unknown"); assert.deepEqual(ui.errors, []);
 });

@@ -143,7 +143,7 @@ test("mobile bootstrap turns raw market diagnostics into customer copy", () => {
   assert.equal(payload.compliance.required, true);
   assert.equal(payload.compliance.accepted, false);
   assert.match(payload.compliance.data_delay_notice, /T\+1/);
-  assert.match(payload.compliance.investment_notice, /不构成投资建议/);
+  assert.match(payload.compliance.investment_notice, /不保证未来收益/);
   assert.doesNotMatch(JSON.stringify(payload.home), /Market overview|phase=|capital_outflow|latest_available/);
 });
 
@@ -156,6 +156,26 @@ test("mobile compliance copy is versioned and records acceptance state", () => {
   assert.equal(accepted.version, pending.version);
   assert.equal(accepted.accepted, true);
   assert.match(accepted.data_delay_notice, /交易所及持牌机构/);
+  assert.equal(pending.version,'2026-11-03.v4');
+  assert.equal(pending.title,'使用须知');
+  assert.equal(pending.sections.length,5);
+  assert.equal(pending.format_version,2);
+  assert.deepEqual(pending.sections.map(s=>s.title),
+    ['这是什么，不是什么','数据来源与更新节奏','评分、信号与 AI 输出的性质','账号、设备与你的数据','风险与责任'],
+    'notice order follows what a user can get wrong first, not legal boilerplate order');
+  assert.match(pending.sections[3].text,/移动设备数量有上限/,'device binding and limit are disclosed');
+  assert.match(pending.sections[3].text,/不读取通讯录/,'scope of personal data collection is stated');
+  assert.match(pending.sections[2].text,/AI 生成的文字同样可能有误/,'AI output is not presented as authoritative');
+  const legacy=presentation.mobileCompliancePayload(false,1);
+  assert.equal(legacy.version,'2026-08-19.v1');
+  assert.equal(legacy.sections,undefined,'old non-scrolling APKs retain their compact, independently versioned notice');
+  assert.ok(legacy.investment_notice.length<150);
+  assert.match(pending.investment_notice,/不免除服务方依法应承担的责任/);
+  assert.match(pending.investment_notice,/整个 APP/);
+  for(const section of pending.sections) {
+    assert.ok((section.title==='数据来源与更新节奏'?pending.data_delay_notice:pending.investment_notice).includes(section.text),
+      'legacy clients must see every material term before accepting the same version');
+  }
 });
 
 test("market center presents breadth, capital, and sector rotation together", () => {

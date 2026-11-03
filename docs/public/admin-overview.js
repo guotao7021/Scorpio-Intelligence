@@ -14,7 +14,7 @@
     const request = ++revision; busy = true;
     root.setAttribute("aria-busy", "true"); root.querySelectorAll("[data-ops-days],#opsRefresh").forEach((button) => { button.disabled = true; });
     try {
-      const result = await config.request(`/scorpio_v1_admin/operations?days=${days}`);
+      const result = V.requireContract(await config.request(`/scorpio_v1_admin/operations?days=${days}`), (value) => value?.period && value.totals && value.snapshot && value.queue && value.analysis && Array.isArray(value.series) && value.series.length === days && ["editions", "pages", "expiring"].every((key) => Array.isArray(value[key])));
       let health = null;
       try { health = await config.request("/scorpio_v1_admin/signing/health"); } catch (error) { if (error.status === 403) throw error; }
       if (!authorized || request !== revision) return;

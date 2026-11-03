@@ -6,7 +6,10 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "predeploy": "npm test",
+    "deploy": "wrangler deploy --keep-vars",
+    "postdeploy": "node scripts/verify-deployment.mjs",
+    "deploy:verify": "node scripts/verify-deployment.mjs",
     "d1:create": "wrangler d1 create scorpio-license-db",
     "d1:migrate:local": "wrangler d1 migrations apply scorpio-license-db --local",
     "d1:migrate:remote": "wrangler d1 migrations apply scorpio-license-db --remote",

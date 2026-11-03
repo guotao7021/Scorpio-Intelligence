@@ -27,4 +27,8 @@ test("unified Worker keeps website delivery and feedback features", () => {
   assert.match(workerSource, /route\("GET", "\/v1\/scorpio_v1_admin\/site-analytics"/);
   assert.match(wranglerSource, /PUBLIC_PRODUCT_VIDEO_R2_KEY/);
   assert.match(wranglerSource, /ALIYUN_CDN_DOWNLOAD_HOST/);
+  assert.match(wranglerSource, /binding\s*=\s*"FEEDBACK_BUCKET"/);
+  assert.match(wranglerSource, /bucket_name\s*=\s*"website"/);
+  assert.match(wranglerSource, /D1_STORAGE_HARD_BYTES\s*=\s*"4500000000"/);
+  for (const registrar of ["registerAuthSecurity", "registerAccountCenterRoutes", "registerFeedbackCenter", "registerAdminOperations", "registerAccountPortfolioRoutes", "registerSignalStorageRoutes"]) assert.match(workerSource, new RegExp(registrar + "\\("));
 });

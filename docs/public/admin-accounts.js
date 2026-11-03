@@ -45,7 +45,7 @@
     try {
       const query = new URLSearchParams({limit: licensePage.limit, offset: licensePage.offset, q: byId("adminLicenseSearch").value.trim(), status: byId("adminLicenseStatus").value, include_test: byId("adminIncludeTestLicenses").checked ? "1" : "0"});
       query.set("archived", byId("adminLicenseArchive").value);
-      const data = await call(`/authorizations?${query}`);
+      const data = V.requireContract(await call(`/authorizations?${query}`), (value) => Array.isArray(value?.items) && V.validPage(value.page) && value.counts && typeof value.counts === "object");
       if (request !== licenseSequence || !authorized) return;
       licensePage = data.page;
       const metrics = [["", t("全部授权", "All grants"), Object.values(data.counts).reduce((sum, n) => sum + n, 0)], ["unactivated", t("待激活", "Ready to activate"), data.counts.unactivated || 0], ["active", t("正式授权有效", "Active commercial"), data.counts.active || 0], ["expired", t("已到期", "Expired"), data.counts.expired || 0], ["pending", t("待审批", "Awaiting approval"), data.counts.pending || 0]];
@@ -66,7 +66,7 @@
     try {
       const query = new URLSearchParams({limit: page.limit, offset: page.offset, q: byId("adminUserSearch").value.trim(), status: byId("adminUserStatus").value, include_test: byId("adminIncludeTestUsers").checked ? "1" : "0"});
       query.set("archived", byId("adminUserArchive").value);
-      const data = await call(`/users?${query}`);
+      const data = V.requireContract(await call(`/users?${query}`), (value) => Array.isArray(value?.items) && V.validPage(value.page));
       if (request !== sequence || !authorized) return;
       page = data.page;
       byId("adminUsersTable").innerHTML = data.items.length ? `<div class="portal-table-wrap"><table class="portal-table"><thead><tr><th>${t("注册用户", "Registered user")}</th><th>${t("授权状态", "License status")}</th><th>${t("版本", "Edition")}</th><th>${t("到期日期", "Expires on")}</th><th class="portal-secondary">${t("注册时间", "Registered")}</th><th>${t("操作", "Actions")}</th></tr></thead><tbody>${data.items.map((user) => `<tr><td><strong>${escape(user.username)}</strong><small class="portal-user-email">${escape(user.email)}</small></td><td>${badge(user.status)}</td><td>${escape(edition(user.edition))}</td><td>${date(user.expires_at)}</td><td class="portal-secondary">${date(user.created_at)}</td><td><button class="portal-text-button" type="button" data-open-user="${user.id}">${t("管理", "Manage")}${icon("arrow-right")}</button></td></tr>`).join("")}</tbody></table></div>` : empty("没有匹配的注册用户", "No users match these filters");
@@ -108,7 +108,7 @@
     if (!authorized) return;
     const request = ++requestSequence;
     try {
-      const result = await call(`/account-requests?status=${encodeURIComponent(byId("adminRequestStatus").value)}`);
+      const result = V.requireContract(await call(`/account-requests?status=${encodeURIComponent(byId("adminRequestStatus").value)}`), (value) => Array.isArray(value?.items));
       if (!authorized || request !== requestSequence) return;
       const pending = byId("adminRequestStatus").value === "pending";
       if (pending) byId("adminPendingCount").textContent = result.items.length ? `(${result.items.length})` : "";

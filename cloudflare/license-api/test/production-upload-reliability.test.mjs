@@ -55,6 +55,22 @@ test('oversized lookups and unauthenticated lookups are refused', async () => {
   assert.equal((await lookup(hashDb(),['k'],'wrong')).status,403);
 });
 
+test('dedupe and postcommit readback never count unpublished batch rows as available', async()=>{
+  const sql=new DatabaseSync(':memory:');
+  sql.exec(`CREATE TABLE production_upload_batches(batch_id TEXT PRIMARY KEY,status TEXT);
+    CREATE TABLE production_table_rows(table_name TEXT,row_key TEXT,row_hash TEXT,edition_scope TEXT,batch_id TEXT);
+    INSERT INTO production_upload_batches VALUES('good','committed'),('pending','committing');
+    INSERT INTO production_table_rows VALUES('fund_profiles','one','goodhash','standard_pro','good'),('fund_profiles','two','unpublishedhash','standard_pro','pending');`);
+  const db={prepare(text){return {values:[],bind(...values){this.values=values;return this;},
+    async all(){return {results:sql.prepare(text).all(...this.values)};},
+    async first(){return sql.prepare(text).get(...this.values);}};}};
+  try{
+    let r=await lookup(db,['one','two']);const body=await r.json();
+    assert.deepEqual(body.rows,{one:'goodhash'});
+    r=await lookup(db,[]);assert.equal((await r.json()).table_row_count,1);
+  }finally{sql.close();}
+});
+
 function sqliteFixture() {
   const sql = new DatabaseSync(':memory:');
   for (const name of ['0008_production_uploads.sql','0009_production_upload_staging.sql']) {

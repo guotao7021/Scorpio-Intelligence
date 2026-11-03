@@ -878,6 +878,7 @@
     if (options.blob && response.ok) return response.blob();
     const text = await response.text();
     const data = text ? parseJson(text) : {};
+    if (response.ok) V.requireContract(data, (value) => response.headers.get("content-type")?.includes("application/json") && value && typeof value === "object" && !Array.isArray(value));
     if (!response.ok) {
       const detail = errorLabel(data.error || response.statusText);
       const error = new Error(`${detail}（HTTP ${response.status} · ${path}）`);

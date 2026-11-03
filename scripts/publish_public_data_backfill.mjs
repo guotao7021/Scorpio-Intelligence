@@ -1,4 +1,4 @@
-/** Only owner-authorized source-sealed hourly/NAV backfills. No HTTP auth bypass. */
+/** Owner-authorized, source-sealed public facts. No HTTP authentication bypass. */
 import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -21,18 +21,19 @@ export async function loadPlan(file){
   const p=JSON.parse(w.payload_json);
   check(Object.keys(p).sort().join(',')==='edition_scope,manifest_json,module,reference_day,rows,sample_codes,source_readonly,source_write_count,table_name,version'&&
     p.version==='production-owner-backfill-input.v1'&&p.source_readonly===true&&p.source_write_count===0&&p.edition_scope==='standard_pro', 'invalid source plan');
-  check(['stock_hourly_history','fund_nav_daily','stock_signal_observation_daily','stock_info'].includes(p.table_name)&&p.module===(['fund_nav_daily','stock_info'].includes(p.table_name)?'target_research':'market_context'),'table outside bounded backfill scope');
+  check(['stock_hourly_history','fund_nav_daily','stock_signal_observation_daily','stock_info','stock_risk_metrics'].includes(p.table_name)&&p.module===(['fund_nav_daily','stock_info'].includes(p.table_name)?'target_research':'market_context'),'table outside bounded backfill scope');
   check(Array.isArray(p.rows)&&p.rows.length<=20000&&new Set(p.rows.map(r=>r.row_key)).size===p.rows.length,'invalid rows');
-  const fields=p.table_name==='stock_info'?['code','name','industry','sector','market','list_date','status','created_at','updated_at','source',
+  const fields=p.table_name==='stock_risk_metrics'?RISK_FIELDS:p.table_name==='stock_info'?['code','name','industry','sector','market','list_date','status','created_at','updated_at','source',
     'listing_board','listing_board_source','listing_board_available_on','listing_board_source_hash']:p.table_name==='stock_signal_observation_daily'?['code','business_date','batch_id','snapshot_json','updated_at']:p.table_name==='stock_hourly_history'?['code','trade_date','interval_minutes','data_source','price_basis','snapshot_id','available_at','quality_status','bars_json','updated_at']:
     ['fund_code','nav_date','nav','acc_nav','daily_return_pct','source','updated_at'];
   for(const r of p.rows){
     check(Object.keys(r).sort().join(',')==='data_date,row_hash,row_json,row_key'&&await digest(r.row_json)===r.row_hash,'source row hash changed');
     const data=JSON.parse(r.row_json);
     check(Object.keys(data).every(k=>fields.includes(k)),'private source fields');
-    const code=data.code||data.fund_code,date=data.trade_date||data.nav_date||data.business_date||data.updated_at;
+    const code=data.code||data.fund_code||data.symbol,date=data.trade_date||data.nav_date||data.business_date||data.updated_at;
     check(/^\d{6}$/.test(code)&&(p.table_name==='stock_info'?/^\d{4}-\d{2}-\d{2}(?:[ T].*)?$/:/^\d{4}-\d{2}-\d{2}$/).test(date)&&r.data_date===date&&
-      r.row_key===await digest(p.table_name==='stock_info'?`stock_info|${code}`:p.table_name==='stock_signal_observation_daily'?`${p.table_name}|${date}|${code}`:`${p.table_name}|${code}|${date}`),'row identity changed');
+      r.row_key===await digest(p.table_name==='stock_risk_metrics'?`${p.table_name}|${date}|${code}|${data.data_source}`:p.table_name==='stock_info'?`stock_info|${code}`:p.table_name==='stock_signal_observation_daily'?`${p.table_name}|${date}|${code}`:`${p.table_name}|${code}|${date}`),'row identity changed');
+    if(p.table_name==='stock_risk_metrics') validateRiskRow(data,p);
     if(p.table_name==='stock_info') {
       check(date.slice(0,10)<=p.reference_day,'future master source');
       if(data.listing_board!==undefined) check(['主板','创业板','科创板','北交所'].includes(data.listing_board)&&
@@ -61,7 +62,68 @@ export async function loadPlan(file){
   const m=JSON.parse(p.manifest_json);
   check(m.module===p.module&&m.edition_scope===p.edition_scope&&m.tables.length===1&&m.tables[0].table_name===p.table_name&&
     m.tables[0].mode===(p.table_name==='stock_info'?'full_replace':'incremental_upsert')&&m.estimated_rows===p.rows.length,'manifest differs from row plan');
+  if(p.table_name==='stock_risk_metrics') {
+    check(p.rows.length>0 && canonical(p.sample_codes)===canonical(p.rows.map(r=>JSON.parse(r.row_json).symbol).sort()),'complete risk population required');
+    const rows=p.rows.map(r=>JSON.parse(r.row_json)),d=m.derivation;
+    check(d?.version==='daily-price-risk-refresh.v1' && d.business_date===p.reference_day &&
+      /^sha256:[a-f0-9]{64}$/.test(d.result_hash) &&
+      d.source_hash==='sha256:'+await digest(canonical(rows.slice().sort((a,b)=>a.symbol.localeCompare(b.symbol)).map(r=>[r.symbol,r.source_window_hash]))) &&
+      d.upload_rows_hash==='sha256:'+await digest(canonical(p.rows.map(r=>[r.row_key,r.row_hash]).sort((a,b)=>a[0].localeCompare(b[0])))) &&
+      /^sha256:[a-f0-9]{64}$/.test(d.calendar_hash) &&
+      rows.every(r=>r.available_at===d.available_at) && d.scored_rows===rows.filter(r=>r.risk_score!==null).length,'risk derivation seal differs');
+  }
   return {...p,inputHash:w.content_hash};
+}
+
+const RISK_FIELDS=['trade_date','symbol','volatility_20','volatility_60','max_drawdown_20','max_drawdown_60',
+  'extreme_down_days_20','avg_turnover_20','liquidity_amount_20','risk_score','data_source','created_at','updated_at','available_at',
+  'liquidity_amount_unit','sample_count_20','sample_count_60','risk_formula_version','quality_policy_version',
+  'source_window_hash','price_basis','calendar_source','metric_status','missing_metrics_json'];
+RISK_FIELDS.push('turnover_unit','turnover_source');
+function validateRiskRow(r,p) {
+  const stamp=v=>typeof v==='string' && /(?:Z|[+-]\d\d:\d\d)$/.test(v) && Number.isFinite(Date.parse(v));
+  check(Object.keys(r).length===RISK_FIELDS.length && r.trade_date===p.reference_day &&
+    r.data_source==='derived_daily_bar' && r.risk_formula_version==='daily-price-pressure.v1' &&
+    r.quality_policy_version==='complete-sse-periods-cny-turnover.v2' && r.price_basis==='unadjusted' &&
+    r.calendar_source==='tushare_trade_calendar.SSE' && /^sha256:[a-f0-9]{64}$/.test(r.source_window_hash) &&
+    stamp(r.available_at) && r.created_at===r.available_at && r.updated_at===r.available_at &&
+    Date.parse(r.available_at)>=Date.parse(`${p.reference_day}T15:00:00+08:00`) && Date.parse(r.available_at)<=Date.now(),
+    'risk provenance or actual processing clock differs');
+  for(const k of ['volatility_20','volatility_60','max_drawdown_20','max_drawdown_60',
+    'extreme_down_days_20','avg_turnover_20','liquidity_amount_20','risk_score']) {
+    const n=r[k];
+    check(n===null || typeof n==='number' && Number.isFinite(n) && (k.startsWith('max_drawdown')?n>=-1&&n<=0:n>=0), 'invalid risk measurement');
+  }
+  check([20,60].every(n=>Number.isInteger(r[`sample_count_${n}`]) && r[`sample_count_${n}`]>=0 && r[`sample_count_${n}`]<=n &&
+    (r[`sample_count_${n}`]===n || r[`volatility_${n}`]===null && r[`max_drawdown_${n}`]===null)) &&
+    (r.extreme_down_days_20===null || Number.isInteger(r.extreme_down_days_20)&&r.extreme_down_days_20<=20) &&
+    (r.liquidity_amount_20===null?r.liquidity_amount_unit===null:r.liquidity_amount_unit==='CNY') &&
+    (r.avg_turnover_20===null?r.turnover_unit===null&&r.turnover_source===null:
+      r.turnover_unit==='percent'&&r.turnover_source==='canonical_daily_or_verified_tushare_daily_valuation'),'risk sample or money unit differs');
+  const input=['volatility_20','max_drawdown_60','extreme_down_days_20','liquidity_amount_20'].map(k=>r[k]);
+  const expected=input.every(v=>v!==null)?Math.max(0,Math.min(100,50+input[0]*3+Math.abs(input[1])*100+input[2]*4-Math.min(10,input[3]/1e9))):null;
+  check(expected===null?r.risk_score===null:r.risk_score!==null&&Math.abs(expected-r.risk_score)<1e-8,'risk formula or missing-score contract differs');
+  const missing=JSON.parse(r.missing_metrics_json);
+  check(Array.isArray(missing) && new Set(missing).size===missing.length &&
+    r.metric_status===(missing.length?'partial':'complete') &&
+    [['volatility_20','pct_change_20_incomplete'],['volatility_60','pct_change_60_incomplete'],
+      ['max_drawdown_20','close_20_incomplete'],['max_drawdown_60','close_60_incomplete'],
+      ['avg_turnover_20','turnover_20_incomplete'],['liquidity_amount_20','cny_amount_20_unproven_or_incomplete']]
+      .every(([key,reason])=>(r[key]===null)===missing.includes(reason)),'risk quality coverage differs');
+}
+export function riskGuard(p) {
+  const known=JSON.parse(p.rows[0].row_json).available_at;
+  return `NOT EXISTS(SELECT 1 FROM production_table_rows r JOIN production_upload_batches b ON b.batch_id=r.batch_id
+    WHERE r.table_name='stock_risk_metrics' AND r.data_date=${sqlLiteral(p.reference_day)}
+    AND r.edition_scope='standard_pro' AND b.status='committed'
+    AND julianday(COALESCE(json_extract(r.row_json,'$.available_at'),r.updated_at))>=julianday(${sqlLiteral(known)}))`;
+}
+export function verifiedCommitChunks(receipt,expectedRows,predictedChunks,{reused=false}={}) {
+  check(receipt.status==='committed' && receipt.received_row_count===expectedRows && receipt.staging_rows===0 &&
+    Number.isInteger(receipt.received_chunk_count) && receipt.received_chunk_count>0 &&
+    receipt.received_chunk_count===receipt.actual_chunk_count &&
+    (reused||receipt.received_chunk_count===predictedChunks),'atomic receipt readback mismatch');
+  return receipt.received_chunk_count;
 }
 export function hourlyGuard(plan,now){
   const [first,next]=hourlyRetentionWindow(now),last=JSON.parse(plan.manifest_json).tables[0].retained_previous_date;
@@ -84,7 +146,7 @@ export function signalGuard(p) {
 }
 export async function buildSql(p,now=new Date()){
   const batch_id=`pu_owner_${p.table_name}_${p.inputHash.slice(0,24)}`,statements=[];
-  const guard=p.table_name==='stock_hourly_history'?hourlyGuard(p,now):p.table_name==='stock_signal_observation_daily'?signalGuard(p):
+  const guard=p.table_name==='stock_risk_metrics'?riskGuard(p):p.table_name==='stock_hourly_history'?hourlyGuard(p,now):p.table_name==='stock_signal_observation_daily'?signalGuard(p):
     p.table_name==='stock_info'?`NOT EXISTS(SELECT 1 FROM production_table_rows r JOIN production_upload_batches b ON b.batch_id=r.batch_id
       WHERE r.table_name='stock_info' AND r.edition_scope='standard_pro' AND b.status='committed' AND substr(r.data_date,1,10)>${sqlLiteral(p.reference_day)})`:'1';
   const env={DB:{prepare(sql){return {bind(...args){return {async run(){
@@ -109,7 +171,7 @@ export async function buildSql(p,now=new Date()){
   // HTTP uses bound parameters. Owner SQL imports inline public literals, so
   // the same logical chunk also needs a UTF-8 SQL-byte budget (D1:100KB).
   const maxBytes=p.rows.reduce((n,r)=>Math.max(n,Buffer.byteLength(r.row_json.replaceAll("'","''"),'utf8')+250),1);
-  const chunkSize=p.table_name==='stock_signal_observation_daily'?Math.max(1,Math.min(500,Math.floor(80000/maxBytes))):500;
+  const chunkSize=Math.max(1,Math.min(500,Math.floor(80000/maxBytes)));
   for(let i=0;i<p.rows.length;i+=chunkSize){
     const rows=p.rows.slice(i,i+chunkSize).map(r=>({row_key:r.row_key,row_hash:r.row_hash,data_date:r.data_date,row:JSON.parse(r.row_json)}));
     const chunk=uploader.normalizeProductionUploadChunk({batch_id,table_name:p.table_name,module:p.module,edition_scope:p.edition_scope,
@@ -145,6 +207,10 @@ export async function main(argv=process.argv.slice(2)){
   else if(p.table_name==='stock_signal_observation_daily') {
     const accepted=await query(`SELECT CASE WHEN ${signalGuard(p)} THEN 1 ELSE 0 END AS accepted;`);
     check(accepted[0]?.accepted===1,'signal day or published head changed');
+  } else if(p.table_name==='stock_risk_metrics') {
+    const accepted=await query(`SELECT CASE WHEN ${riskGuard(p)} THEN 1 ELSE 0 END AS accepted;`);
+    const committed=(await query(`SELECT status,manifest_hash FROM production_upload_batches WHERE batch_id=${sqlLiteral(built.batch_id)};`))[0];
+    check(accepted[0]?.accepted===1 || committed?.status==='committed'&&committed.manifest_hash===p.inputHash,'newer exact-day risk results exist; no overwrite');
   } else if(p.table_name!=='stock_info'){
     const members=await query(`SELECT DISTINCT json_extract(r.row_json,'$.code') AS code FROM production_table_rows r JOIN production_upload_batches b ON b.batch_id=r.batch_id
       WHERE r.table_name='score_history' AND r.module='target_research' AND b.status='committed' AND json_extract(r.row_json,'$.asset_type')='fund'
@@ -154,17 +220,17 @@ export async function main(argv=process.argv.slice(2)){
   const existing=(await query(`SELECT status,manifest_hash FROM production_upload_batches WHERE batch_id=${sqlLiteral(built.batch_id)};`))[0];
   if(existing)check(existing.status==='committed'&&existing.manifest_hash===p.inputHash,'existing batch conflicts; no reset');
   const sql=path.join(out,'publish.sql');writeFileSync(sql,built.sql,{encoding:'utf8',flag:'wx'});
-  let verified=false;
+  let verified=false,committedChunks=built.chunks;
   if(a.apply&&p.rows.length){
     if(!existing)await query(sql,true);
     const rows=await query(`SELECT row_key,row_hash FROM production_table_rows WHERE batch_id=${sqlLiteral(built.batch_id)} AND table_name=${sqlLiteral(p.table_name)} AND edition_scope=${sqlLiteral(p.edition_scope)} ORDER BY row_key;`);
     const hashes=new Map(rows.map(r=>[r.row_key,r.row_hash]));check(hashes.size===p.rows.length&&p.rows.every(r=>hashes.get(r.row_key)===r.row_hash),'remote row readback mismatch');
-    const receipt=(await query(`SELECT status,received_row_count,received_chunk_count,(SELECT COUNT(*) FROM production_upload_staging_rows WHERE batch_id=${sqlLiteral(built.batch_id)}) AS staging_rows FROM production_upload_batches WHERE batch_id=${sqlLiteral(built.batch_id)};`))[0];
-    check(receipt.status==='committed'&&receipt.received_row_count===p.rows.length&&receipt.received_chunk_count===built.chunks&&receipt.staging_rows===0,'atomic receipt readback mismatch');
+    const receipt=(await query(`SELECT status,received_row_count,received_chunk_count,(SELECT COUNT(*) FROM production_upload_staging_rows WHERE batch_id=${sqlLiteral(built.batch_id)}) AS staging_rows,(SELECT COUNT(*) FROM production_upload_chunks WHERE batch_id=${sqlLiteral(built.batch_id)}) AS actual_chunk_count FROM production_upload_batches WHERE batch_id=${sqlLiteral(built.batch_id)};`))[0];
+    committedChunks=verifiedCommitChunks(receipt,p.rows.length,built.chunks,{reused:Boolean(existing)});
     verified=true;
   }
   const receipt={version:'production-owner-backfill-receipt.v1',checked_at:new Date().toISOString(),apply:a.apply,table_name:p.table_name,
-    batch_id:built.batch_id,rows:p.rows.length,chunks:built.chunks,source_input_hash:p.inputHash,remote_readback_passed:verified,
+    batch_id:built.batch_id,rows:p.rows.length,chunks:committedChunks,source_input_hash:p.inputHash,remote_readback_passed:verified,
     reused_committed_batch:Boolean(existing),source_write_count:0};
   receipt.content_hash=await digest(canonical(receipt));writeFileSync(path.join(out,'receipt.json'),JSON.stringify(receipt,null,2),{encoding:'utf8',flag:'wx'});
   process.stdout.write(JSON.stringify(receipt)+'\n');return receipt;

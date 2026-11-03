@@ -22,9 +22,10 @@
     byId("supportRefresh").disabled = true; byId("supportNotice").classList.add("hidden");
     try {
       const query = new URLSearchParams({q: byId("supportSearch").value.trim(), status: byId("supportStatus").value, type: byId("supportType").value, limit: String(page.limit), offset: String(page.offset)});
-      const data = await request(`?${query}`); if (!active || sequence !== revision) return;
+      const data = window.ScorpioAccountViews.requireContract(await request(`?${query}`), (value) => Array.isArray(value?.results) && window.ScorpioAccountViews.validPage(value.page) && value.metrics && ["total", "open", "high"].every((key) => Number.isFinite(value.metrics[key]))); if (!active || sequence !== revision) return;
       page = data.page; rows = data.results;
       byId("supportMetrics").innerHTML = [[t("全部反馈", "All feedback"), data.metrics.total || 0], [t("待处理问题", "Open issues"), data.metrics.open || 0], [t("高优先级待处理", "High-priority open"), data.metrics.high || 0]].map(([key, value]) => `<div><span>${key}</span><strong>${value}</strong></div>`).join("");
+      byId("supportMetrics").classList.remove("hidden");
       renderList();
       byId("supportPageInfo").textContent = page.total ? `${page.offset + 1}-${Math.min(page.offset + page.limit, page.total)} / ${page.total}` : t("0 条反馈", "0 feedback items");
       byId("supportPrevious").disabled = page.offset === 0; byId("supportNext").disabled = !page.has_more;
@@ -32,7 +33,7 @@
       if (detailRevision !== detailAtStart || dirty) return;
       if (identity && rows.some((row) => row.id === identity)) await open(identity, true);
       else { selected = null; dirty = false; ++detailRevision; releaseImages(); renderDetail(); }
-    } catch (error) { if (active && sequence === revision) { rows = []; renderList(); notice(errorText(error)); } }
+    } catch (error) { if (active && sequence === revision) { notice(errorText(error)); if (!rows.length) byId("supportInbox").innerHTML = empty("反馈列表未加载", "Feedback could not be loaded"); } }
     finally { if (sequence === revision) byId("supportRefresh").disabled = false; }
   }
   function renderList() {
@@ -43,7 +44,7 @@
     const sequence = ++detailRevision; dirty = false; selected = {id}; releaseImages(); renderList();
     byId("supportDetail").innerHTML = empty("正在读取问题详情…", "Loading issue details…");
     try {
-      const detail = await request(`/detail?id=${id}`); if (!active || sequence !== detailRevision) return;
+      const detail = window.ScorpioAccountViews.requireContract(await request(`/detail?id=${id}`), (value) => value?.public_id && Array.isArray(value.attachments) && Array.isArray(value.events)); if (!active || sequence !== detailRevision) return;
       selected = detail; renderDetail();
       for (const attachment of detail.attachments) {
         if (!active || sequence !== detailRevision) return;
@@ -81,6 +82,7 @@
       if (!config.admin) section.dataset.accountSection = "feedback";
       section.innerHTML = `<div class="portal-summary" id="supportMetrics"></div><div class="portal-toolbar"><label class="portal-search"><span class="visually-hidden">${t("搜索反馈", "Search feedback")}</span>${icon("search")}<input id="supportSearch" type="search" placeholder="${t("搜索标题或问题编号", "Search subject or reference")}"></label><label class="visually-hidden" for="supportStatus">${t("状态", "Status")}</label><select id="supportStatus"><option value="">${t("全部状态", "All statuses")}</option>${choices(labels)}</select><label class="visually-hidden" for="supportType">${t("类型", "Type")}</label><select id="supportType"><option value="">${t("全部类型", "All types")}</option>${choices(types)}</select>${!config.admin ? `<a class="button primary" href="feedback-${en ? "en" : "cn"}.html">${icon("plus")}${t("提交反馈", "New feedback")}</a>` : ""}<button class="portal-icon" id="supportRefresh" type="button" aria-label="${t("刷新反馈", "Refresh feedback")}" title="${t("刷新反馈", "Refresh feedback")}">${icon("refresh-cw")}</button></div><p id="supportNotice" class="portal-notice hidden" role="status" aria-live="polite"></p><div class="support-workbench"><div><div class="support-inbox" id="supportInbox"></div><div class="portal-pagination"><span id="supportPageInfo"></span><div><button class="portal-icon" id="supportPrevious" type="button" title="${t("上一页", "Previous page")}" aria-label="${t("上一页", "Previous page")}">${icon("chevron-left")}</button><button class="portal-icon" id="supportNext" type="button" title="${t("下一页", "Next page")}" aria-label="${t("下一页", "Next page")}">${icon("chevron-right")}</button></div></div></div><div class="support-detail" id="supportDetail"></div></div>`;
       document.querySelector(config.admin ? "#adminAccountNotice" : '[data-account-section="overview"]').after(section);
+      byId("supportMetrics").classList.add("hidden");
       lightbox = document.createElement("dialog"); lightbox.className = "support-lightbox"; lightbox.ariaLabel = t("问题截图", "Screenshot"); lightbox.innerHTML = `<header><h2></h2><button class="portal-icon" type="button" aria-label="${t("关闭截图", "Close screenshot")}" title="${t("关闭截图", "Close screenshot")}">${icon("x")}</button></header><img alt="">`; document.body.append(lightbox); lightbox.querySelector("button").onclick = () => lightbox.close();
       byId("supportRefresh").onclick = load;
       let timer; byId("supportSearch").oninput = () => { clearTimeout(timer); timer = setTimeout(() => { page.offset = 0; load(); }, 300); };
@@ -105,7 +107,7 @@
     },
     sessionChanged(value) {
       active = value; ++revision; ++detailRevision; dirty = false; saving = false; selected = null; releaseImages(); rows = []; page = {offset: 0, limit: 25};
-      if (!config) return; byId("supportInbox").textContent = ""; byId("supportMetrics").textContent = ""; byId("supportNotice").classList.add("hidden"); renderDetail();
+      if (!config) return; byId("supportInbox").textContent = ""; byId("supportMetrics").textContent = ""; byId("supportMetrics").classList.add("hidden"); byId("supportNotice").classList.add("hidden"); renderDetail();
       if (value) load();
     },
     navigate(view) { if (config?.admin) section.classList.toggle("hidden", view !== "feedback"); if (view === "feedback" && active && !rows.length) load(); },
