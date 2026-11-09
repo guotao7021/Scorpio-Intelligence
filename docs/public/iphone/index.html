@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b121b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Scorpio 投研">
+  <meta name="description" content="Scorpio 投研 iPhone 网页版，查看市场和标的复盘。">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self'; img-src 'self'; connect-src 'self' https://api.scorpio-intelligence.tech; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon.png">
+  <link rel="icon" href="./icon.png" type="image/png">
+  <link rel="stylesheet" href="./app.css">
+  <script type="module" src="./app.mjs"></script>
+  <title>Scorpio 投研 · iPhone 版</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="../" aria-label="Scorpio 官网">
+      <img src="./icon.png" alt="" width="34" height="34"><span>Scorpio <span class="brand-accent">投研</span></span>
+    </a>
+    <div id="account-controls" class="account-controls" hidden>
+      <span id="edition" class="badge"></span>
+      <button id="logout" type="button" class="quiet">退出</button>
+    </div>
+  </header>
+  <main class="shell">
+    <section id="welcome" class="intro">
+      <p class="eyebrow"><span></span> IPHONE 网页版</p>
+      <h1>市场复盘<br><span>随手可查</span></h1>
+      <p class="intro-copy">用现有 Scorpio 账号查看市场、搜索标的和回看日线证据。</p>
+      <details id="install" class="install">
+        <summary>添加到 iPhone 主屏幕</summary>
+        <p>在 Safari 打开本页，点「共享」→「添加到主屏幕」。若看到「作为网页 App 打开」，请将它打开。建议先添加，再从主屏幕进入并登录。</p>
+      </details>
+      <form id="login" class="card login" method="post">
+        <h2>登录 Scorpio</h2>
+        <label for="email">电子邮箱</label>
+        <input id="email" type="email" name="username" autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false" maxlength="254" required>
+        <label for="password">密码</label>
+        <input id="password" type="password" name="password" autocomplete="current-password" required maxlength="256">
+        <p class="subtle">首次登录会将此浏览器登记为账号的一台移动设备。</p>
+        <div id="login-challenge"></div>
+        <p id="challenge-status" class="status" role="status"></p>
+        <button id="challenge-retry" type="button" class="quiet" hidden>重新加载验证</button>
+        <button id="sign-in" type="submit" class="primary" disabled>登录</button>
+        <a href="../account.html">注册、找回密码或查看授权</a>
+        <p id="login-status" class="status" role="status"></p>
+      </form>
+      <div id="unsupported" class="card" hidden>
+        <h2>在 iPhone 上继续</h2>
+        <p>请用 iPhone 的 Safari 打开此页面。</p>
+        <a href="../account.html">返回用户中心</a>
+      </div>
+    </section>
+    <section id="notice" class="card notice" hidden aria-labelledby="notice-title">
+      <p class="eyebrow"><span></span> 使用须知</p>
+      <h1 id="notice-title">开始前请阅读</h1>
+      <div id="notice-content"></div>
+      <button id="accept" type="button" class="primary">同意并继续</button>
+      <p id="notice-status" class="status" role="status"></p>
+    </section>
+    <section id="workspace" hidden aria-label="研究工作台">
+      <nav id="navigation" class="tabs" aria-label="研究栏目">
+        <button type="button" data-view="overview" aria-current="page">概览</button>
+        <button type="button" data-view="market">市场</button>
+        <button type="button" data-view="stocks">标的</button>
+      </nav>
+      <div id="screen" class="screen"></div>
+      <p id="workspace-status" class="status" role="status"></p>
+    </section>
+    <footer>Scorpio Intelligence · 市场与标的复盘</footer>
+  </main>
+</body>
+</html>

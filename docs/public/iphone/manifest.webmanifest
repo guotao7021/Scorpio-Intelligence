@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Scorpio 投研",
+  "short_name": "Scorpio",
+  "lang": "zh-CN",
+  "description": "市场与标的复盘",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#0b121b",
+  "background_color": "#0b121b",
+  "icons": [
+    { "src": "./icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
