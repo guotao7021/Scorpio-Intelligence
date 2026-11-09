@@ -141,7 +141,10 @@ html { scroll-behavior: auto; scroll-padding-top: 92px; }
 .portal-inline-form { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 18px; align-items: end; }
 .portal-page .portal-inline-form label { display: grid; gap: 7px; margin: 0; }
 .portal-inline-form .button { width: fit-content; }
-.portal-page .portal-download-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.portal-page .portal-download-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.portal-page .portal-download-grid .release-edition-card { overflow-wrap: anywhere; }
+.portal-page .portal-download-grid .release-edition-card header span { font: inherit; font-weight: 650; letter-spacing: 0; }
+.portal-page .portal-download-grid .button { min-width: 0; text-align: center; white-space: normal; }
 .portal-page .release-edition-card { min-width: 0; min-height: 0; padding: 24px; background: #10172a; border: 1px solid var(--portal-line); border-radius: 6px; box-shadow: none; }
 .portal-page .release-edition-card header { display: flex; align-items: center; justify-content: flex-start; gap: 10px; color: var(--portal-ink); font-size: 18px; margin-bottom: 24px; }
 .portal-page .release-edition-card header svg { color: var(--portal-accent); width: 23px; height: 23px; }
@@ -253,6 +256,8 @@ html { scroll-behavior: auto; scroll-padding-top: 92px; }
 @media (max-width: 1100px) {
   .portal-layout { grid-template-columns: 190px minmax(0,1fr); }
   .portal-content { padding: 26px 24px 40px; }
+  .portal-page .portal-download-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portal-page .portal-download-grid .is-iphone { grid-column: 1 / -1; }
   .portal-summary > div { padding: 0 14px; }
   .portal-summary strong { font-size: 19px; }
 }
@@ -278,6 +283,11 @@ html { scroll-behavior: auto; scroll-padding-top: 92px; }
   .portal-summary { grid-template-columns: repeat(2,minmax(0,1fr)); row-gap: 22px; }
   .portal-summary > div:nth-child(3) { border-left: 0; }
   .portal-page .portal-download-grid { grid-template-columns: minmax(0,1fr); }
+  .portal-page .portal-download-grid .release-edition-card { padding: 18px; }
+  .portal-page .portal-download-grid .release-edition-card header { margin-bottom: 4px; }
+  .portal-page .portal-download-grid .release-platform-select { margin-bottom: 0; }
+  .portal-page .portal-download-grid .release-platform-name { min-height: 0; }
+  .portal-page .portal-download-grid .release-edition-card small { min-height: 0; margin: 0 0 4px; }
   .portal-admin .admin-console { padding: 22px 18px 40px; }
   .portal-admin .admin-topbar { padding: 12px 18px; }
   .portal-admin .admin-topbar .admin-brand span { display: none; }

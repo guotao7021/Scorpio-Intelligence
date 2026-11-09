@@ -15,12 +15,36 @@ test("the root page remains an explicit language gateway with relative links on 
     assert.match(d.querySelector("h1").textContent, /Scorpio Intelligence/);
     assert.equal(d.querySelector('[data-locale="cn"]').href, new URL("index-cn.html", base).href);
     assert.equal(d.querySelector('[data-locale="en"]').href, new URL("index-en.html", base).href);
+    assert.equal(d.querySelector('a[href="iphone/"]'), null);
     assert.ok(d.querySelector(".gateway-motion[aria-label][aria-pressed]"));
     for (const node of d.querySelectorAll("script[src],link[href],img[src]")) {
       const value = node.getAttribute("src") || node.getAttribute("href"); if (/^(?:https?:|\/)/.test(value)) continue;
       assert.ok(existsSync(new URL(value.split(/[?#]/)[0], root)), `Missing ${value}`);
     }
     dom.window.close();
+  }
+});
+
+test("product homes link to the localized download module and the iPhone manifest stays in its deployment scope", () => {
+  for (const base of ["https://www.scorpio-intelligence.tech/", "https://guotao7021.github.io/Scorpio-Intelligence/"]) {
+    for (const [file, path] of [["index-cn.html", "account.html#software-download"], ["index-en.html", "account.html?lang=en#software-download"]]) {
+      const dom = new JSDOM(read(file), {url: new URL(file, base)});
+      try {
+        const d = dom.window.document;
+        assert.equal(d.querySelector(`.hero-actions a[href="${path}"]`)?.href, new URL(path, base).href);
+        assert.equal(d.querySelector('a[href="iphone/"]'), null);
+      } finally { dom.window.close(); }
+    }
+    const pwa = new URL("iphone/", base), dom = new JSDOM(read("iphone/index.html"), {url: pwa});
+    try {
+      const d = dom.window.document, manifestUrl = d.querySelector('link[rel="manifest"]').href;
+      const manifest = JSON.parse(read("iphone/manifest.webmanifest"));
+      assert.equal(new URL(manifest.start_url, manifestUrl).href, pwa.href);
+      assert.equal(new URL(manifest.scope, manifestUrl).href, pwa.href);
+      assert.equal(manifest.display, "standalone");
+      assert.equal(d.querySelector('script[type="module"]').src, new URL("app.mjs", pwa).href);
+      assert.ok(existsSync(new URL("iphone/sw.js", root)));
+    } finally { dom.window.close(); }
   }
 });
 

@@ -13,6 +13,8 @@ Primary entry points:
 - `faq.html`
 - `account.html` for registration, licenses, device bindings, renewal requests,
   activity and authenticated client downloads (add `?lang=en` for English)
+- `account.html#software-download` for Windows, Android and the iPhone web app.
+  The iPhone entry opens `iphone/` in Safari and does not download an installer.
 - `scorpio_v1_admin.html` for owner-only administration with a locally entered `ADMIN_API_TOKEN`
 
 Keep this folder public-facing only. Do not place download packages here.

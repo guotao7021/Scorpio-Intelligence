@@ -8,10 +8,10 @@
   <meta name="description" content="Scorpio Intelligence 用户中心：账号、软件授权、设备与续期申请。">
   <link rel="icon" href="assets/scorpio-logo-mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="site.css?v=20260819-platform-downloads">
-  <link rel="stylesheet" href="account-center.css?v=20261102-account-center">
+  <link rel="stylesheet" href="account-center.css?v=20261109-iphone-downloads">
   <script>if (new URLSearchParams(location.search).get("lang") === "en") document.documentElement.lang = "en";</script>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
-  <script src="account-i18n.js?v=20261102-account-center" defer></script>
+  <script src="account-i18n.js?v=20261109-iphone-downloads" defer></script>
   <script src="account-center-ui.js?v=20261103-service" defer></script>
   <link rel="stylesheet" href="support-features.css?v=20261102-support">
   <script src="auth-controls.js?v=20261102-support" defer></script>
@@ -134,7 +134,7 @@
         </section>
 
         <section data-account-section="downloads" class="hidden" aria-labelledby="downloadTitle" id="software-download">
-          <div class="portal-section-head first"><h2 id="downloadTitle">下载 Scorpio Intelligence</h2><button class="portal-icon" id="refreshRelease" type="button" aria-label="刷新发行信息" title="刷新发行信息"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></div>
+          <div class="portal-section-head first"><h2 id="downloadTitle">获取 Scorpio Intelligence</h2><button class="portal-icon" id="refreshRelease" type="button" aria-label="刷新发行信息" title="刷新发行信息"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></div>
           <div class="release-edition-grid portal-download-grid">
             <article class="release-edition-card is-pro" id="windowsReleaseBox">
               <header><i data-lucide="monitor" aria-hidden="true"></i><span>Windows</span></header>
@@ -146,6 +146,13 @@
               <header><i data-lucide="smartphone" aria-hidden="true"></i><span>Android</span></header>
               <div class="release-platform-name">Android APK</div><strong id="androidReleaseVersion">正在读取...</strong><small id="androidReleaseMeta">--</small>
               <a class="button secondary disabled" id="androidDownloadLink" href="#" aria-disabled="true"><i data-lucide="download" aria-hidden="true"></i>下载 Android APK</a>
+            </article>
+            <article class="release-edition-card is-iphone" aria-labelledby="iphoneWebAppTitle">
+              <header><i data-lucide="smartphone" aria-hidden="true"></i><span>iPhone</span></header>
+              <div class="release-platform-name">Safari · PWA</div>
+              <strong id="iphoneWebAppTitle">iPhone 网页版</strong>
+              <small>使用现有账号登录，可从 Safari 添加到主屏幕。</small>
+              <a class="button secondary" id="iphoneWebAppLink" href="iphone/" hreflang="zh-CN"><i data-lucide="arrow-up-right" aria-hidden="true"></i><span>打开 iPhone 网页版</span></a>
             </article>
           </div>
           <div class="download-progress hidden" id="downloadProgress" aria-live="polite">

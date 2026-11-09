@@ -27,9 +27,3 @@
 @media(max-width:360px) {.gateway-intro h1 {font-size:38px}.gateway-main {padding-inline:18px}.gateway-eyebrow {font-size:7px}.gateway-route {padding-inline:18px}.gateway-route strong {font-size:20px}}
 @media(max-height:720px) and (max-width:620px) {.gateway-main {padding-block:24px;gap:25px}.gateway-eyebrow {margin-bottom:18px}.gateway-intro h1 {font-size:38px;margin-bottom:18px}.gateway-description {font-size:18px}.gateway-route {min-height:82px}.gateway-footer {min-height:106px;padding-top:14px;padding-bottom:14px}}
 @media(prefers-reduced-motion:reduce) {* {transition:none!important}}
-.gateway-iphone{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:12px;padding:12px 20px;min-height:54px;color:#dbeef5;border:1px solid #375260;background:#0a151eb3}
-.gateway-iphone span{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-.gateway-iphone strong{font-size:16px}
-.gateway-iphone small{font-size:12px;color:#a5bdc8}
-.gateway-iphone svg{width:20px;height:20px;color:#75d5ed;flex:none}
-.gateway-iphone:hover,.gateway-iphone:focus-visible{background:#12303d}

@@ -16,8 +16,9 @@ async function until(check, description) {
   for (let i = 0; i < 600; i++) { if (check()) return; await new Promise((resolve) => setTimeout(resolve, 5)); }
   assert.fail(description);
 }
-function page(t, f, file, scripts, {lang = "zh-CN", auth, admin = false, brokenSecurity = false, responseOverrides = {}} = {}) {
-  const dom = new JSDOM(read(file), {url: `https://scorpio-intelligence.tech/${file}${lang === "en" ? "?lang=en" : ""}`, runScripts: "outside-only"});
+function page(t, f, file, scripts, {lang = "zh-CN", auth, admin = false, brokenSecurity = false, responseOverrides = {}, siteRoot = "https://scorpio-intelligence.tech/", hash = ""} = {}) {
+  const url = new URL(`${file}${lang === "en" ? "?lang=en" : ""}${hash}`, siteRoot);
+  const dom = new JSDOM(read(file), {url, runScripts: "outside-only"});
   f.windows.push(dom.window);
   const w = dom.window, d = w.document, removed = [];
   d.documentElement.lang = lang;
@@ -64,6 +65,40 @@ function setup(t) {
 const set = (ui, id, value) => { const field = ui.d.getElementById(id); field.value = value; field.dispatchEvent(new ui.w.Event("input", {bubbles: true})); };
 const click = (ui, id) => ui.d.getElementById(id).click();
 const submit = (ui, id) => ui.d.getElementById(id).dispatchEvent(new ui.w.Event("submit", {bubbles: true, cancelable: true}));
+
+for (const [lang, siteRoot, label] of [
+  ["zh-CN", "https://www.scorpio-intelligence.tech/", "打开 iPhone 网页版"],
+  ["en", "https://guotao7021.github.io/Scorpio-Intelligence/", "Open iPhone web app"],
+]) test(`client downloads include the iPhone web app alongside authorized installers (${lang})`, async (t) => {
+  const f = setup(t), now = new Date().toISOString();
+  const addRelease = f.sql.prepare("INSERT INTO release_versions(version,channel,edition,platform,r2_key,file_name,released_at) VALUES(?,?,?,?,?,?,?)");
+  addRelease.run("1.0.1", "stable", "personal_pro", "desktop", "fixtures/Setup.exe", "Setup.exe", now);
+  addRelease.run("1.0.2", "beta", "android", "android", "fixtures/Scorpio.apk", "Scorpio.apk", now);
+  const ui = page(t, f, "account.html", accountScripts, {lang, siteRoot, hash: "#software-download", auth: {access_token: f.jwt(), email: "researcher@example.test", user_id: 1}});
+  const d = ui.d, view = d.querySelector('[data-account-section="downloads"]');
+  const windows = d.getElementById("windowsDownloadLink"), android = d.getElementById("androidDownloadLink");
+  const iphone = d.getElementById("iphoneWebAppLink");
+  await until(() => !windows.hasAttribute("aria-disabled") && !android.hasAttribute("aria-disabled"), "Windows and Android releases loaded");
+  assert.equal(view.classList.contains("hidden"), false);
+  assert.equal(d.querySelector('[data-account-view="downloads"]').getAttribute("aria-current"), "page");
+  assert.equal(view.querySelectorAll(".release-edition-card").length, 3);
+  assert.ok(view.contains(iphone));
+  assert.equal(iphone.textContent.trim(), label);
+  assert.equal(iphone.href, new URL("iphone/", siteRoot).href);
+  assert.equal(iphone.hreflang, "zh-CN");
+  assert.equal(iphone.hasAttribute("download"), false);
+  assert.equal(ui.w.location.hash, "#downloads");
+  if (lang === "en") assert.match(iphone.closest("article").textContent, /App in Chinese/);
+
+  f.sql.exec("UPDATE release_versions SET is_active=0");
+  click(ui, "refreshRelease");
+  await until(() => d.getElementById("androidReleaseBox").classList.contains("is-unavailable"), "unavailable installers indicated");
+  assert.equal(windows.getAttribute("aria-disabled"), "true");
+  assert.equal(android.getAttribute("aria-disabled"), "true");
+  assert.equal(iphone.hasAttribute("aria-disabled"), false);
+  assert.equal(iphone.href, new URL("iphone/", siteRoot).href);
+  assert.deepEqual(ui.errors, []);
+});
 
 test("Chinese login has reversible eye controls, blocks missing proofs and opens My feedback in the same account center", async (t) => {
   const f = setup(t), ui = page(t, f, "account.html", accountScripts);

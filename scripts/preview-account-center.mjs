@@ -49,7 +49,7 @@ issueCode(fixture);
 const sample = multipartFeedback({...feedbackBody, title: "续期后到期日未刷新（本地演示）", description: "此记录仅用于隔离验收，不代表线上故障。管理员可在问题反馈中处理，用户可在我的反馈中查看进展。"}, [new File([readFileSync(path.join(root, "assets/scorpio-workbench-preview.png"))], "preview.png", {type: "image/png"})]);
 const seeded = await worker.fetch(new Request(base + "/v1/feedback", {method: "POST", headers: {authorization: `Bearer ${fixture.jwt()}`, "CF-IPCountry": "CN"}, body: sample}), fixture.env);
 if (seeded.status !== 201) throw new Error("Could not seed the isolated feedback preview");
-const types = {".html": "text/html; charset=utf-8", ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon"};
+const types = {".html": "text/html; charset=utf-8", ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json"};
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, base);
@@ -92,7 +92,7 @@ const server = http.createServer(async (request, response) => {
     }
     let file = decodeURIComponent(url.pathname);
     if (file === "/") file = "/account.html";
-    if (!path.extname(file)) file += ".html";
+    if (!path.extname(file)) file += file.endsWith("/") ? "index.html" : ".html";
     const absolute = path.resolve(root, "." + file);
     if (!absolute.startsWith(root + path.sep) || !existsSync(absolute)) { response.writeHead(404); response.end("Not found"); return; }
     let content = readFileSync(absolute);
